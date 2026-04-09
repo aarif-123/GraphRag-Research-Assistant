@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-04-05T22:15:02.646166+00:00",
+  "supabase": {
+    "status": "OK",
+    "details": {
+      "client_creation_ms": 530.8,
+      "rest_status": 200,
+      "rest_latency_ms": 1112.7,
+      "db_latency_ms": 843.1,
+      "rpc_works": false,
+      "rpc_note": "{'message': 'different vector dimensions 768 and 1024', 'code': '22000', 'hint': None, 'details': None}"
+    }
+  },
+  "neo4j": {
+    "status": "OK",
+    "details": {
+      "driver_creation_ms": 1476.0,
+      "connectivity_ms": 1476.0,
+      "server_address": "34.126.171.25:7687",
+      "protocol_version": "(6, 0)",
+      "ping_ms": 148.9,
+      "total_nodes": 196875,
+      "total_relationships": 398961,
+      "labels": [
+        "Publication",
+        "Author",
+        "Venue",
+        "Year",
+        "metadata_16years.csv"
+      ],
+      "relationship_types": [
+        "WRITTEN_BY",
+        "PUBLISHED_IN",
+        "PUBLISHED_IN_YEAR",
+        "CITES",
+        "WROTE"
+      ],
+      "publication_count": 111896
+    }
+  }
+}

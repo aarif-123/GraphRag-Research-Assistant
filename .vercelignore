@@ -1,0 +1,14 @@
+venv311/
+__pycache__/
+**/__pycache__/
+*.pyc
+.vscode/
+tests/
+ingestion/
+*.log
+app.log
+connectivity_report.json
+project_summary_report.md
+fix_symbols.py
+.env
+.env.*

@@ -1,0 +1,15 @@
+.vercel
+.env
+.env.*
+venv/
+venv*/
+__pycache__/
+*.py[cod]
+*.log
+*.sqlite3
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+ingestion/dblp-v10.csv
+ingestion/paper_chunks_rows.csv

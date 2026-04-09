@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="GraphRAG Research Assistant - AI-powered academic research with graph-augmented retrieval and anti-hallucination verification." />
+    <title>Aether - GraphRAG Research Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <!-- Libraries for enhanced functionality -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+</head>
+<body>
+    <!-- ================= SIDEBAR ================= -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 32 32" fill="none">
+                        <circle cx="16" cy="16" r="14" stroke="url(#grad1)" stroke-width="2.5"/>
+                        <circle cx="16" cy="10" r="3" fill="url(#grad1)"/>
+                        <circle cx="10" cy="20" r="3" fill="url(#grad2)"/>
+                        <circle cx="22" cy="20" r="3" fill="url(#grad2)"/>
+                        <line x1="16" y1="13" x2="10" y2="17" stroke="url(#grad1)" stroke-width="1.5"/>
+                        <line x1="16" y1="13" x2="22" y2="17" stroke="url(#grad1)" stroke-width="1.5"/>
+                        <line x1="10" y1="20" x2="22" y2="20" stroke="url(#grad2)" stroke-width="1.5"/>
+                        <defs>
+                            <linearGradient id="grad1" x1="0" y1="0" x2="32" y2="32">
+                                <stop offset="0%" stop-color="#6366f1"/>
+                                <stop offset="100%" stop-color="#a78bfa"/>
+                            </linearGradient>
+                            <linearGradient id="grad2" x1="0" y1="0" x2="32" y2="32">
+                                <stop offset="0%" stop-color="#a78bfa"/>
+                                <stop offset="100%" stop-color="#c4b5fd"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <span class="logo-title">Aether</span>
+                    <span class="logo-subtitle">Knowledge Graph AI</span>
+                </div>
+            </div>
+            <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M15 18l-6-6 6-6"/>
+                </svg>
+            </button>
+        </div>
+
+        <div class="sidebar-section sidebar-section-scrollable">
+            <div class="sidebar-label-row">
+                <h3 class="sidebar-label">History</h3>
+                <button class="btn-clear-history" id="clearHistoryBtn" title="Clear all history">Clear</button>
+            </div>
+            <div class="history-list" id="historyList">
+                <div class="history-empty">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <span>No history yet</span>
+                </div>
+            </div>
+        </div>
+
+
+        <div class="sidebar-section sidebar-section-compact">
+            <h3 class="sidebar-label">Settings</h3>
+            <div class="settings-group">
+                <label class="setting-item" for="topK">
+                    <span class="setting-label">Top K Results</span>
+                    <div class="setting-control">
+                        <input type="range" id="topK" min="1" max="20" value="5" />
+                        <span class="setting-value" id="topKValue">5</span>
+                    </div>
+                </label>
+                <label class="setting-item" for="minSim">
+                    <span class="setting-label">Min Similarity</span>
+                    <div class="setting-control">
+                        <input type="range" id="minSim" min="0" max="100" value="10" step="5" />
+                        <span class="setting-value" id="minSimValue">0.10</span>
+                    </div>
+                </label>
+                <label class="setting-item setting-toggle" for="verifyToggle">
+                    <span class="setting-label">Verification</span>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="verifyToggle" checked />
+                        <span class="toggle-slider"></span>
+                    </div>
+                </label>
+                <label class="setting-item setting-toggle" for="groundedStudyToggle">
+                    <span class="setting-label">Study Mode</span>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="groundedStudyToggle" />
+                        <span class="toggle-slider"></span>
+                    </div>
+                </label>
+                <label class="setting-item" for="modelSelect" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+                    <span class="setting-label">Reasoning Model</span>
+                    <select id="modelSelect" class="setting-select">
+                        <option value="light">Light (Fast)</option>
+                        <option value="heavy">Heavy (Deep)</option>
+                    </select>
+                </label>
+            </div>
+        </div>
+
+        <div class="sidebar-footer">
+            <button class="btn-health" id="healthBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                </svg>
+                <span>System Health</span>
+            </button>
+            <div class="version-tag">v4.0.2 - Master Pipeline</div>
+        </div>
+    </aside>
+
+    <!-- ================= MAIN ================= -->
+    <main class="main" id="main">
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Open menu">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="3" y1="6" x2="21" y2="6"/>
+                    <line x1="3" y1="12" x2="21" y2="12"/>
+                    <line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+            </button>
+            <div class="connection-status" id="connectionStatus">
+                <span class="status-dot"></span>
+                <span class="status-text">Connecting...</span>
+                <span class="pipeline-step" id="pipelineStep"></span>
+            </div>
+            <div class="top-bar-actions" style="display: flex; gap: 8px;">
+                <button class="btn-icon" id="themeToggle" title="Toggle theme">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="themeIcon">
+                        <!-- Default to moon/dark mode -->
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+                <button class="btn-icon" id="sourcePanelToggle" title="Toggle sources panel">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="7"/>
+                        <rect x="14" y="3" width="7" height="7"/>
+                        <rect x="3" y="14" width="7" height="7"/>
+                        <rect x="14" y="14" width="7" height="7"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Chat Area -->
+        <div class="chat-container" id="chatContainer">
+            <div class="chat-messages" id="chatMessages">
+                <!-- Welcome Screen -->
+                <div class="welcome-screen" id="welcomeScreen">
+                    <div class="welcome-glow"></div>
+                    <div class="welcome-icon">
+                        <svg viewBox="0 0 64 64" fill="none" width="80" height="80">
+                            <circle cx="32" cy="32" r="28" stroke="url(#wgrad1)" stroke-width="2" opacity="0.3"/>
+                            <circle cx="32" cy="32" r="20" stroke="url(#wgrad1)" stroke-width="2" opacity="0.5"/>
+                            <circle cx="32" cy="20" r="5" fill="url(#wgrad1)"/>
+                            <circle cx="20" cy="38" r="5" fill="url(#wgrad2)"/>
+                            <circle cx="44" cy="38" r="5" fill="url(#wgrad2)"/>
+                            <circle cx="32" cy="48" r="4" fill="url(#wgrad1)" opacity="0.7"/>
+                            <line x1="32" y1="25" x2="20" y2="33" stroke="url(#wgrad1)" stroke-width="2"/>
+                            <line x1="32" y1="25" x2="44" y2="33" stroke="url(#wgrad1)" stroke-width="2"/>
+                            <line x1="20" y1="38" x2="44" y2="38" stroke="url(#wgrad2)" stroke-width="1.5"/>
+                            <line x1="20" y1="38" x2="32" y2="48" stroke="url(#wgrad2)" stroke-width="1.5" opacity="0.5"/>
+                            <line x1="44" y1="38" x2="32" y2="48" stroke="url(#wgrad2)" stroke-width="1.5" opacity="0.5"/>
+                            <defs>
+                                <linearGradient id="wgrad1" x1="0" y1="0" x2="64" y2="64">
+                                    <stop offset="0%" stop-color="#818cf8"/>
+                                    <stop offset="100%" stop-color="#c084fc"/>
+                                </linearGradient>
+                                <linearGradient id="wgrad2" x1="0" y1="0" x2="64" y2="64">
+                                    <stop offset="0%" stop-color="#a78bfa"/>
+                                    <stop offset="100%" stop-color="#e879f9"/>
+                                </linearGradient>
+                            </defs>
+                        </svg>
+                    </div>
+                    <h1 class="welcome-title">Aether Research</h1>
+                    <p class="welcome-desc">
+                        Advanced graph retrieval with <strong>anti-hallucination verification</strong>.
+                        Get grounded, cited answers from your academic knowledge base.
+                    </p>
+                    <div class="welcome-cards">
+                        <button class="welcome-card" data-query="What are the latest advances in transformer architectures?">
+                            <span class="welcome-card-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-purple)">
+                                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                                </svg>
+                            </span>
+                            <span>Transformer advances</span>
+                        </button>
+                        <button class="welcome-card" data-query="Explain graph neural networks and their applications">
+                            <span class="welcome-card-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-cyan)">
+                                    <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                                </svg>
+                            </span>
+                            <span>Graph networks</span>
+                        </button>
+                        <button class="welcome-card" data-query="What methods reduce hallucination in large language models?">
+                            <span class="welcome-card-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-emerald)">
+                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                </svg>
+                            </span>
+                            <span>Hallucination check</span>
+                        </button>
+                        <button class="welcome-card" data-query="Compare retrieval-augmented generation approaches">
+                            <span class="welcome-card-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-amber)">
+                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                                </svg>
+                            </span>
+                            <span>RAG comparison</span>
+                        </button>
+                    </div>
+                    <div class="study-prompt-bar">
+                        <button class="study-prompt-chip" data-study-prompt="Summarize the main argument of the uploaded paper and cite the most relevant sections.">Summary Mode</button>
+                        <button class="study-prompt-chip" data-study-prompt="Explain the methodology step by step using only the uploaded PDF evidence.">Methodology</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="input-area">
+            <div class="input-wrapper composer-wrapper">
+                <div class="attachment-tray" id="attachmentTray"></div>
+                
+                <div class="composer-main">
+                    <!-- ATTACH BUTTON -->
+                    <div class="composer-leading">
+                        <button id="attachMenuBtn" class="btn-plus" aria-expanded="false">+</button>
+    
+                        <!-- ATTACH MENU -->
+                        <div id="attachMenu" class="attach-menu" aria-hidden="true">
+                            <div class="attach-menu-item" data-attach-action="files">
+                                <span class="attach-menu-icon-symbol">📎</span>
+                                Add photos & files
+                            </div>
+                            <div class="attach-menu-item" data-attach-action="pdf">
+                                <span class="attach-menu-icon-symbol">📄</span>
+                                Upload PDF
+                            </div>
+                            <div class="attach-menu-item" data-attach-action="deep-research">
+                                <span class="attach-menu-icon-symbol">🔍</span>
+                                Deep research mode
+                            </div>
+                        </div>
+                    </div>
+
+                    <textarea
+                        id="queryInput"
+                        placeholder="Ask anything"
+                        rows="1"
+                        maxlength="2000"
+                    ></textarea>
+
+                    <div class="input-actions">
+                        <button class="btn-icon btn-mic" id="micBtn" title="Voice input">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                                <line x1="12" y1="19" x2="12" y2="23"/>
+                                <line x1="8" y1="23" x2="16" y2="23"/>
+                            </svg>
+                        </button>
+                        <button class="btn-send" id="sendBtn" disabled title="Send query">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <line x1="12" y1="19" x2="12" y2="5"/>
+                                <polyline points="5 12 12 5 19 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="input-hints">
+                <span>Press <kbd>Enter</kbd> to send • <kbd>Shift+Enter</kbd> new line</span>
+                <span class="char-count" id="charCount">0/2000</span>
+            </div>
+            
+            <!-- Hidden File Inputs -->
+            <input type="file" id="attachmentFileInput" accept="image/*,video/*,application/pdf,.doc,.docx,.txt,.csv,.xlsx" multiple hidden />
+            <input type="file" id="pdfFileInput" accept="application/pdf" multiple hidden />
+            <input type="file" id="videoFileInput" accept="video/*" multiple hidden />
+        </div>
+    </main>
+
+    <!-- ================= SOURCES PANEL ================= -->
+    <div class="panel-resizer" id="panelResizer"></div>
+    <aside class="sources-panel" id="sourcesPanel">
+        <div class="sources-header">
+            <h2>Sources & Evidence</h2>
+            <button class="btn-icon sources-close" id="sourcesPanelClose" aria-label="Close sources panel">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        </div>
+
+        <div class="sources-overview" id="sourcesOverviewContainer">
+            <!-- Overview will be injected here -->
+        </div>
+
+        <div class="study-guardrails-card dismissible-card" id="studyGuardrailsCard">
+            <button class="card-dismiss-btn" onclick="this.parentElement.style.display='none'" title="Dismiss">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+            <h3>Grounded Study Guardrails</h3>
+            <ul>
+                <li>Answers should stay tied to uploaded or retrieved evidence.</li>
+                <li>Claims without support should be marked as uncertain.</li>
+                <li>Tables, formulas, and visuals should be explained instead of only quoted.</li>
+            </ul>
+        </div>
+
+        <div class="sources-tabs">
+            <button class="sources-tab active" data-tab="chunks">Knowledge</button>
+            <button class="sources-tab" data-tab="papers">Network</button>
+            <button class="sources-tab" data-tab="graph">Graph View</button>
+            <button class="sources-tab" data-tab="verification">Verification</button>
+        </div>
+
+        <div class="sources-content" id="sourcesContent">
+            <div class="sources-tab-content active" id="tabChunks">
+                <div class="sources-empty">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    <span>Send a query to see retrieved Supabase chunks</span>
+                </div>
+            </div>
+            <div class="sources-tab-content" id="tabPapers">
+                <div class="sources-empty">
+                    <span>Send a query to see research network</span>
+                </div>
+            </div>
+            <div class="sources-tab-content" id="tabGraph">
+                <div id="graphContainer" class="graph-explorer">
+                    <svg id="graphSvg"></svg>
+                    <div class="graph-controls">
+                        <button id="resetGraph">Center</button>
+                    </div>
+                </div>
+                <div class="sources-empty" id="graphEmpty">
+                    <span>Graph visualization will appear here</span>
+                </div>
+            </div>
+            <div class="sources-tab-content" id="tabVerification">
+                <div class="sources-empty">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                    <span>Verification results will appear here</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• HEALTH MODAL â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+    <div class="modal-overlay" id="healthModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>System Health</h2>
+                <button class="btn-icon" id="healthModalClose" aria-label="Close modal">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body" id="healthModalBody">
+                <div class="loading-spinner"></div>
+                <span>Checking system health...</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
