@@ -38,50 +38,21 @@ It serves both a **REST API** (FastAPI) and a **browser-based frontend UI** from
 ---
 
 ## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                     Browser (Frontend)                   │
-│         http://localhost:8000/app                        │
-└────────────────────────┬────────────────────────────────┘
-                         │ HTTP
-┌────────────────────────▼────────────────────────────────┐
-│              FastAPI Backend (app.py)                    │
-│                   Port 8000                              │
-│                                                          │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐  │
-│  │   Intent    │  │   Keyword    │  │  Embedding    │  │
-│  │ Classifier  │  │  Extractor   │  │  (HuggingFace)│  │
-│  └─────────────┘  └──────────────┘  └───────────────┘  │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │             RAG Pipeline                         │   │
-│  │  Neo4j Graph Search → Supabase Vector Search     │   │
-│  │  → RRF Fusion → Relevance Filter → LLM Answer   │   │
-│  │  → Hallucination Verifier → Final Response       │   │
-│  └──────────────────────────────────────────────────┘   │
-└──────┬──────────────────────┬───────────────────────────┘
-       │                      │
-┌──────▼──────┐       ┌───────▼───────┐
-│   Neo4j     │       │   Supabase    │
-│   Aura      │       │  (pgvector)   │
-│ (Graph DB)  │       │  (Vector DB)  │
-└─────────────┘       └───────────────┘
-```
-
----
+![Alt Text](aether_full_system_architecture.svg)
 
 ## ✨ Features
+## 🛡️ Anti-Hallucination Pipeline
 
-### 🛡️ Anti-Hallucination Pipeline
-| Feature | Description |
-|---|---|
-| **Relevance Floor Filtering** | Drops chunks below 0.25 similarity — removes misleading low-quality context |
-| **Grounded Prompts** | Forces LLM to cite every factual claim with `[1]`, `[2]`, etc. |
-| **Dual-Pass Verification** | Second LLM pass fact-checks every claim against source documents |
-| **Confidence Scoring** | Returns 0.0–1.0 confidence score + `PASS / PARTIAL / FAIL` verdict |
-| **Zero-Temperature Reasoning** | LLM answers at `temperature=0.0` — no creative fabrication |
+The 6-step pipeline that prevents LLM fabrication:
 
+![Aether Intent Routing Flowchart](aether_intent_routing_flowchart.svg)
+
+1. **Intent Classification**: Identifies if the query is research, general, or chitchat.
+2. **Keyword Extraction**: Parallel embedding and entity extraction.
+3. **Graph Retrieval**: Neo4j seed expansion via `CITES` and `WRITTEN_BY` relationships.
+4. **Vector Search**: Tiered similarity search via Supabase pgvector.
+5. **Relevance Filter**: Strict floor filtering (default 0.25) to remove low-quality context.
+6. **Verification Pass**: Dual-pass LLM fact-checking for a final `PASS/FAIL` verdict.
 ### 🔍 Retrieval Pipeline
 - **Intent Classification** — auto-routes research vs. general/chitchat queries
 - **Keyword Extraction** — extracts 3–5 search keywords from natural language
