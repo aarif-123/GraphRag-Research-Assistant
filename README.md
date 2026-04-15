@@ -35,6 +35,7 @@
 
 It serves both a **REST API** (FastAPI) and a **browser-based frontend UI** from a single server.
 
+![Alt Text](systemView.png)
 ---
 
 ## 🏗️ Architecture
