@@ -1,15 +1,99 @@
-.vercel
-.env
-.env.*
-venv/
-venv*/
+# ──────────────────────────────────────────
+# Python
+# ──────────────────────────────────────────
 __pycache__/
 *.py[cod]
-*.log
-*.sqlite3
-.pytest_cache/
+*.pyd
+*.pyo
+*.pyw
+*.pyz
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+venv/
+venv*/
+.venv/
+env/
+ENV/
+
+# Type checkers / linters
 .mypy_cache/
 .ruff_cache/
+.pytype/
+
+# Test / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# ──────────────────────────────────────────
+# Environment & Secrets
+# ──────────────────────────────────────────
+.env
+.env.*
+.env*
+*.local
+
+# ──────────────────────────────────────────
+# Logs & Debug outputs
+# ──────────────────────────────────────────
+*.log
+app.log
+app/*.log
+*pid.txt
+server_live_*.txt
+
+# Test response / scratch output files
+test_response*.txt
+parsed_pdf*.txt
+debug_*.txt
+scratch_*.txt
+
+# ──────────────────────────────────────────
+# Editors & IDEs
+# ──────────────────────────────────────────
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ──────────────────────────────────────────
+# Node / Frontend tooling
+# ──────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ──────────────────────────────────────────
+# Deployment
+# ──────────────────────────────────────────
+.vercel
+vercel.json
+
+# ──────────────────────────────────────────
+# Database & SQLite
+# ──────────────────────────────────────────
+*.sqlite3
+*.db
+
+# ──────────────────────────────────────────
+# Project-specific: large data files
+# ──────────────────────────────────────────
 ingestion/dblp-v10.csv
 ingestion/paper_chunks_rows.csv
+ingestion/*.csv
+ingestion/*.json

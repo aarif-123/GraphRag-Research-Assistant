@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Aether GraphRAG Research Assistant - AI-powered academic research with graph-augmented retrieval and anti-hallucination verification.">
+    <title>Aether — GraphRAG Research Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="landing-body">
+    <!-- Animated Network Graph Canvas -->
+    <canvas id="network-canvas" class="network-canvas"></canvas>
+
+    <!-- Header / Navbar -->
+    <header class="landing-header">
+        <div class="logo">
+            <div class="logo-icon">
+                <svg viewBox="0 0 32 32" fill="none">
+                    <circle cx="16" cy="16" r="14" stroke="url(#grad-l1)" stroke-width="2.5" />
+                    <circle cx="16" cy="10" r="3" fill="url(#grad-l1)" />
+                    <circle cx="10" cy="20" r="3" fill="url(#grad-l2)" />
+                    <circle cx="22" cy="20" r="3" fill="url(#grad-l2)" />
+                    <line x1="16" y1="13" x2="10" y2="17" stroke="url(#grad-l1)" stroke-width="1.5" />
+                    <line x1="16" y1="13" x2="22" y2="17" stroke="url(#grad-l1)" stroke-width="1.5" />
+                    <line x1="10" y1="20" x2="22" y2="20" stroke="url(#grad-l2)" stroke-width="1.5" />
+                    <defs>
+                        <linearGradient id="grad-l1" x1="0" y1="0" x2="32" y2="32">
+                            <stop offset="0%" stop-color="#6366f1" />
+                            <stop offset="100%" stop-color="#a78bfa" />
+                        </linearGradient>
+                        <linearGradient id="grad-l2" x1="0" y1="0" x2="32" y2="32">
+                            <stop offset="0%" stop-color="#a78bfa" />
+                            <stop offset="100%" stop-color="#c4b5fd" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </div>
+            <div class="logo-text">
+                <span class="logo-title">Aether</span>
+                <span class="logo-subtitle">Knowledge Graph AI</span>
+            </div>
+        </div>
+        <div class="nav-actions">
+            <button class="btn btn-secondary" onclick="openAuthModal('signin')">Sign In</button>
+            <button class="btn btn-primary" onclick="openAuthModal('signup')">Get Started</button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="landing-main">
+        <!-- Hero Section -->
+        <section class="hero-section">
+            <div class="hero-badge">Next-Gen Academic Intelligence</div>
+            <h1 class="hero-title">Decipher the <span class="gradient-text">Academic Universe</span></h1>
+            <p class="hero-subtitle">
+                Aether combines advanced GraphRAG, citation traversal networks, and real-time anti-hallucination verification to transform how you analyze and synthesize scientific literature.
+            </p>
+            <div class="hero-actions">
+                <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start Researching Free</button>
+                <a href="#features" class="btn btn-secondary btn-lg">Explore Features</a>
+            </div>
+        </section>
+
+        <!-- Stats Section -->
+        <section class="stats-section">
+            <div class="stat-card">
+                <span class="stat-number">5M+</span>
+                <span class="stat-label">Academic Papers Indexed</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number">12ms</span>
+                <span class="stat-label">Embedding Latency</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number">100%</span>
+                <span class="stat-label">Fact-Checked Citations</span>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section id="features" class="features-section">
+            <h2 class="section-title">Engineered for Academic Precision</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-name">GraphRAG Augmentation</h3>
+                    <p class="feature-description">Retrieves multi-hop facts and relationships directly from Neo4j citation and author graphs, mapping connections standard search engines miss.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-name">Anti-Hallucination Guard</h3>
+                    <p class="feature-description">Every generated claim is verified against source papers. Visual confidence scores guarantee all outputs are scientifically grounded.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/>
+                            <path d="M13 6h3a2 2 0 012 2v7M11 18H8a2 2 0 01-2-2V9"/>
+                        </svg>
+                    </div>
+                    <h3 class="feature-name">Citation Traversal</h3>
+                    <p class="feature-description">Explore bibliography coupling, prolific author networks, and citation velocities to build chronological evolution tracks of fields.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="landing-footer">
+        <p>&copy; 2026 Aether Intelligence. Built for academic excellence.</p>
+    </footer>
+
+    <!-- Auth Modal (Overlay) -->
+    <div id="auth-modal" class="auth-modal-overlay" style="display: none;">
+        <div class="auth-modal-content">
+            <button class="auth-close-btn" onclick="closeAuthModal()">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+            </button>
+            <div class="auth-tabs">
+                <button id="tab-signin" class="auth-tab active" onclick="switchTab('signin')">Sign In</button>
+                <button id="tab-signup" class="auth-tab" onclick="switchTab('signup')">Sign Up</button>
+            </div>
+            
+            <!-- Sign In Form -->
+            <form id="signin-form" class="auth-form" onsubmit="handleAuth(event, 'signin')">
+                <div class="form-group">
+                    <label for="signin-email">Email Address</label>
+                    <input type="email" id="signin-email" required placeholder="name@university.edu">
+                </div>
+                <div class="form-group">
+                    <label for="signin-password">Password</label>
+                    <input type="password" id="signin-password" required placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+                <div id="signin-error" class="auth-error-msg"></div>
+            </form>
+
+            <!-- Sign Up Form -->
+            <form id="signup-form" class="auth-form" style="display: none;" onsubmit="handleAuth(event, 'signup')">
+                <div class="form-group">
+                    <label for="signup-email">Email Address</label>
+                    <input type="email" id="signup-email" required placeholder="name@university.edu">
+                </div>
+                <div class="form-group">
+                    <label for="signup-password">Password</label>
+                    <input type="password" id="signup-password" required minlength="6" placeholder="At least 6 characters">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Create Account</button>
+                <div id="signup-error" class="auth-error-msg"></div>
+                <div id="signup-success" class="auth-success-msg"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Background Canvas Animation & Auth Client Code -->
+    <script>
+        // ── Canvas Particle Animation ──
+        const canvas = document.getElementById('network-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let particles = [];
+        const maxParticles = 90;
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        
+        class Particle {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.vx = (Math.random() - 0.5) * 0.4;
+                this.vy = (Math.random() - 0.5) * 0.4;
+                this.radius = Math.random() * 2 + 1;
+            }
+            
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                if (this.x < 0 || this.x > canvas.width) this.vx = -this.vx;
+                if (this.y < 0 || this.y > canvas.height) this.vy = -this.vy;
+            }
+            
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(99, 102, 241, 0.4)';
+                ctx.fill();
+            }
+        }
+        
+        for (let i = 0; i < maxParticles; i++) {
+            particles.push(new Particle());
+        }
+        
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw connections
+            ctx.strokeStyle = 'rgba(99, 102, 241, 0.05)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dx = particles[i].x - particles[j].x;
+                    const dy = particles[i].y - particles[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 120) {
+                        ctx.beginPath();
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            // Update and draw particles
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+            
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+
+        // ── Auth Modal Logic ──
+        const modal = document.getElementById('auth-modal');
+        const signInForm = document.getElementById('signin-form');
+        const signUpForm = document.getElementById('signup-form');
+        const tabSignIn = document.getElementById('tab-signin');
+        const tabSignUp = document.getElementById('tab-signup');
+        const signInError = document.getElementById('signin-error');
+        const signUpError = document.getElementById('signup-error');
+        const signUpSuccess = document.getElementById('signup-success');
+
+        function openAuthModal(mode) {
+            modal.style.display = 'flex';
+            switchTab(mode);
+        }
+
+        function closeAuthModal() {
+            modal.style.display = 'none';
+            // Clear inputs and errors
+            signInError.textContent = '';
+            signUpError.textContent = '';
+            signUpSuccess.textContent = '';
+            signInForm.reset();
+            signUpForm.reset();
+        }
+
+        function switchTab(mode) {
+            signInError.textContent = '';
+            signUpError.textContent = '';
+            signUpSuccess.textContent = '';
+            if (mode === 'signin') {
+                signInForm.style.display = 'block';
+                signUpForm.style.display = 'none';
+                tabSignIn.classList.add('active');
+                tabSignUp.classList.remove('active');
+            } else {
+                signInForm.style.display = 'none';
+                signUpForm.style.display = 'block';
+                tabSignIn.classList.remove('active');
+                tabSignUp.classList.add('active');
+            }
+        }
+
+        // Close on click outside modal content
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeAuthModal();
+            }
+        });
+
+        // ── Supabase Authentication ──
+        let supabaseClient = null;
+
+        async function initAuth() {
+            try {
+                const res = await fetch('/api/config');
+                const config = await res.json();
+                supabaseClient = window.supabase.createClient(config.supabase_url, config.supabase_anon_key);
+                
+                // If user has session, auto redirect to app
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session) {
+                    window.location.href = '/app';
+                }
+            } catch (e) {
+                console.error("Supabase load error:", e);
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', initAuth);
+
+        async function handleAuth(event, type) {
+            event.preventDefault();
+            if (!supabaseClient) {
+                alert("Auth system not ready yet. Please try again in a moment.");
+                return;
+            }
+
+            if (type === 'signin') {
+                signInError.textContent = '';
+                const email = document.getElementById('signin-email').value;
+                const password = document.getElementById('signin-password').value;
+
+                const submitBtn = signInForm.querySelector('button[type="submit"]');
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Signing In...';
+
+                try {
+                    const { data, error } = await supabaseClient.auth.signInWithPassword({
+                        email,
+                        password,
+                    });
+
+                    if (error) {
+                        signInError.textContent = error.message;
+                    } else if (data.session) {
+                        // Store access token in localStorage for easy access
+                        localStorage.setItem('aether_token', data.session.access_token);
+                        window.location.href = '/app';
+                    }
+                } catch (err) {
+                    signInError.textContent = 'An unexpected error occurred. Please try again.';
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Sign In';
+                }
+            } else {
+                signUpError.textContent = '';
+                signUpSuccess.textContent = '';
+                const email = document.getElementById('signup-email').value;
+                const password = document.getElementById('signup-password').value;
+
+                const submitBtn = signUpForm.querySelector('button[type="submit"]');
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Creating Account...';
+
+                try {
+                    const { data, error } = await supabaseClient.auth.signUp({
+                        email,
+                        password,
+                    });
+
+                    if (error) {
+                        signUpError.textContent = error.message;
+                    } else {
+                        // Check if we signed in automatically or need verification
+                        if (data.session) {
+                            localStorage.setItem('aether_token', data.session.access_token);
+                            window.location.href = '/app';
+                        } else {
+                            signUpSuccess.textContent = 'Sign up successful! Please check your email inbox to confirm your account.';
+                            signUpForm.reset();
+                        }
+                    }
+                } catch (err) {
+                    signUpError.textContent = 'An unexpected error occurred. Please try again.';
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Create Account';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,20 +1,40 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="GraphRAG Research Assistant - AI-powered academic research with graph-augmented retrieval and anti-hallucination verification." />
+    <meta name="description"
+        content="GraphRAG Research Assistant - AI-powered academic research with graph-augmented retrieval and anti-hallucination verification." />
     <title>Aether - GraphRAG Research Assistant</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
     <!-- Libraries for enhanced functionality -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                processEscapes: true,
+                processEnvironments: true
+            },
+            options: {
+                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+            }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
     <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <!-- Supabase Auth Client SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
+
 <body>
     <!-- ================= SIDEBAR ================= -->
     <aside class="sidebar" id="sidebar">
@@ -22,21 +42,21 @@
             <div class="logo">
                 <div class="logo-icon">
                     <svg viewBox="0 0 32 32" fill="none">
-                        <circle cx="16" cy="16" r="14" stroke="url(#grad1)" stroke-width="2.5"/>
-                        <circle cx="16" cy="10" r="3" fill="url(#grad1)"/>
-                        <circle cx="10" cy="20" r="3" fill="url(#grad2)"/>
-                        <circle cx="22" cy="20" r="3" fill="url(#grad2)"/>
-                        <line x1="16" y1="13" x2="10" y2="17" stroke="url(#grad1)" stroke-width="1.5"/>
-                        <line x1="16" y1="13" x2="22" y2="17" stroke="url(#grad1)" stroke-width="1.5"/>
-                        <line x1="10" y1="20" x2="22" y2="20" stroke="url(#grad2)" stroke-width="1.5"/>
+                        <circle cx="16" cy="16" r="14" stroke="url(#grad1)" stroke-width="2.5" />
+                        <circle cx="16" cy="10" r="3" fill="url(#grad1)" />
+                        <circle cx="10" cy="20" r="3" fill="url(#grad2)" />
+                        <circle cx="22" cy="20" r="3" fill="url(#grad2)" />
+                        <line x1="16" y1="13" x2="10" y2="17" stroke="url(#grad1)" stroke-width="1.5" />
+                        <line x1="16" y1="13" x2="22" y2="17" stroke="url(#grad1)" stroke-width="1.5" />
+                        <line x1="10" y1="20" x2="22" y2="20" stroke="url(#grad2)" stroke-width="1.5" />
                         <defs>
                             <linearGradient id="grad1" x1="0" y1="0" x2="32" y2="32">
-                                <stop offset="0%" stop-color="#6366f1"/>
-                                <stop offset="100%" stop-color="#a78bfa"/>
+                                <stop offset="0%" stop-color="#6366f1" />
+                                <stop offset="100%" stop-color="#a78bfa" />
                             </linearGradient>
                             <linearGradient id="grad2" x1="0" y1="0" x2="32" y2="32">
-                                <stop offset="0%" stop-color="#a78bfa"/>
-                                <stop offset="100%" stop-color="#c4b5fd"/>
+                                <stop offset="0%" stop-color="#a78bfa" />
+                                <stop offset="100%" stop-color="#c4b5fd" />
                             </linearGradient>
                         </defs>
                     </svg>
@@ -48,20 +68,38 @@
             </div>
             <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M15 18l-6-6 6-6"/>
+                    <path d="M15 18l-6-6 6-6" />
                 </svg>
             </button>
         </div>
 
-        <div class="sidebar-section sidebar-section-scrollable">
+        <div class="sidebar-section" style="padding: 16px 16px 0 16px;">
+            <button class="btn btn-primary btn-new-chat" id="newChatBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                New Chat
+            </button>
+        </div>
+
+        <div class="sidebar-section sidebar-section-scrollable" style="padding-top: 10px;">
             <div class="sidebar-label-row">
                 <h3 class="sidebar-label">History</h3>
                 <button class="btn-clear-history" id="clearHistoryBtn" title="Clear all history">Clear</button>
             </div>
+            <div class="history-search-container" style="padding: 0 16px 8px 16px; position: relative;">
+                <input type="text" id="historySearchInput" placeholder="Search chats..." style="width: 100%; padding: 8px 12px 8px 32px; font-size: 13px; border-radius: var(--radius-md); border: 1px solid var(--surface-glass-border); background: rgba(0,0,0,0.2); color: var(--text-primary); outline: none; transition: all 0.2s ease; box-sizing: border-box;" />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position: absolute; left: 26px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none;">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+            </div>
             <div class="history-list" id="historyList">
                 <div class="history-empty">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
                     </svg>
                     <span>No history yet</span>
                 </div>
@@ -69,51 +107,10 @@
         </div>
 
 
-        <div class="sidebar-section sidebar-section-compact">
-            <h3 class="sidebar-label">Settings</h3>
-            <div class="settings-group">
-                <label class="setting-item" for="topK">
-                    <span class="setting-label">Top K Results</span>
-                    <div class="setting-control">
-                        <input type="range" id="topK" min="1" max="20" value="5" />
-                        <span class="setting-value" id="topKValue">5</span>
-                    </div>
-                </label>
-                <label class="setting-item" for="minSim">
-                    <span class="setting-label">Min Similarity</span>
-                    <div class="setting-control">
-                        <input type="range" id="minSim" min="0" max="100" value="10" step="5" />
-                        <span class="setting-value" id="minSimValue">0.10</span>
-                    </div>
-                </label>
-                <label class="setting-item setting-toggle" for="verifyToggle">
-                    <span class="setting-label">Verification</span>
-                    <div class="toggle-switch">
-                        <input type="checkbox" id="verifyToggle" checked />
-                        <span class="toggle-slider"></span>
-                    </div>
-                </label>
-                <label class="setting-item setting-toggle" for="groundedStudyToggle">
-                    <span class="setting-label">Study Mode</span>
-                    <div class="toggle-switch">
-                        <input type="checkbox" id="groundedStudyToggle" />
-                        <span class="toggle-slider"></span>
-                    </div>
-                </label>
-                <label class="setting-item" for="modelSelect" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-                    <span class="setting-label">Reasoning Model</span>
-                    <select id="modelSelect" class="setting-select">
-                        <option value="light">Light (Fast)</option>
-                        <option value="heavy">Heavy (Deep)</option>
-                    </select>
-                </label>
-            </div>
-        </div>
-
         <div class="sidebar-footer">
             <button class="btn-health" id="healthBtn">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
                 </svg>
                 <span>System Health</span>
             </button>
@@ -127,9 +124,9 @@
         <header class="top-bar">
             <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Open menu">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="3" y1="6" x2="21" y2="6"/>
-                    <line x1="3" y1="12" x2="21" y2="12"/>
-                    <line x1="3" y1="18" x2="21" y2="18"/>
+                    <line x1="3" y1="6" x2="21" y2="6" />
+                    <line x1="3" y1="12" x2="21" y2="12" />
+                    <line x1="3" y1="18" x2="21" y2="18" />
                 </svg>
             </button>
             <div class="connection-status" id="connectionStatus">
@@ -137,19 +134,52 @@
                 <span class="status-text">Connecting...</span>
                 <span class="pipeline-step" id="pipelineStep"></span>
             </div>
-            <div class="top-bar-actions" style="display: flex; gap: 8px;">
+            <div class="top-bar-actions" style="display: flex; gap: 8px; align-items: center;">
+                <!-- User Profile Menu -->
+                <div class="user-profile-menu" id="userProfileMenu" style="position: relative; margin-right: 8px;">
+                    <button class="user-avatar-btn" id="userProfileBtn">
+                        <div class="user-avatar-icon" id="userAvatarIcon">U</div>
+                        <span id="userEmailText">Loading...</span>
+                    </button>
+                    <div class="dropdown-menu" id="userDropdown" style="display: none; position: absolute; top: 100%; right: 0; margin-top: 8px; background: var(--bg-elevated); border: 1px solid var(--glass-border); border-radius: var(--radius-md); padding: 8px; box-shadow: var(--glass-shadow); z-index: 100; min-width: 180px; flex-direction: column; gap: 4px;">
+                        <button class="btn btn-secondary btn-block" id="profileSettingsBtn" style="font-size: 13px; padding: 8px 12px; text-align: left; background: transparent; border: none; display: flex; align-items: center; gap: 8px; color: var(--text-secondary); width: 100%; cursor: pointer;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                <circle cx="12" cy="7" r="4"/>
+                            </svg>
+                            Profile Settings
+                        </button>
+                        <div style="height: 1px; background: var(--glass-border); margin: 4px 8px;"></div>
+                        <button class="btn btn-secondary btn-block" id="logoutBtn" style="font-size: 13px; padding: 8px 12px; text-align: left; background: transparent; border: none; display: flex; align-items: center; gap: 8px; color: var(--text-secondary); width: 100%; cursor: pointer;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+                            </svg>
+                            Logout
+                        </button>
+                    </div>
+                </div>
+
                 <button class="btn-icon" id="themeToggle" title="Toggle theme">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="themeIcon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        id="themeIcon">
                         <!-- Default to moon/dark mode -->
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                     </svg>
                 </button>
+                <button class="btn-icon" id="settingsToggleBtn" title="Settings">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z">
+                        </path>
+                    </svg>
+                </button>
                 <button class="btn-icon" id="sourcePanelToggle" title="Toggle sources panel">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="7" height="7"/>
-                        <rect x="14" y="3" width="7" height="7"/>
-                        <rect x="3" y="14" width="7" height="7"/>
-                        <rect x="14" y="14" width="7" height="7"/>
+                        <rect x="3" y="3" width="7" height="7" />
+                        <rect x="14" y="3" width="7" height="7" />
+                        <rect x="3" y="14" width="7" height="7" />
+                        <rect x="14" y="14" width="7" height="7" />
                     </svg>
                 </button>
             </div>
@@ -163,25 +193,27 @@
                     <div class="welcome-glow"></div>
                     <div class="welcome-icon">
                         <svg viewBox="0 0 64 64" fill="none" width="80" height="80">
-                            <circle cx="32" cy="32" r="28" stroke="url(#wgrad1)" stroke-width="2" opacity="0.3"/>
-                            <circle cx="32" cy="32" r="20" stroke="url(#wgrad1)" stroke-width="2" opacity="0.5"/>
-                            <circle cx="32" cy="20" r="5" fill="url(#wgrad1)"/>
-                            <circle cx="20" cy="38" r="5" fill="url(#wgrad2)"/>
-                            <circle cx="44" cy="38" r="5" fill="url(#wgrad2)"/>
-                            <circle cx="32" cy="48" r="4" fill="url(#wgrad1)" opacity="0.7"/>
-                            <line x1="32" y1="25" x2="20" y2="33" stroke="url(#wgrad1)" stroke-width="2"/>
-                            <line x1="32" y1="25" x2="44" y2="33" stroke="url(#wgrad1)" stroke-width="2"/>
-                            <line x1="20" y1="38" x2="44" y2="38" stroke="url(#wgrad2)" stroke-width="1.5"/>
-                            <line x1="20" y1="38" x2="32" y2="48" stroke="url(#wgrad2)" stroke-width="1.5" opacity="0.5"/>
-                            <line x1="44" y1="38" x2="32" y2="48" stroke="url(#wgrad2)" stroke-width="1.5" opacity="0.5"/>
+                            <circle cx="32" cy="32" r="28" stroke="url(#wgrad1)" stroke-width="2" opacity="0.3" />
+                            <circle cx="32" cy="32" r="20" stroke="url(#wgrad1)" stroke-width="2" opacity="0.5" />
+                            <circle cx="32" cy="20" r="5" fill="url(#wgrad1)" />
+                            <circle cx="20" cy="38" r="5" fill="url(#wgrad2)" />
+                            <circle cx="44" cy="38" r="5" fill="url(#wgrad2)" />
+                            <circle cx="32" cy="48" r="4" fill="url(#wgrad1)" opacity="0.7" />
+                            <line x1="32" y1="25" x2="20" y2="33" stroke="url(#wgrad1)" stroke-width="2" />
+                            <line x1="32" y1="25" x2="44" y2="33" stroke="url(#wgrad1)" stroke-width="2" />
+                            <line x1="20" y1="38" x2="44" y2="38" stroke="url(#wgrad2)" stroke-width="1.5" />
+                            <line x1="20" y1="38" x2="32" y2="48" stroke="url(#wgrad2)" stroke-width="1.5"
+                                opacity="0.5" />
+                            <line x1="44" y1="38" x2="32" y2="48" stroke="url(#wgrad2)" stroke-width="1.5"
+                                opacity="0.5" />
                             <defs>
                                 <linearGradient id="wgrad1" x1="0" y1="0" x2="64" y2="64">
-                                    <stop offset="0%" stop-color="#818cf8"/>
-                                    <stop offset="100%" stop-color="#c084fc"/>
+                                    <stop offset="0%" stop-color="#818cf8" />
+                                    <stop offset="100%" stop-color="#c084fc" />
                                 </linearGradient>
                                 <linearGradient id="wgrad2" x1="0" y1="0" x2="64" y2="64">
-                                    <stop offset="0%" stop-color="#a78bfa"/>
-                                    <stop offset="100%" stop-color="#e879f9"/>
+                                    <stop offset="0%" stop-color="#a78bfa" />
+                                    <stop offset="100%" stop-color="#e879f9" />
                                 </linearGradient>
                             </defs>
                         </svg>
@@ -192,44 +224,56 @@
                         Get grounded, cited answers from your academic knowledge base.
                     </p>
                     <div class="welcome-cards">
-                        <button class="welcome-card" data-query="What are the latest advances in transformer architectures?">
+                        <button class="welcome-card"
+                            data-query="What are the latest advances in transformer architectures?">
                             <span class="welcome-card-icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-purple)">
-                                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" style="color: var(--accent-purple)">
+                                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                                 </svg>
                             </span>
                             <span>Transformer advances</span>
                         </button>
                         <button class="welcome-card" data-query="Explain graph neural networks and their applications">
                             <span class="welcome-card-icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-cyan)">
-                                    <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
-                                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" style="color: var(--accent-cyan)">
+                                    <circle cx="18" cy="5" r="3" />
+                                    <circle cx="6" cy="12" r="3" />
+                                    <circle cx="18" cy="19" r="3" />
+                                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
                                 </svg>
                             </span>
                             <span>Graph networks</span>
                         </button>
-                        <button class="welcome-card" data-query="What methods reduce hallucination in large language models?">
+                        <button class="welcome-card"
+                            data-query="What methods reduce hallucination in large language models?">
                             <span class="welcome-card-icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-emerald)">
-                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" style="color: var(--accent-emerald)">
+                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                                 </svg>
                             </span>
                             <span>Hallucination check</span>
                         </button>
                         <button class="welcome-card" data-query="Compare retrieval-augmented generation approaches">
                             <span class="welcome-card-icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-amber)">
-                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-                                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" style="color: var(--accent-amber)">
+                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
                                 </svg>
                             </span>
                             <span>RAG comparison</span>
                         </button>
                     </div>
                     <div class="study-prompt-bar">
-                        <button class="study-prompt-chip" data-study-prompt="Summarize the main argument of the uploaded paper and cite the most relevant sections.">Summary Mode</button>
-                        <button class="study-prompt-chip" data-study-prompt="Explain the methodology step by step using only the uploaded PDF evidence.">Methodology</button>
+                        <button class="study-prompt-chip"
+                            data-study-prompt="Summarize the main argument of the uploaded paper and cite the most relevant sections.">Summary
+                            Mode</button>
+                        <button class="study-prompt-chip"
+                            data-study-prompt="Explain the methodology step by step using only the uploaded PDF evidence.">Methodology</button>
                     </div>
                 </div>
             </div>
@@ -239,12 +283,12 @@
         <div class="input-area">
             <div class="input-wrapper composer-wrapper">
                 <div class="attachment-tray" id="attachmentTray"></div>
-                
+
                 <div class="composer-main">
                     <!-- ATTACH BUTTON -->
                     <div class="composer-leading">
                         <button id="attachMenuBtn" class="btn-plus" aria-expanded="false">+</button>
-    
+
                         <!-- ATTACH MENU -->
                         <div id="attachMenu" class="attach-menu" aria-hidden="true">
                             <div class="attach-menu-item" data-attach-action="files">
@@ -255,6 +299,10 @@
                                 <span class="attach-menu-icon-symbol">📄</span>
                                 Upload PDF
                             </div>
+                            <div class="attach-menu-item" data-attach-action="paste-link">
+                                <span class="attach-menu-icon-symbol">🔗</span>
+                                Paste paper link
+                            </div>
                             <div class="attach-menu-item" data-attach-action="deep-research">
                                 <span class="attach-menu-icon-symbol">🔍</span>
                                 Deep research mode
@@ -262,43 +310,237 @@
                         </div>
                     </div>
 
-                    <textarea
-                        id="queryInput"
-                        placeholder="Ask anything"
-                        rows="1"
-                        maxlength="2000"
-                    ></textarea>
+                    <textarea id="queryInput" placeholder="Ask anything" rows="1" maxlength="2000"></textarea>
 
                     <div class="input-actions">
+                        <button class="btn-icon btn-link" id="linkBtn" title="Paste paper link">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                            </svg>
+                        </button>
                         <button class="btn-icon btn-mic" id="micBtn" title="Voice input">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                                <line x1="12" y1="19" x2="12" y2="23"/>
-                                <line x1="8" y1="23" x2="16" y2="23"/>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                                <line x1="12" y1="19" x2="12" y2="23" />
+                                <line x1="8" y1="23" x2="16" y2="23" />
                             </svg>
                         </button>
                         <button class="btn-send" id="sendBtn" disabled title="Send query">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                <line x1="12" y1="19" x2="12" y2="5"/>
-                                <polyline points="5 12 12 5 19 12"/>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
+                                <line x1="12" y1="19" x2="12" y2="5" />
+                                <polyline points="5 12 12 5 19 12" />
                             </svg>
                         </button>
                     </div>
                 </div>
             </div>
-            
+
             <div class="input-hints">
                 <span>Press <kbd>Enter</kbd> to send • <kbd>Shift+Enter</kbd> new line</span>
                 <span class="char-count" id="charCount">0/2000</span>
             </div>
-            
+
             <!-- Hidden File Inputs -->
-            <input type="file" id="attachmentFileInput" accept="image/*,video/*,application/pdf,.doc,.docx,.txt,.csv,.xlsx" multiple hidden />
+            <input type="file" id="attachmentFileInput"
+                accept="image/*,video/*,application/pdf,.doc,.docx,.txt,.csv,.xlsx" multiple hidden />
             <input type="file" id="pdfFileInput" accept="application/pdf" multiple hidden />
             <input type="file" id="videoFileInput" accept="video/*" multiple hidden />
         </div>
     </main>
+
+    <!-- ================= SETTINGS MODAL ================= -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="btn-icon" id="settingsModalClose" aria-label="Close modal">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-group" style="display: flex; flex-direction: column; gap: 14px;">
+                    <div class="setting-item" style="display: flex; flex-direction: column; align-items: stretch; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span class="setting-label">Top K Results</span>
+                            <div class="setting-control" style="display: flex; align-items: center; gap: 8px;">
+                                <input type="range" id="topK" min="1" max="20" value="5" />
+                                <span class="setting-value" id="topKValue">5</span>
+                            </div>
+                        </div>
+                        <span class="setting-desc" style="font-size: 11px; color: var(--text-muted);">Number of retrieved source chunks to inject into the LLM context.</span>
+                    </div>
+
+                    <div class="setting-item" style="display: flex; flex-direction: column; align-items: stretch; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span class="setting-label">Temperature</span>
+                            <div class="setting-control" style="display: flex; align-items: center; gap: 8px;">
+                                <input type="range" id="temperature" min="0" max="2" value="0.0" step="0.1" />
+                                <span class="setting-value" id="temperatureValue">0.0</span>
+                            </div>
+                        </div>
+                        <span class="setting-desc" style="font-size: 11px; color: var(--text-muted);">Controls randomness. Lower values are more deterministic and factual.</span>
+                    </div>
+
+                    <div class="setting-item" style="display: flex; flex-direction: column; align-items: stretch; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span class="setting-label">Verification</span>
+                            <div class="toggle-switch">
+                                <input type="checkbox" id="verifyToggle" checked />
+                                <span class="toggle-slider"></span>
+                            </div>
+                        </div>
+                        <span class="setting-desc" style="font-size: 11px; color: var(--text-muted);">Enable real-time anti-hallucination verification checking against citations.</span>
+                    </div>
+
+                    <div class="setting-item" style="display: flex; flex-direction: column; align-items: stretch; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span class="setting-label">Study Mode</span>
+                            <div class="toggle-switch">
+                                <input type="checkbox" id="groundedStudyToggle" />
+                                <span class="toggle-slider"></span>
+                            </div>
+                        </div>
+                        <span class="setting-desc" style="font-size: 11px; color: var(--text-muted);">Show interactive academic templates and guardrail guides.</span>
+                    </div>
+
+                    <div class="setting-item" style="display: flex; flex-direction: column; align-items: stretch; gap: 8px;">
+                        <span class="setting-label">Reasoning Model</span>
+                        <select id="modelSelect" class="setting-select" style="width: 100%; box-sizing: border-box;">
+                            <option value="light">Light (Fast)</option>
+                            <option value="heavy">Heavy (Deep)</option>
+                        </select>
+                        <span class="setting-desc" style="font-size: 11px; color: var(--text-muted);">"Heavy" invokes multi-hop reasoning strategy, "Light" is standard speed retrieval.</span>
+                    </div>
+                    
+                    <button id="resetSettingsBtn" class="btn btn-secondary" style="width: 100%; margin-top: 8px; font-weight: 600; padding: 10px; border-color: rgba(255,255,255,0.08);">Reset to Defaults</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= PASTE LINK MODAL ================= -->
+    <div class="modal-overlay" id="linkModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Paste Paper Link</h2>
+                <button class="btn-icon" id="linkModalClose" aria-label="Close modal">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-group">
+                    <div class="setting-item"
+                        style="flex-direction: column; align-items: flex-start; gap: 8px; border: none; padding: 0;">
+                        <span class="setting-label" style="font-size: 13px; font-weight: 500;">Paper URL (ArXiv abstract
+                            page, PDF URL, etc.)</span>
+                        <input type="url" id="paperUrlInput" placeholder="https://arxiv.org/abs/1807.03819"
+                            style="width: 100%; padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--surface-glass-border); background: var(--bg-primary); color: var(--text-primary); font-family: inherit; font-size: 14px;" />
+                    </div>
+                    <button class="btn-health" id="submitPaperUrlBtn"
+                        style="width: 100%; margin-top: 20px; justify-content: center; background: var(--gradient-primary); color: white; border: none; font-weight: 600; padding: 12px; border-radius: 9px; box-shadow: var(--shadow-sm);">Add
+                        to Context</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= HEALTH MODAL ================= -->
+    <div class="modal-overlay" id="healthModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>System Health</h2>
+                <button class="btn-icon" id="healthModalClose" aria-label="Close modal">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body" id="healthModalBody">
+                <div class="loading-spinner"></div>
+                <span>Checking system health...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= PROFILE MODAL ================= -->
+    <div class="modal-overlay" id="profileModal">
+        <div class="modal" style="max-width: 480px;">
+            <div class="modal-header">
+                <h2>Profile Settings</h2>
+                <button class="btn-icon" id="profileModalClose" aria-label="Close modal">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="profileError" class="auth-error-msg" style="margin-bottom: 12px; display: none;"></div>
+                <div id="profileSuccess" class="auth-success-msg" style="margin-bottom: 12px; display: none; color: var(--accent-emerald);"></div>
+                
+                <form id="profileForm" style="display: flex; flex-direction: column; gap: 16px;">
+                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                        <label style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Email Address (Read-only)</label>
+                        <input type="email" id="profileEmail" readonly style="background: rgba(0,0,0,0.25); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-muted); cursor: not-allowed; width: 100%; box-sizing: border-box;" />
+                    </div>
+                    
+                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                        <label for="profileFullName" style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Full Name</label>
+                        <input type="text" id="profileFullName" placeholder="Your display name" style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
+                    </div>
+
+                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                        <label for="profileInstitution" style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Institution / Organization</label>
+                        <input type="text" id="profileInstitution" placeholder="e.g. Stanford University" style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
+                    </div>
+
+                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                        <label for="profileRole" style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Academic Role</label>
+                        <select id="profileRole" style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box; font-family: inherit; font-size: 14px;">
+                            <option value="">Select your role...</option>
+                            <option value="Researcher">Researcher</option>
+                            <option value="Student">Student</option>
+                            <option value="Professor">Professor / Faculty</option>
+                            <option value="Developer">Software Engineer</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" id="saveProfileBtn" class="btn btn-primary" style="margin-top: 4px; padding: 12px; font-weight: 600;">Update Profile Details</button>
+                </form>
+
+                <div style="height: 1px; background: var(--glass-border); margin: 24px 0 16px 0;"></div>
+                
+                <form id="passwordForm" style="display: flex; flex-direction: column; gap: 16px;">
+                    <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">Change Password</h3>
+                    
+                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                        <label for="profilePassword" style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">New Password</label>
+                        <input type="password" id="profilePassword" placeholder="At least 6 characters" required style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
+                    </div>
+
+                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                        <label for="profileConfirmPassword" style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Confirm New Password</label>
+                        <input type="password" id="profileConfirmPassword" placeholder="Repeat password" required style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
+                    </div>
+
+                    <button type="submit" id="savePasswordBtn" class="btn btn-secondary" style="padding: 12px; font-weight: 600;">Update Password</button>
+                </form>
+            </div>
+        </div>
+    </div>
 
     <!-- ================= SOURCES PANEL ================= -->
     <div class="panel-resizer" id="panelResizer"></div>
@@ -307,8 +549,8 @@
             <h2>Sources & Evidence</h2>
             <button class="btn-icon sources-close" id="sourcesPanelClose" aria-label="Close sources panel">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
             </button>
         </div>
@@ -320,7 +562,8 @@
         <div class="study-guardrails-card dismissible-card" id="studyGuardrailsCard">
             <button class="card-dismiss-btn" onclick="this.parentElement.style.display='none'" title="Dismiss">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
             </button>
             <h3>Grounded Study Guardrails</h3>
@@ -341,9 +584,10 @@
         <div class="sources-content" id="sourcesContent">
             <div class="sources-tab-content active" id="tabChunks">
                 <div class="sources-empty">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                        <polyline points="14 2 14 8 20 8"/>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                        opacity="0.4">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
                     </svg>
                     <span>Send a query to see retrieved Supabase chunks</span>
                 </div>
@@ -366,8 +610,9 @@
             </div>
             <div class="sources-tab-content" id="tabVerification">
                 <div class="sources-empty">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                        opacity="0.4">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                     </svg>
                     <span>Verification results will appear here</span>
                 </div>
@@ -375,26 +620,51 @@
         </div>
     </aside>
 
-    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• HEALTH MODAL â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
-    <div class="modal-overlay" id="healthModal">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>System Health</h2>
-                <button class="btn-icon" id="healthModalClose" aria-label="Close modal">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                </button>
+    <!-- Auth Modal (Overlay) -->
+    <div id="auth-modal" class="auth-modal-overlay" style="display: none;">
+        <div class="auth-modal-content">
+            <button class="auth-close-btn" id="authCloseBtn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+            </button>
+            <div class="auth-tabs">
+                <button id="tab-signin" class="auth-tab active">Sign In</button>
+                <button id="tab-signup" class="auth-tab">Sign Up</button>
             </div>
-            <div class="modal-body" id="healthModalBody">
-                <div class="loading-spinner"></div>
-                <span>Checking system health...</span>
-            </div>
+            
+            <!-- Sign In Form -->
+            <form id="signin-form" class="auth-form">
+                <div class="form-group">
+                    <label for="signin-email">Email Address</label>
+                    <input type="email" id="signin-email" required placeholder="name@university.edu">
+                </div>
+                <div class="form-group">
+                    <label for="signin-password">Password</label>
+                    <input type="password" id="signin-password" required placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+                <div id="signin-error" class="auth-error-msg"></div>
+            </form>
+
+            <!-- Sign Up Form -->
+            <form id="signup-form" class="auth-form" style="display: none;">
+                <div class="form-group">
+                    <label for="signup-email">Email Address</label>
+                    <input type="email" id="signup-email" required placeholder="name@university.edu">
+                </div>
+                <div class="form-group">
+                    <label for="signup-password">Password</label>
+                    <input type="password" id="signup-password" required minlength="6" placeholder="At least 6 characters">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Create Account</button>
+                <div id="signup-error" class="auth-error-msg"></div>
+                <div id="signup-success" class="auth-success-msg"></div>
+            </form>
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=4.0.4"></script>
 </body>
-</html>
 
+</html>

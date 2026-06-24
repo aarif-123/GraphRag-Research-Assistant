@@ -37,6 +37,8 @@ const els = {
     topKValue: $('#topKValue'),
     minSim: $('#minSim'),
     minSimValue: $('#minSimValue'),
+    temperature: $('#temperature'),
+    temperatureValue: $('#temperatureValue'),
     modelSelect: $('#modelSelect'),
     verifyToggle: $('#verifyToggle'),
     groundedStudyToggle: $('#groundedStudyToggle'),
@@ -61,17 +63,40 @@ const els = {
     healthModal: $('#healthModal'),
     healthModalClose: $('#healthModalClose'),
     healthModalBody: $('#healthModalBody'),
+    settingsToggleBtn: $('#settingsToggleBtn'),
+    settingsModal: $('#settingsModal'),
+    settingsModalClose: $('#settingsModalClose'),
     clearHistoryBtn: $('#clearHistoryBtn'),
+    linkModal: $('#linkModal'),
+    linkModalClose: $('#linkModalClose'),
+    paperUrlInput: $('#paperUrlInput'),
+    submitPaperUrlBtn: $('#submitPaperUrlBtn'),
+    linkBtn: $('#linkBtn'),
+    profileModal: $('#profileModal'),
+    profileModalClose: $('#profileModalClose'),
+    profileSettingsBtn: $('#profileSettingsBtn'),
 };
 
 // INIT
 
 document.addEventListener('DOMContentLoaded', () => {
+    if (window.mermaid) {
+        try {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: 'dark',
+                securityLevel: 'loose',
+                suppressErrorAlerts: true
+            });
+        } catch (e) {
+            console.error('Failed to initialize Mermaid:', e);
+        }
+    }
+    loadSettingsFromLocalStorage();
     initEventListeners();
     checkHealth();
-    loadHistory();
+    initSupabase();
     renderAttachmentTray();
-    syncStudyGuardrails();
     els.queryInput.focus();
 });
 
@@ -124,7 +149,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function initEventListeners() {
     // Sidebar
-    els.sidebarToggle.addEventListener('click', toggleSidebar);
+    if (els.sidebarToggle) {
+        els.sidebarToggle.addEventListener('click', toggleSidebar);
+    }
     if (els.mobileMenuBtn) {
         els.mobileMenuBtn.addEventListener('click', () => {
             els.sidebar.classList.remove('collapsed');
@@ -132,26 +159,71 @@ function initEventListeners() {
     }
 
     // Settings
-    els.topK.addEventListener('input', () => {
-        els.topKValue.textContent = els.topK.value;
-    });
-    els.minSim.addEventListener('input', () => {
-        els.minSimValue.textContent = (els.minSim.value / 100).toFixed(2);
-    });
+    if (els.topK) {
+        els.topK.addEventListener('input', () => {
+            els.topKValue.textContent = els.topK.value;
+            saveSettingsToLocalStorage();
+        });
+    }
+    if (els.minSim) {
+        els.minSim.addEventListener('input', () => {
+            els.minSimValue.textContent = (els.minSim.value / 100).toFixed(2);
+            saveSettingsToLocalStorage();
+        });
+    }
+    if (els.temperature) {
+        els.temperature.addEventListener('input', () => {
+            els.temperatureValue.textContent = parseFloat(els.temperature.value).toFixed(1);
+            saveSettingsToLocalStorage();
+        });
+    }
+    if (els.verifyToggle) {
+        els.verifyToggle.addEventListener('change', () => {
+            saveSettingsToLocalStorage();
+        });
+    }
+    if (els.groundedStudyToggle) {
+        els.groundedStudyToggle.addEventListener('change', () => {
+            syncStudyGuardrails();
+            saveSettingsToLocalStorage();
+        });
+    }
+    if (els.modelSelect) {
+        els.modelSelect.addEventListener('change', () => {
+            saveSettingsToLocalStorage();
+        });
+    }
+
+    const resetSettingsBtn = document.getElementById('resetSettingsBtn');
+    if (resetSettingsBtn) {
+        resetSettingsBtn.addEventListener('click', resetSettingsToDefaults);
+    }
+
+    const historySearchInput = document.getElementById('historySearchInput');
+    if (historySearchInput) {
+        historySearchInput.addEventListener('input', () => {
+            renderHistory();
+        });
+    }
 
     // Input
-    els.queryInput.addEventListener('input', handleInputChange);
-    els.queryInput.addEventListener('keydown', handleInputKeydown);
-    els.sendBtn.addEventListener('click', sendQuery);
-    if (els.groundedStudyToggle) {
-        els.groundedStudyToggle.addEventListener('change', syncStudyGuardrails);
+    if (els.queryInput) {
+        els.queryInput.addEventListener('input', handleInputChange);
+        els.queryInput.addEventListener('keydown', handleInputKeydown);
+    }
+    if (els.sendBtn) {
+        els.sendBtn.addEventListener('click', sendQuery);
     }
 
     // Sources panel
-    els.sourcePanelToggle.addEventListener('click', toggleSourcesPanel);
-    els.sourcesPanelClose.addEventListener('click', () => {
-        setSourcesPanelOpen(false);
-    });
+    if (els.sourcePanelToggle) {
+        els.sourcePanelToggle.addEventListener('click', toggleSourcesPanel);
+    }
+    if (els.sourcesPanelClose) {
+        els.sourcesPanelClose.addEventListener('click', () => {
+            setSourcesPanelOpen(false);
+        });
+    }
 
     // Source tabs
     $$('.sources-tab').forEach(tab => {
@@ -159,13 +231,81 @@ function initEventListeners() {
     });
 
     // Health modal
-    els.healthBtn.addEventListener('click', showHealthModal);
-    els.healthModalClose.addEventListener('click', () => {
-        els.healthModal.classList.remove('visible');
-    });
-    els.healthModal.addEventListener('click', (e) => {
-        if (e.target === els.healthModal) els.healthModal.classList.remove('visible');
-    });
+    if (els.healthBtn) {
+        els.healthBtn.addEventListener('click', showHealthModal);
+    }
+    if (els.healthModalClose) {
+        els.healthModalClose.addEventListener('click', () => {
+            els.healthModal.classList.remove('visible');
+        });
+    }
+    if (els.healthModal) {
+        els.healthModal.addEventListener('click', (e) => {
+            if (e.target === els.healthModal) els.healthModal.classList.remove('visible');
+        });
+    }
+
+    // Settings modal
+    if (els.settingsToggleBtn) {
+        els.settingsToggleBtn.addEventListener('click', () => {
+            els.settingsModal.classList.add('visible');
+        });
+    }
+    if (els.settingsModalClose) {
+        els.settingsModalClose.addEventListener('click', () => {
+            els.settingsModal.classList.remove('visible');
+        });
+    }
+    if (els.settingsModal) {
+        els.settingsModal.addEventListener('click', (e) => {
+            if (e.target === els.settingsModal) els.settingsModal.classList.remove('visible');
+        });
+    }
+
+    // Link button directly on input bar
+    if (els.linkBtn) {
+        els.linkBtn.addEventListener('click', () => {
+            if (els.linkModal) {
+                els.linkModal.classList.add('visible');
+                setTimeout(() => els.paperUrlInput?.focus(), 100);
+            }
+        });
+    }
+
+    // Link modal
+    if (els.linkModalClose) {
+        els.linkModalClose.addEventListener('click', () => {
+            els.linkModal.classList.remove('visible');
+        });
+    }
+    if (els.linkModal) {
+        els.linkModal.addEventListener('click', (e) => {
+            if (e.target === els.linkModal) els.linkModal.classList.remove('visible');
+        });
+    }
+    if (els.submitPaperUrlBtn && els.paperUrlInput) {
+        const handleUrlSubmit = () => {
+            const url = els.paperUrlInput.value.trim();
+            if (!url) return;
+            // Append URL to query input
+            const currentVal = els.queryInput.value.trim();
+            els.queryInput.value = currentVal ? `${currentVal} ${url}` : url;
+            // Focus queryInput and trigger change
+            els.queryInput.focus();
+            handleInputChange();
+            // Close and clear modal
+            els.linkModal.classList.remove('visible');
+            els.paperUrlInput.value = '';
+        };
+
+        els.submitPaperUrlBtn.addEventListener('click', handleUrlSubmit);
+        els.paperUrlInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleUrlSubmit();
+            }
+        });
+    }
 
     // Welcome cards
     $$('.welcome-card').forEach(card => {
@@ -230,9 +370,23 @@ function initEventListeners() {
     });
 
     document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && state.attachMenuOpen) {
-            setAttachMenuOpen(false);
-            els.queryInput.focus();
+        if (event.key === 'Escape') {
+            if (state.attachMenuOpen) {
+                setAttachMenuOpen(false);
+                els.queryInput.focus();
+            }
+            if (els.settingsModal && els.settingsModal.classList.contains('visible')) {
+                els.settingsModal.classList.remove('visible');
+            }
+            if (els.healthModal && els.healthModal.classList.contains('visible')) {
+                els.healthModal.classList.remove('visible');
+            }
+            if (els.linkModal && els.linkModal.classList.contains('visible')) {
+                els.linkModal.classList.remove('visible');
+            }
+            if (els.profileModal && els.profileModal.classList.contains('visible')) {
+                els.profileModal.classList.remove('visible');
+            }
         }
     });
 
@@ -265,12 +419,229 @@ function initEventListeners() {
 
     // Clear History
     if (els.clearHistoryBtn) {
-        els.clearHistoryBtn.addEventListener('click', () => {
+        els.clearHistoryBtn.addEventListener('click', async () => {
             if (confirm('Clear all conversation history?')) {
-                state.conversations = [];
-                localStorage.removeItem('graphrag_history');
-                renderHistory();
+                try {
+                    const res = await fetch(`${API_BASE}/api/history`, {
+                        method: 'DELETE',
+                        headers: getAuthHeader()
+                    });
+                    if (res.ok) {
+                        state.conversations = [];
+                        startNewChat();
+                    }
+                } catch (e) {
+                    console.error("Error clearing history:", e);
+                }
             }
+        });
+    }
+
+    // User Profile Dropdown Toggle
+    const profileBtn = document.getElementById('userProfileBtn');
+    const dropdown = document.getElementById('userDropdown');
+    if (profileBtn && dropdown) {
+        profileBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+        });
+        
+        // Close dropdown on click outside
+        document.addEventListener('click', () => {
+            if (dropdown) dropdown.style.display = 'none';
+        });
+    }
+
+    // Profile Modal Event Listeners
+    if (els.profileSettingsBtn) {
+        els.profileSettingsBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (dropdown) dropdown.style.display = 'none';
+            
+            // Clear message alerts
+            const errorEl = document.getElementById('profileError');
+            const successEl = document.getElementById('profileSuccess');
+            if (errorEl) errorEl.style.display = 'none';
+            if (successEl) successEl.style.display = 'none';
+            
+            // Load user profile details
+            if (supabase) {
+                try {
+                    const { data: { user }, error } = await supabase.auth.getUser();
+                    if (error) throw error;
+                    if (user) {
+                        const emailInput = document.getElementById('profileEmail');
+                        const fullNameInput = document.getElementById('profileFullName');
+                        const institutionInput = document.getElementById('profileInstitution');
+                        const roleSelect = document.getElementById('profileRole');
+                        
+                        if (emailInput) emailInput.value = user.email || '';
+                        
+                        const meta = user.user_metadata || {};
+                        if (fullNameInput) fullNameInput.value = meta.full_name || '';
+                        if (institutionInput) institutionInput.value = meta.institution || '';
+                        if (roleSelect) roleSelect.value = meta.role || '';
+                        
+                        els.profileModal.classList.add('visible');
+                    }
+                } catch (err) {
+                    console.error("Failed to fetch profile details:", err);
+                    alert("Error loading profile: " + err.message);
+                }
+            }
+        });
+    }
+
+    if (els.profileModalClose) {
+        els.profileModalClose.addEventListener('click', () => {
+            els.profileModal.classList.remove('visible');
+        });
+    }
+
+    if (els.profileModal) {
+        els.profileModal.addEventListener('click', (e) => {
+            if (e.target === els.profileModal) {
+                els.profileModal.classList.remove('visible');
+            }
+        });
+    }
+
+    const profileForm = document.getElementById('profileForm');
+    if (profileForm) {
+        profileForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorEl = document.getElementById('profileError');
+            const successEl = document.getElementById('profileSuccess');
+            const submitBtn = document.getElementById('saveProfileBtn');
+            
+            if (errorEl) errorEl.style.display = 'none';
+            if (successEl) successEl.style.display = 'none';
+            
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Saving Profile...';
+            }
+            
+            const fullName = document.getElementById('profileFullName')?.value.trim();
+            const institution = document.getElementById('profileInstitution')?.value.trim();
+            const role = document.getElementById('profileRole')?.value;
+            
+            if (supabase) {
+                try {
+                    const { data, error } = await supabase.auth.updateUser({
+                        data: {
+                            full_name: fullName,
+                            institution: institution,
+                            role: role
+                        }
+                    });
+                    
+                    if (error) throw error;
+                    
+                    if (successEl) {
+                        successEl.textContent = 'Profile details updated successfully!';
+                        successEl.style.display = 'block';
+                    }
+                    
+                    updateUserUI(data.user);
+                } catch (err) {
+                    console.error("Profile update error:", err);
+                    if (errorEl) {
+                        errorEl.textContent = err.message || 'An error occurred during update.';
+                        errorEl.style.display = 'block';
+                    }
+                } finally {
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Update Profile Details';
+                    }
+                }
+            }
+        });
+    }
+
+    const passwordForm = document.getElementById('passwordForm');
+    if (passwordForm) {
+        passwordForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorEl = document.getElementById('profileError');
+            const successEl = document.getElementById('profileSuccess');
+            const submitBtn = document.getElementById('savePasswordBtn');
+            
+            if (errorEl) errorEl.style.display = 'none';
+            if (successEl) successEl.style.display = 'none';
+            
+            const password = document.getElementById('profilePassword')?.value;
+            const confirmPassword = document.getElementById('profileConfirmPassword')?.value;
+            
+            if (password.length < 6) {
+                if (errorEl) {
+                    errorEl.textContent = 'Password must be at least 6 characters long.';
+                    errorEl.style.display = 'block';
+                }
+                return;
+            }
+            
+            if (password !== confirmPassword) {
+                if (errorEl) {
+                    errorEl.textContent = 'Passwords do not match.';
+                    errorEl.style.display = 'block';
+                }
+                return;
+            }
+            
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Updating Password...';
+            }
+            
+            if (supabase) {
+                try {
+                    const { error } = await supabase.auth.updateUser({
+                        password: password
+                    });
+                    
+                    if (error) throw error;
+                    
+                    if (successEl) {
+                        successEl.textContent = 'Password updated successfully!';
+                        successEl.style.display = 'block';
+                    }
+                    
+                    passwordForm.reset();
+                } catch (err) {
+                    console.error("Password update error:", err);
+                    if (errorEl) {
+                        errorEl.textContent = err.message || 'Failed to update password.';
+                        errorEl.style.display = 'block';
+                    }
+                } finally {
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Update Password';
+                    }
+                }
+            }
+        });
+    }
+
+    // Logout Action
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async () => {
+            if (supabase) {
+                await supabase.auth.signOut();
+                localStorage.removeItem('aether_token');
+                window.location.href = '/';
+            }
+        });
+    }
+
+    // New Chat Action
+    const newChatBtn = document.getElementById('newChatBtn');
+    if (newChatBtn) {
+        newChatBtn.addEventListener('click', () => {
+            startNewChat();
         });
     }
 }
@@ -322,6 +693,12 @@ function handleAttachAction(action) {
             break;
         case 'pdf':
             els.pdfFileInput?.click();
+            break;
+        case 'paste-link':
+            if (els.linkModal) {
+                els.linkModal.classList.add('visible');
+                setTimeout(() => els.paperUrlInput?.focus(), 100);
+            }
             break;
         case 'video':
             els.videoFileInput?.click();
@@ -712,19 +1089,127 @@ function updateSourcesPanel(data) {
 
     // Papers
     const paperList = document.getElementById('tabPapers');
-    paperList.innerHTML = data.papers && data.papers.length > 0
-        ? data.papers.map(p => `
-            <div class="source-card paper">
-                <div class="card-title">${escapeHtml(p.title)}</div>
-                <div class="card-meta">
-                    <span>${escapeHtml(p.author)}</span>
-                    <span>${p.year}</span>
-                    <span class="domain-tag">${escapeHtml(p.domain)}</span>
+    let papersHtml = '';
+
+    const dbPapers = data.papers || [];
+    const arxivPapers = data.arxiv_papers || [];
+
+    if (dbPapers.length === 0 && arxivPapers.length === 0) {
+        papersHtml = '<div class="sources-empty">No papers identified.</div>';
+    } else {
+        if (arxivPapers.length > 0) {
+            papersHtml += `<div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--accent-cyan); margin: 10px 0; letter-spacing: 0.5px;">Live arXiv References</div>`;
+            papersHtml += arxivPapers.map(p => {
+                const upvotesHtml = p.hf_upvotes ? `
+                    <span class="domain-tag" style="background: rgba(236, 72, 153, 0.15); color: #f472b6; display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(236, 72, 153, 0.25);">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                        ${p.hf_upvotes}
+                    </span>
+                ` : '';
+
+                const reposHtml = p.code_repos && p.code_repos.length > 0 ? `
+                    <div style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                        <span style="font-size: 11px; color: var(--text-tertiary);">Code:</span>
+                        ${p.code_repos.map(repo => `
+                            <a href="${repo.url}" target="_blank" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--surface-glass-border); color: var(--text-primary); padding: 3px 8px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="repo-badge">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                                ${escapeHtml(repo.name)} ${repo.stars ? `★${repo.stars.toLocaleString()}` : ''}
+                            </a>
+                        `).join('')}
+                    </div>
+                ` : '';
+
+                const datasetsHtml = p.datasets && p.datasets.length > 0 ? `
+                    <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                        <span style="font-size: 11px; color: var(--text-tertiary);">Datasets:</span>
+                        ${p.datasets.map(ds => `
+                            <a href="${ds.url}" target="_blank" style="background: rgba(34, 211, 238, 0.05); border: 1px solid rgba(34, 211, 238, 0.2); color: var(--accent-cyan); padding: 2px 6px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="dataset-badge">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z"/><path d="M2 7c0 2.76 4.477 5 10 5s10-2.24 10-5"/><path d="M2 12c0 2.76 4.477 5 10 5s10-2.24 10-5"/></svg>
+                                ${escapeHtml(ds.name)}
+                            </a>
+                        `).join('')}
+                    </div>
+                ` : '';
+
+                const modelsHtml = p.linked_models && p.linked_models.length > 0 ? `
+                    <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                        <span style="font-size: 11px; color: var(--text-tertiary);">HF Models:</span>
+                        ${p.linked_models.slice(0, 3).map(m => `
+                            <a href="${m.url}" target="_blank" style="background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.2); color: var(--primary-light); padding: 2px 6px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="model-badge">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+                                ${escapeHtml(m.id.split('/').pop())}
+                            </a>
+                        `).join('')}
+                        ${p.linked_models.length > 3 ? `<span style="font-size: 10px; color: var(--text-tertiary);">+${p.linked_models.length - 3} more</span>` : ''}
+                    </div>
+                ` : '';
+
+                const spacesHtml = p.linked_spaces && p.linked_spaces.length > 0 ? `
+                    <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                        <span style="font-size: 11px; color: var(--text-tertiary);">Spaces:</span>
+                        ${p.linked_spaces.slice(0, 3).map(s => `
+                            <a href="${s.url}" target="_blank" style="background: rgba(236, 72, 153, 0.05); border: 1px solid rgba(236, 72, 153, 0.2); color: #f472b6; padding: 2px 6px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="space-badge">
+                                <span>${escapeHtml(s.emoji)}</span>
+                                ${escapeHtml(s.id.split('/').pop())}
+                            </a>
+                        `).join('')}
+                        ${p.linked_spaces.length > 3 ? `<span style="font-size: 10px; color: var(--text-tertiary);">+${p.linked_spaces.length - 3} more</span>` : ''}
+                    </div>
+                ` : '';
+
+                return `
+                    <div class="source-card paper">
+                        <div class="card-title">${escapeHtml(p.title)}</div>
+                        <div class="card-meta">
+                            <span>${escapeHtml(Array.isArray(p.authors) ? p.authors.join(', ') : (p.author || p.authors || 'Unknown'))}</span>
+                            <span>${p.year}</span>
+                            <span class="domain-tag" style="background: rgba(239, 68, 68, 0.15); color: #f87171;">arXiv</span>
+                            ${upvotesHtml}
+                        </div>
+                        <div class="card-abstract">${escapeHtml((p.abstract || '').substring(0, 150))}...</div>
+                        
+                        ${reposHtml}
+                        ${datasetsHtml}
+                        ${modelsHtml}
+                        ${spacesHtml}
+                        
+                        <div style="display: flex; gap: 8px; margin-top: 12px; border-top: 1px solid var(--surface-glass-border); padding-top: 12px;">
+                            <a href="${p.url}" target="_blank" style="background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); color: var(--accent-cyan); padding: 5px 10px; border-radius: 6px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(34, 211, 238, 0.2)'" onmouseout="this.style.background='rgba(34, 211, 238, 0.1)'">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                Abstract
+                            </a>
+                            <a href="${p.pdf_url}" target="_blank" style="background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.3); color: var(--accent-emerald); padding: 5px 10px; border-radius: 6px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(52, 211, 153, 0.2)'" onmouseout="this.style.background='rgba(52, 211, 153, 0.1)'">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                                PDF Document
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        if (dbPapers.length > 0) {
+            papersHtml += `<div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--primary-light); margin: 20px 0 10px 0; letter-spacing: 0.5px;">Graph Database Papers</div>`;
+            papersHtml += dbPapers.map(p => `
+                <div class="source-card paper">
+                    <div class="card-title">${escapeHtml(p.title)}</div>
+                    <div class="card-meta">
+                        <span>${escapeHtml(Array.isArray(p.authors) ? p.authors.join(', ') : (p.author || p.authors || 'Unknown'))}</span>
+                        <span>${p.year}</span>
+                        <span class="domain-tag">${escapeHtml(p.domain || 'General')}</span>
+                    </div>
+                    <div class="card-abstract">${escapeHtml((p.abstract || '').substring(0, 150))}...</div>
+                    <div style="display: flex; gap: 8px; margin-top: 12px;">
+                        <a href="https://scholar.google.com/scholar?q=${encodeURIComponent(p.title)}" target="_blank" style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); color: var(--primary-light); padding: 5px 10px; border-radius: 6px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(99, 102, 241, 0.2)'" onmouseout="this.style.background='rgba(99, 102, 241, 0.1)'">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            Google Scholar
+                        </a>
+                    </div>
                 </div>
-                <div class="card-abstract">${escapeHtml((p.abstract || '').substring(0, 150))}...</div>
-            </div>
-        `).join('')
-        : '<div class="sources-empty">No papers identified.</div>';
+            `).join('');
+        }
+    }
+    paperList.innerHTML = papersHtml;
 
     // Graph View
     if (data.papers) {
@@ -756,6 +1241,11 @@ function updateSourcesPanel(data) {
     } else {
         verifTab.innerHTML = '<div class="sources-empty">No verification data available.</div>';
     }
+
+    const elementsToTypeset = [];
+    if (chunkList) elementsToTypeset.push(chunkList);
+    if (verifTab) elementsToTypeset.push(verifTab);
+    typesetMath(elementsToTypeset);
 }
 
 // Smart Highlighting Logic
@@ -814,9 +1304,14 @@ function setSourcesLoading() {
 // -------------------------------------------------------------------------
 
 function handleInputChange() {
+    if (!els.queryInput) return;
     const val = els.queryInput.value;
-    els.charCount.textContent = `${val.length}/2000`;
-    els.sendBtn.disabled = val.trim().length === 0 || state.isLoading;
+    if (els.charCount) {
+        els.charCount.textContent = `${val.length}/2000`;
+    }
+    if (els.sendBtn) {
+        els.sendBtn.disabled = val.trim().length === 0 || state.isLoading;
+    }
 
     // Auto resize
     els.queryInput.style.height = 'auto';
@@ -826,7 +1321,7 @@ function handleInputChange() {
 function handleInputKeydown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        if (!els.sendBtn.disabled) sendQuery();
+        if (els.sendBtn && !els.sendBtn.disabled) sendQuery();
     }
 }
 
@@ -881,14 +1376,16 @@ async function sendQuery() {
         const requestData = {
             top_k: els.topK ? parseInt(els.topK.value) : 5,
             min_similarity: els.minSim ? parseFloat(els.minSim.value) / 100 : 0.1,
+            temperature: els.temperature ? parseFloat(els.temperature.value) : 0.0,
             use_heavy: els.modelSelect ? els.modelSelect.value === 'heavy' : false,
             verify: els.verifyToggle ? els.verifyToggle.checked : true,
         };
 
         if (useChat) {
+            const cleanMessages = state.messages.map(m => ({ role: m.role, content: m.content }));
             data = await apiCall('/api/chat', {
                 ...requestData,
-                messages: state.messages,
+                messages: cleanMessages,
             });
         } else {
             data = await apiCall('/api/research', {
@@ -906,7 +1403,7 @@ async function sendQuery() {
         removeMessage(loadingId);
 
         // Add assistant message
-        state.messages.push({ role: 'assistant', content: data.answer });
+        state.messages.push({ role: 'assistant', content: data.answer, data: data });
         const assistantMsgId = addAssistantMessage(data);
         state.messageData.set(assistantMsgId, data);
 
@@ -939,11 +1436,21 @@ async function sendQuery() {
 // API CALL
 // -------------------------------------------------------------------------
 
-async function apiCall(endpoint, body) {
+function getAuthHeader() {
+    const token = localStorage.getItem('aether_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
+async function apiCall(endpoint, body, method = 'POST') {
+    const headers = { 
+        'Content-Type': 'application/json',
+        ...getAuthHeader()
+    };
+    
     const res = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        method: method,
+        headers: headers,
+        body: body ? JSON.stringify(body) : undefined,
     });
 
     if (!res.ok) {
@@ -993,10 +1500,19 @@ function addMessage(role, content, opts = {}) {
 
     els.chatMessages.appendChild(div);
     scrollToBottom();
+
+    if (!opts.isError) {
+        const contentDiv = div.querySelector('.message-content');
+        if (contentDiv) {
+            typesetMath([contentDiv]);
+            postProcessResponse(contentDiv);
+        }
+    }
+
     return id;
 }
 
-function addAssistantMessage(data) {
+function addAssistantMessage(data, stream = true) {
     const id = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const div = document.createElement('div');
     div.className = 'message assistant';
@@ -1128,28 +1644,37 @@ function addAssistantMessage(data) {
     const contentDiv = div.querySelector('.message-content');
     const footerDiv = div.querySelector('.message-footer');
 
-    // Simulate Live Word-by-Word Streaming
     const textRaw = data.answer || '';
-    let currIdx = 0;
 
-    const streamInterval = setInterval(() => {
-        // stream up to 5 chars at randomly variable speeds to look human-like native SSE
-        currIdx += Math.floor(Math.random() * 5) + 3;
-        if (currIdx >= textRaw.length) {
-            currIdx = textRaw.length;
-            clearInterval(streamInterval);
-            footerDiv.style.opacity = "1"; // Show stats smoothly at the end
-        }
+    if (!stream) {
+        contentDiv.innerHTML = formatMarkdown(textRaw);
+        typesetMath([contentDiv]);
+        postProcessResponse(contentDiv);
+        footerDiv.style.opacity = '1';
+    } else {
+        let currIdx = 0;
+        const streamInterval = setInterval(() => {
+            currIdx += Math.floor(Math.random() * 5) + 3;
+            const finished = currIdx >= textRaw.length;
+            if (finished) {
+                currIdx = textRaw.length;
+                clearInterval(streamInterval);
+            }
 
-        contentDiv.innerHTML = formatMarkdown(textRaw.substring(0, currIdx));
+            contentDiv.innerHTML = formatMarkdown(textRaw.substring(0, currIdx));
 
-        // Auto scroll only if we're near bottom
-        if (els.chatContainer.scrollHeight - els.chatContainer.scrollTop - els.chatContainer.clientHeight < 150) {
-            scrollToBottom();
-        }
-    }, 12);
+            if (finished) {
+                footerDiv.style.opacity = '1';
+                typesetMath([contentDiv]);
+                postProcessResponse(contentDiv);
+            }
 
-    // Auto scroll only if we're near bottom initially
+            if (els.chatContainer.scrollHeight - els.chatContainer.scrollTop - els.chatContainer.clientHeight < 150) {
+                scrollToBottom();
+            }
+        }, 12);
+    }
+
     scrollToBottom();
     return id;
 }
@@ -1189,16 +1714,18 @@ function scrollToBottom() {
     });
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• MARKDOWN & KATEX â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+
+/* ═══════════════════════════ MARKDOWN & KATEX ═══════════════════════════ */
+
 function formatMarkdown(text) {
     if (!text) return '';
-    text = text.replace(/\[(\d+)\]/g, '<span class="citation">[$1]</span>');
+    text = text.replace(/\[(\d+)\](?!\()/g, '<span class="citation">[$1]</span>');
 
     // Handle v4.0 specific tags if any
-    text = text.replace(/ã€(.*?)ã€‘/g, '<span class="source-tag">$1</span>');
+    text = text.replace(/【(.*?)】/g, '<span class="source-tag">$1</span>');
 
-    // â”€â”€ BEAUTIFY SQUISHED BACKEND LISTS â”€â”€
-    // Convert squished ' â€¢ ' bullet points into proper Markdown lists with spacing
+    // ── BEAUTIFY SQUISHED BACKEND LISTS ──
+    // Convert squished ' • ' bullet points into proper Markdown lists with spacing
     // ── BEAUTIFY SQUISHED BACKEND LISTS ──
     // 1. Convert bullet points (\u2022) into standard Markdown bullets (-)
     text = text.replace(/\u2022/g, '-');
@@ -1211,8 +1738,8 @@ function formatMarkdown(text) {
 
     // 4. Bold specific paper titles and format metadata (Year, Author, Citations)
     // Case A: Full format "- Title (YYYY) — Author"
-    text = text.replace(/-\s+([^\n]+?)\s+\((\d{4})\)\s*(â€”|-|â€“)\s*([^\n]+)/g, '- **$1** <span class="paper-year">($2)</span> &mdash; <span class="paper-author">$4</span>');
-    
+    text = text.replace(/-\s+([^\n]+?)\s+\((\d{4})\)\s*(—|-|–)\s*([^\n]+)/g, '- **$1** <span class="paper-year">($2)</span> &mdash; <span class="paper-author">$4</span>');
+
     // Case B: Compact format "- Title (YYYY) [Citation]" as seen in surveys
     text = text.replace(/-\s+([^\n]+?)\s+\((\d{4})\)\s*(\[\d+\]|\[N\])/g, '- **$1** <span class="paper-year">($2)</span> $3');
 
@@ -1220,21 +1747,39 @@ function formatMarkdown(text) {
     const mathBlocks = [];
     let processedText = text;
 
-    // Display math $$ ... $$
-    processedText = processedText.replace(/\$\$(.+?)\$\$/gs, (match, p1) => {
-        const id = `__MATH_DISPLAY_${mathBlocks.length}__`;
-        try {
-            mathBlocks.push({ id, html: katex.renderToString(p1, { displayMode: true, throwOnError: false }) });
-        } catch (e) { mathBlocks.push({ id, html: p1 }); }
+    // A. Display math: \begin{equation} ... \end{equation} (and other environments)
+    processedText = processedText.replace(/\\begin\{([a-zA-Z\*]+)\}([\s\S]*?)\\end\{\1\}/g, (match) => {
+        const id = `MATHDISPLAYPLACEHOLDER${mathBlocks.length}`;
+        mathBlocks.push({ id, raw: match });
         return id;
     });
 
-    // Inline math $ ... $
-    processedText = processedText.replace(/\$(.+?)\$/g, (match, p1) => {
-        const id = `__MATH_INLINE_${mathBlocks.length}__`;
-        try {
-            mathBlocks.push({ id, html: katex.renderToString(p1, { displayMode: false, throwOnError: false }) });
-        } catch (e) { mathBlocks.push({ id, html: p1 }); }
+    // B. Display math: \[ ... \]
+    processedText = processedText.replace(/\\\[([\s\S]*?)\\\]/g, (match) => {
+        const id = `MATHDISPLAYPLACEHOLDER${mathBlocks.length}`;
+        mathBlocks.push({ id, raw: match });
+        return id;
+    });
+
+    // C. Display math: $$ ... $$
+    processedText = processedText.replace(/\$\$([\s\S]*?)\$\$/g, (match) => {
+        const id = `MATHDISPLAYPLACEHOLDER${mathBlocks.length}`;
+        mathBlocks.push({ id, raw: match });
+        return id;
+    });
+
+    // D. Inline math: \( ... \)
+    processedText = processedText.replace(/\\\(([\s\S]*?)\\\)/g, (match) => {
+        const id = `MATHINLINEPLACEHOLDER${mathBlocks.length}`;
+        mathBlocks.push({ id, raw: match });
+        return id;
+    });
+
+    // E. Inline math: $ ... $ (avoiding currency matches like $50)
+    processedText = processedText.replace(/\$([^\$\s](?:[^\$]*?[^\$\s])?)\$/g, (match, p1) => {
+        if (p1.includes('\n')) return match;
+        const id = `MATHINLINEPLACEHOLDER${mathBlocks.length}`;
+        mathBlocks.push({ id, raw: match });
         return id;
     });
 
@@ -1245,9 +1790,9 @@ function formatMarkdown(text) {
         processedText = processedText.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>');
     }
 
-    // 3. Re-inject rendered Math
+    // 3. Re-inject raw Math for MathJax
     mathBlocks.forEach(block => {
-        processedText = processedText.replace(block.id, block.html);
+        processedText = processedText.replace(block.id, () => block.raw);
     });
 
     return processedText;
@@ -1255,7 +1800,7 @@ function formatMarkdown(text) {
 
 function updatePipelineStep(step) {
     if (els.pipelineStep) {
-        els.pipelineStep.textContent = step ? `â€¢ ${step}` : '';
+        els.pipelineStep.textContent = step ? `• ${step}` : '';
         els.pipelineStep.style.opacity = step ? '1' : '0';
     }
 }
@@ -1266,6 +1811,335 @@ function escapeHtml(str) {
     div.textContent = str;
     return div.innerHTML;
 }
+
+// Robust MathJax Typesetting Helper
+function typesetMath(elements) {
+    if (!elements || elements.length === 0) return;
+
+    const runTypeset = () => {
+        if (window.MathJax && window.MathJax.typesetPromise) {
+            window.MathJax.typesetPromise(elements).catch(err => console.warn('MathJax typesetting error:', err));
+        }
+    };
+
+    if (window.MathJax && window.MathJax.typesetPromise) {
+        runTypeset();
+    } else {
+        const script = document.getElementById('MathJax-script');
+        if (script) {
+            script.addEventListener('load', () => {
+                if (window.MathJax && window.MathJax.startup && window.MathJax.startup.promise) {
+                    window.MathJax.startup.promise.then(runTypeset);
+                } else {
+                    runTypeset();
+                }
+            }, { once: true });
+        }
+    }
+}
+
+
+// Helper to escape HTML characters for safe raw code fallback display
+function escapeHtml(str) {
+    if (!str) return '';
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+// Automatic Mermaid flowchart syntax sanitizer/healer
+function sanitizeMermaidCode(code) {
+    if (!code) return '';
+    
+    let lines = code.split('\n');
+    let processedLines = [];
+    
+    // Improved connection regex to handle spaces around pipe labels and -- text -->, etc.
+    const connectionRegex = /(\s*(?:-->|==>|-\.->)\s*\|[^|]+\|\s*|\s*--\s*[^-]+?\s*-->\s*|\s*==\s*[^=]+?\s*==>\s*|\s*-\.\s*[^\.]+\s*\.-\s*>\s*|-->|---|==>|-\.-|-.->|->)/;
+    
+    const wrapLabel = (label) => {
+        let clean = label.trim();
+        // If it starts and ends with double quotes, strip them first to escape inner quotes properly
+        if (clean.startsWith('"') && clean.endsWith('"')) {
+            let inner = clean.substring(1, clean.length - 1);
+            inner = inner.replace(/\\"/g, '"').replace(/"/g, '\\"');
+            return `"${inner}"`;
+        }
+        // Escape double quotes inside the label
+        clean = clean.replace(/\\"/g, '"').replace(/"/g, '\\"');
+        return `"${clean}"`;
+    };
+    
+    const sanitizeNodePart = (part) => {
+        let p = part.trim();
+        if (!p) return '';
+        
+        // Stadium: id([label])
+        let stadiumMatch = p.match(/^([^\[\(\{\>"]+)\(\[(.+)\]\)$/);
+        if (stadiumMatch) {
+            return `${stadiumMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}([${wrapLabel(stadiumMatch[2])}])`;
+        }
+        
+        // Database: id[(label)]
+        let dbMatch = p.match(/^([^\[\(\{\>"]+)\[\((.+)\)\]$/);
+        if (dbMatch) {
+            return `${dbMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}[(${wrapLabel(dbMatch[2])})]`;
+        }
+        
+        // Circle: id((label))
+        let circleMatch = p.match(/^([^\[\(\{\>"]+)\(\((.+)\)\)$/);
+        if (circleMatch) {
+            return `${circleMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}((${wrapLabel(circleMatch[2])}))`;
+        }
+        
+        // Hexagon: id{{label}}
+        let hexMatch = p.match(/^([^\[\(\{\>"]+)\{\{(.+)\}\}$/);
+        if (hexMatch) {
+            return `${hexMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}{{${wrapLabel(hexMatch[2])}}}`;
+        }
+        
+        // Subroutine: id[[label]]
+        let subMatch = p.match(/^([^\[\(\{\>"]+)\[\[(.+)\]\]$/);
+        if (subMatch) {
+            return `${subMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}[[${wrapLabel(subMatch[2])}]]`;
+        }
+        
+        // Parallelogram: id[/label/] or id[\label\]
+        let paraMatch1 = p.match(/^([^\[\(\{\>"]+)\[\/(.+)\/\]$/);
+        if (paraMatch1) {
+            return `${paraMatch1[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}[/${wrapLabel(paraMatch1[2])}/]`;
+        }
+        let paraMatch2 = p.match(/^([^\[\(\{\>"]+)\[\\(.+)\\\]$/);
+        if (paraMatch2) {
+            return `${paraMatch2[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}[\\${wrapLabel(paraMatch2[2])}\\]`;
+        }
+        
+        // Rounded edges: id(label)
+        let singleRoundMatch = p.match(/^([^\[\(\{\>"]+)\((.+)\)$/);
+        if (singleRoundMatch) {
+            return `${singleRoundMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}(${wrapLabel(singleRoundMatch[2])})`;
+        }
+        
+        // Rectangle: id[label]
+        let rectMatch = p.match(/^([^\[\(\{\>"]+)\[(.+)\]$/);
+        if (rectMatch) {
+            return `${rectMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}[${wrapLabel(rectMatch[2])}]`;
+        }
+        
+        // Diamond: id{label}
+        let diamondMatch = p.match(/^([^\[\(\{\>"]+)\{(.+)\}$/);
+        if (diamondMatch) {
+            return `${diamondMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}{${wrapLabel(diamondMatch[2])}}`;
+        }
+        
+        // Asymmetric: id>label]
+        let asymMatch = p.match(/^([^\[\(\{\>"]+)>(.+)\]$/);
+        if (asymMatch) {
+            return `${asymMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}>${wrapLabel(asymMatch[2])}]`;
+        }
+        
+        // No shape found. It's just a raw node ID.
+        // Replace invalid characters with underscores
+        return p.replace(/[^a-zA-Z0-9_-]/g, '_');
+    };
+    
+    let isFlowchart = false;
+    for (let line of lines) {
+        let trimmed = line.trim();
+        if (/^(graph|flowchart)/i.test(trimmed)) {
+            isFlowchart = true;
+            break;
+        }
+    }
+    
+    if (!isFlowchart) {
+        return code;
+    }
+    
+    for (let line of lines) {
+        let trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('%%')) {
+            processedLines.push(line);
+            continue;
+        }
+        
+        // Skip header definitions
+        if (/^(graph|flowchart)/i.test(trimmed)) {
+            processedLines.push(line);
+            continue;
+        }
+        
+        // Subgraph start/end
+        if (trimmed.toLowerCase().startsWith('subgraph ')) {
+            let content = trimmed.substring(9).trim();
+            let shapeMatch = content.match(/^([^\[\(\{\>"]+)([\(\[\{>"].*)$/);
+            if (shapeMatch) {
+                let id = shapeMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+                let label = shapeMatch[2].trim();
+                processedLines.push(`subgraph ${id} ${label}`);
+            } else {
+                processedLines.push(`subgraph ${content.replace(/[^a-zA-Z0-9_-]/g, '_')}`);
+            }
+            continue;
+        }
+        if (trimmed.toLowerCase() === 'end') {
+            processedLines.push(line);
+            continue;
+        }
+        
+        // Style or click directives
+        if (trimmed.toLowerCase().startsWith('style ') || trimmed.toLowerCase().startsWith('click ') || trimmed.toLowerCase().startsWith('classdef ') || trimmed.toLowerCase().startsWith('class ')) {
+            processedLines.push(line);
+            continue;
+        }
+        
+        // Process standard line with potential connections
+        let parts = line.split(connectionRegex);
+        let processedParts = [];
+        for (let i = 0; i < parts.length; i++) {
+            if (i % 2 === 0) {
+                // Node part
+                processedParts.push(sanitizeNodePart(parts[i]));
+            } else {
+                // Connection part
+                processedParts.push(parts[i]);
+            }
+        }
+        
+        processedLines.push(processedParts.join(' '));
+    }
+    
+    return processedLines.join('\n');
+}
+
+// Post-processes HTML inside messages to render callout blocks and Mermaid diagrams
+async function postProcessResponse(container) {
+    if (!container) return;
+
+    // 1. Process GitHub-style alerts in blockquotes (e.g. [!NOTE], [!WARNING], etc.)
+    const blockquotes = container.querySelectorAll('blockquote');
+    blockquotes.forEach(bq => {
+        const html = bq.innerHTML;
+        if (html.includes('[!NOTE]') || html.includes('[!IMPORTANT]') || html.includes('[!WARNING]') || html.includes('[!TIP]') || html.includes('[!CAUTION]')) {
+            let type = 'note';
+            let title = 'Note';
+            
+            if (html.includes('[!IMPORTANT]')) { type = 'important'; title = 'Important'; }
+            else if (html.includes('[!WARNING]')) { type = 'warning'; title = 'Warning'; }
+            else if (html.includes('[!TIP]')) { type = 'tip'; title = 'Tip'; }
+            else if (html.includes('[!CAUTION]')) { type = 'caution'; title = 'Caution'; }
+            
+            const cleanHtml = html
+                .replace(/\[!(NOTE|IMPORTANT|WARNING|TIP|CAUTION)\]/g, '')
+                .replace(/^<p>\s*<br>/, '<p>')
+                .replace(/^<p>\s*/, '<p>');
+                
+            const div = document.createElement('div');
+            div.className = `callout ${type}`;
+            
+            let colorVar = 'var(--accent-cyan)';
+            if (type === 'important') colorVar = 'var(--accent-purple)';
+            else if (type === 'tip') colorVar = 'var(--accent-emerald)';
+            else if (type === 'warning') colorVar = 'var(--accent-amber)';
+            else if (type === 'caution') colorVar = 'var(--accent-red)';
+            
+            div.innerHTML = `<div class="callout-title" style="font-weight: 700; margin-bottom: 4px; color: ${colorVar}">${title}</div>${cleanHtml}`;
+            bq.replaceWith(div);
+        }
+    });
+
+    // 2. Render Mermaid diagrams
+    if (window.mermaid) {
+        const mermaidCodes = container.querySelectorAll('pre code.language-mermaid');
+        if (mermaidCodes.length > 0) {
+            for (let i = 0; i < mermaidCodes.length; i++) {
+                const codeEl = mermaidCodes[i];
+                const preEl = codeEl.parentElement;
+                const codeText = codeEl.textContent.trim();
+                
+                const wrapper = document.createElement('div');
+                wrapper.className = 'mermaid-container';
+                wrapper.style.margin = '16px 0';
+                wrapper.style.padding = '12px';
+                wrapper.style.background = 'rgba(15, 23, 42, 0.6)';
+                wrapper.style.border = '1px solid var(--glass-border)';
+                wrapper.style.borderRadius = 'var(--radius-md)';
+                wrapper.style.overflowX = 'auto';
+                wrapper.style.display = 'flex';
+                wrapper.style.flexDirection = 'column';
+                wrapper.style.alignItems = 'center';
+                
+                let renderSuccess = false;
+                let svgContent = '';
+                const uniqueId = `mermaid-chart-${Date.now()}-${i}-${Math.floor(Math.random() * 1000)}`;
+                
+                // Try rendering original first
+                try {
+                    // Pre-validate original syntax to prevent Mermaid rendering its default error box
+                    await mermaid.parse(codeText);
+                    
+                    const { svg } = await mermaid.render(uniqueId, codeText);
+                    svgContent = svg;
+                    renderSuccess = true;
+                } catch (err) {
+                    console.warn('Mermaid rendering original failed, trying sanitized version...', err);
+                    
+                    // Clean up bad elements created by mermaid error handler
+                    const badEl = document.getElementById(uniqueId);
+                    if (badEl) badEl.remove();
+                    const badElBind = document.getElementById(`d${uniqueId}`);
+                    if (badElBind) badElBind.remove();
+                    
+                    try {
+                        const sanitizedCode = sanitizeMermaidCode(codeText);
+                        // Validate sanitized syntax
+                        await mermaid.parse(sanitizedCode);
+                        
+                        const { svg } = await mermaid.render(uniqueId, sanitizedCode);
+                        svgContent = svg;
+                        renderSuccess = true;
+                    } catch (err2) {
+                        console.error('Mermaid rendering sanitized version also failed:', err2);
+                        const badEl2 = document.getElementById(uniqueId);
+                        if (badEl2) badEl2.remove();
+                        const badEl2Bind = document.getElementById(`d${uniqueId}`);
+                        if (badEl2Bind) badEl2Bind.remove();
+                    }
+                }
+                
+                if (renderSuccess) {
+                    wrapper.innerHTML = svgContent;
+                } else {
+                    wrapper.innerHTML = `
+                        <div class="mermaid-fallback" style="width: 100%; color: var(--text-muted); font-size: 14px; text-align: left;">
+                            <div style="display: flex; align-items: center; gap: 8px; color: var(--accent-red); font-weight: 600; margin-bottom: 6px;">
+                                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                                <span>Diagram Rendering Error</span>
+                            </div>
+                            <p style="margin: 0 0 8px 0; font-size: 13px;">This flowchart has syntax errors and could not be rendered visually.</p>
+                            <details class="mermaid-fallback-details" style="border: 1px solid var(--glass-border); border-radius: 4px; background: rgba(0,0,0,0.2);">
+                                <summary style="cursor: pointer; padding: 6px 10px; font-weight: 500; font-size: 12px; color: var(--accent-cyan); user-select: none;">
+                                    View Raw Diagram Code
+                                </summary>
+                                <pre style="margin: 0; padding: 10px; font-family: monospace; font-size: 12px; color: var(--text-light); overflow-x: auto; background: rgba(0, 0, 0, 0.4); border-top: 1px solid var(--glass-border); white-space: pre-wrap; word-break: break-all;">${escapeHtml(codeText)}</pre>
+                            </details>
+                        </div>
+                    `;
+                }
+                
+                preEl.replaceWith(wrapper);
+            }
+        }
+    }
+}
+
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // HEALTH CHECK
@@ -1345,96 +2219,381 @@ async function showHealthModal() {
 // HISTORY
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-function saveToHistory(query, data) {
-    const historyItem = {
-        id: Date.now().toString(),
-        query: query,
-        timestamp: new Date().toISOString(),
-        intent: data.intent,
-        papersCount: data.papers ? data.papers.length : 0,
-    };
-
-    // Prevent duplicates and move to top
-    state.conversations = state.conversations.filter(c => c.query !== query);
-    state.conversations.unshift(historyItem);
-
-    if (state.conversations.length > 20) state.conversations.pop();
-
+async function generatePremiumTitle(query) {
     try {
-        localStorage.setItem('graphrag_history', JSON.stringify(state.conversations));
-    } catch (e) { /* quota exceeded, ignore */ }
-
-    renderHistory();
+        const res = await fetch(`${API_BASE}/v1/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                messages: [
+                    {
+                        role: "user",
+                        content: `Generate a concise 3 to 5 word title for an academic chat session based on this query. Do not include quotes, markdown, or any introductory text. Return ONLY the title.\n\nQuery: ${query}`
+                    }
+                ],
+                temperature: 0.3,
+                max_tokens: 15
+            })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            const title = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+            if (title) return title;
+        }
+    } catch (e) {
+        console.error("Failed to generate premium title:", e);
+    }
+    // Fallback title
+    return query.length > 30 ? query.substring(0, 30) + '...' : query;
 }
 
-function loadHistory() {
-    try {
-        const saved = localStorage.getItem('graphrag_history');
-        if (saved) {
-            state.conversations = JSON.parse(saved);
-            renderHistory();
+async function saveToHistory(query, data) {
+    if (!state.currentConversation) {
+        try {
+            const title = await generatePremiumTitle(query);
+            const res = await fetch(`${API_BASE}/api/history`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...getAuthHeader()
+                },
+                body: JSON.stringify({
+                    title: title,
+                    messages: state.messages
+                })
+            });
+            if (res.ok) {
+                const session = await res.json();
+                state.currentConversation = session.id;
+                state.conversations.unshift(session);
+                renderHistory();
+            }
+        } catch (e) {
+            console.error("Error creating chat session:", e);
         }
-    } catch (e) { /* corrupt data */ }
+    } else {
+        try {
+            const res = await fetch(`${API_BASE}/api/history/${state.currentConversation}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...getAuthHeader()
+                },
+                body: JSON.stringify({
+                    messages: state.messages
+                })
+            });
+            if (res.ok) {
+                const updatedSession = await res.json();
+                state.conversations = state.conversations.filter(c => c.id !== updatedSession.id);
+                state.conversations.unshift(updatedSession);
+                renderHistory();
+            }
+        } catch (e) {
+            console.error("Error updating chat session:", e);
+        }
+    }
+}
+
+async function loadHistory() {
+    try {
+        const res = await fetch(`${API_BASE}/api/history`, {
+            headers: getAuthHeader()
+        });
+        if (res.ok) {
+            state.conversations = await res.json();
+            renderHistory();
+        } else if (res.status === 401) {
+            window.location.href = '/';
+        }
+    } catch (e) {
+        console.error("Error loading chat history:", e);
+    }
 }
 
 function renderHistory() {
-    if (state.conversations.length === 0) {
+    const searchInput = document.getElementById('historySearchInput');
+    const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    
+    const filteredConversations = state.conversations.filter(conv => {
+        const title = (conv.title || '').toLowerCase();
+        return title.includes(query);
+    });
+
+    if (filteredConversations.length === 0) {
         els.historyList.innerHTML = `
             <div class="history-empty">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <circle cx="12" cy="12" r="10"/>
                     <polyline points="12 6 12 12 16 14"/>
                 </svg>
-                <span>No conversations yet</span>
+                <span>${query ? 'No matching chats' : 'No conversations yet'}</span>
             </div>
         `;
         return;
     }
 
-    els.historyList.innerHTML = state.conversations.map(conv => {
-        const timeStr = new Date(conv.timestamp).toLocaleDateString(undefined, {
-            month: 'short', day: 'numeric',
-        });
+    els.historyList.innerHTML = filteredConversations.map(conv => {
+        const isActive = state.currentConversation === conv.id ? 'active' : '';
+        const title = conv.title || 'New Chat';
+        
         return `
-            <div class="history-item" data-query="${escapeHtml(conv.query)}" title="${escapeHtml(conv.query)}">
-                <div class="history-item-main">
+            <div class="history-item ${isActive}" data-id="${conv.id}">
+                <div class="history-title-container">
                     <svg class="history-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                     </svg>
-                    <div class="history-content">
-                        <span class="history-text">${escapeHtml(conv.query)}</span>
-                        <span class="history-meta">${timeStr} &bull; ${conv.papersCount || 0} papers</span>
-                    </div>
+                    <span class="history-item-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
                 </div>
-                <button class="history-delete-btn" data-id="${conv.id}" title="Delete entry">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                </button>
+                <div class="history-actions-buttons">
+                    <button class="history-action-btn btn-rename" title="Rename chat">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                    </button>
+                    <button class="history-action-btn btn-delete" title="Delete chat">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         `;
     }).join('');
 
-    // Click to re-run
     els.historyList.querySelectorAll('.history-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-            if (e.target.closest('.history-delete-btn')) return;
-            els.queryInput.value = item.dataset.query;
-            handleInputChange();
-            sendQuery();
+        const id = item.dataset.id;
+        const conv = state.conversations.find(c => c.id === id);
+        
+        item.querySelector('.history-title-container').addEventListener('click', () => {
+            loadSession(conv);
         });
-    });
 
-    // Delete handler
-    els.historyList.querySelectorAll('.history-delete-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const id = btn.dataset.id;
-            state.conversations = state.conversations.filter(c => c.id !== id);
-            localStorage.setItem('graphrag_history', JSON.stringify(state.conversations));
-            renderHistory();
-        });
+        const renameBtn = item.querySelector('.btn-rename');
+        if (renameBtn) {
+            renameBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const newTitle = prompt("Enter new title for this chat:", conv.title || "New Chat");
+                if (newTitle && newTitle.trim()) {
+                    await renameSession(id, newTitle.trim());
+                }
+            });
+        }
+
+        const deleteBtn = item.querySelector('.btn-delete');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (confirm("Are you sure you want to delete this chat session?")) {
+                    await deleteSession(id);
+                }
+            });
+        }
     });
+}
+
+function loadSession(session) {
+    state.currentConversation = session.id;
+    state.messages = session.messages || [];
+    
+    els.chatMessages.innerHTML = '';
+    if (els.welcomeScreen) {
+        els.welcomeScreen.style.display = 'none';
+    }
+    
+    state.messages.forEach(msg => {
+        if (msg.role === 'user') {
+            addMessage('user', msg.content);
+        } else if (msg.role === 'assistant') {
+            if (msg.data) {
+                const assistantMsgId = addAssistantMessage(msg.data, false);
+                state.messageData.set(assistantMsgId, msg.data);
+                state.lastResponse = msg.data;
+                updateSourcesPanel(msg.data);
+            } else {
+                addMessage('assistant', msg.content);
+            }
+        }
+    });
+    
+    $$('.history-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.id === session.id);
+    });
+}
+
+async function renameSession(id, newTitle) {
+    try {
+        const res = await fetch(`${API_BASE}/api/history/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeader()
+            },
+            body: JSON.stringify({
+                title: newTitle
+            })
+        });
+        if (res.ok) {
+            const updated = await res.json();
+            state.conversations = state.conversations.map(c => c.id === id ? updated : c);
+            renderHistory();
+        }
+    } catch (e) {
+        console.error("Error renaming chat session:", e);
+    }
+}
+
+async function deleteSession(id) {
+    try {
+        const res = await fetch(`${API_BASE}/api/history/${id}`, {
+            method: 'DELETE',
+            headers: getAuthHeader()
+        });
+        if (res.ok) {
+            state.conversations = state.conversations.filter(c => c.id !== id);
+            if (state.currentConversation === id) {
+                startNewChat();
+            } else {
+                renderHistory();
+            }
+        }
+    } catch (e) {
+        console.error("Error deleting chat session:", e);
+    }
+}
+
+function startNewChat() {
+    state.currentConversation = null;
+    state.messages = [];
+    els.chatMessages.innerHTML = '';
+    if (els.welcomeScreen) {
+        els.welcomeScreen.style.display = 'flex';
+    }
+    $$('.history-item').forEach(item => item.classList.remove('active'));
+    els.queryInput.value = '';
+    els.queryInput.focus();
+}
+
+function updateUserUI(user) {
+    if (!user) return;
+    const email = user.email || 'user@university.edu';
+    const metadata = user.user_metadata || {};
+    const displayName = metadata.full_name || email;
+    const emailText = document.getElementById('userEmailText');
+    const avatarIcon = document.getElementById('userAvatarIcon');
+    if (emailText) emailText.textContent = displayName;
+    if (avatarIcon) {
+        const initial = (metadata.full_name || email).charAt(0).toUpperCase();
+        avatarIcon.textContent = initial;
+    }
+}
+
+async function initSupabase() {
+    try {
+        const res = await fetch('/api/config');
+        const config = await res.json();
+        supabase = window.supabase.createClient(config.supabase_url, config.supabase_anon_key);
+        
+        supabase.auth.onAuthStateChange((event, session) => {
+            if (session) {
+                localStorage.setItem('aether_token', session.access_token);
+                updateUserUI(session.user);
+            } else if (event === 'SIGNED_OUT') {
+                localStorage.removeItem('aether_token');
+                window.location.href = '/';
+            }
+        });
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+            window.location.href = '/';
+            return;
+        }
+        
+        localStorage.setItem('aether_token', session.access_token);
+        updateUserUI(session.user);
+        await loadHistory();
+    } catch (e) {
+        console.error("Failed to initialize Supabase:", e);
+    }
+}
+
+function loadSettingsFromLocalStorage() {
+    try {
+        const topK = localStorage.getItem('aether_settings_topK') || '5';
+        const minSim = localStorage.getItem('aether_settings_minSim') || '22';
+        const temperature = localStorage.getItem('aether_settings_temperature') || '0.0';
+        const verify = localStorage.getItem('aether_settings_verify') !== 'false'; // defaults to true
+        const studyMode = localStorage.getItem('aether_settings_studyMode') === 'true'; // defaults to false
+        const model = localStorage.getItem('aether_settings_model') || 'light';
+        
+        if (els.topK) {
+            els.topK.value = topK;
+            els.topKValue.textContent = topK;
+        }
+        if (els.minSim) {
+            els.minSim.value = minSim;
+            els.minSimValue.textContent = (minSim / 100).toFixed(2);
+        }
+        if (els.temperature) {
+            els.temperature.value = temperature;
+            els.temperatureValue.textContent = parseFloat(temperature).toFixed(1);
+        }
+        if (els.verifyToggle) {
+            els.verifyToggle.checked = verify;
+        }
+        if (els.groundedStudyToggle) {
+            els.groundedStudyToggle.checked = studyMode;
+        }
+        if (els.modelSelect) {
+            els.modelSelect.value = model;
+        }
+        syncStudyGuardrails();
+    } catch (e) {
+        console.error("Failed to load settings from localStorage:", e);
+    }
+}
+
+function saveSettingsToLocalStorage() {
+    try {
+        if (els.topK) localStorage.setItem('aether_settings_topK', els.topK.value);
+        if (els.minSim) localStorage.setItem('aether_settings_minSim', els.minSim.value);
+        if (els.temperature) localStorage.setItem('aether_settings_temperature', els.temperature.value);
+        if (els.verifyToggle) localStorage.setItem('aether_settings_verify', els.verifyToggle.checked);
+        if (els.groundedStudyToggle) localStorage.setItem('aether_settings_studyMode', els.groundedStudyToggle.checked);
+        if (els.modelSelect) localStorage.setItem('aether_settings_model', els.modelSelect.value);
+    } catch (e) {
+        console.error("Failed to save settings to localStorage:", e);
+    }
+}
+
+function resetSettingsToDefaults() {
+    if (els.topK) {
+        els.topK.value = '5';
+        els.topKValue.textContent = '5';
+    }
+    if (els.minSim) {
+        els.minSim.value = '22';
+        els.minSimValue.textContent = '0.22';
+    }
+    if (els.temperature) {
+        els.temperature.value = '0.0';
+        els.temperatureValue.textContent = '0.0';
+    }
+    if (els.verifyToggle) {
+        els.verifyToggle.checked = true;
+    }
+    if (els.groundedStudyToggle) {
+        els.groundedStudyToggle.checked = false;
+    }
+    if (els.modelSelect) {
+        els.modelSelect.value = 'light';
+    }
+    saveSettingsToLocalStorage();
+    syncStudyGuardrails();
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -1446,7 +2605,7 @@ document.addEventListener('click', (e) => {
         const num = parseInt(e.target.textContent.replace(/[\[\]]/g, ''));
         if (num && state.sourcesOpen) {
             // Highlight the corresponding chunk card
-            const chunkCards = $$('.chunk-card');
+            const chunkCards = $$('.insight-node');
             if (chunkCards[num - 1]) {
                 chunkCards[num - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
                 chunkCards[num - 1].style.borderColor = 'var(--accent-primary)';
@@ -1463,59 +2622,5 @@ document.addEventListener('click', (e) => {
             switchSourceTab('chunks');
         }
     }
-
-
-    const attachBtn = document.getElementById("attachMenuBtn");
-    const attachMenu = document.getElementById("attachMenu");
-
-    const fileInput = document.getElementById("attachmentFileInput");
-    const pdfInput = document.getElementById("pdfFileInput");
-
-    /* TOGGLE MENU */
-    attachBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-
-        const isOpen = attachMenu.classList.toggle("open");
-
-        attachBtn.setAttribute("aria-expanded", isOpen);
-        attachMenu.setAttribute("aria-hidden", !isOpen);
-    });
-
-    /* CLOSE ON OUTSIDE CLICK */
-    document.addEventListener("click", (e) => {
-        if (!attachMenu.contains(e.target) && !attachBtn.contains(e.target)) {
-            attachMenu.classList.remove("open");
-            attachBtn.setAttribute("aria-expanded", false);
-            attachMenu.setAttribute("aria-hidden", true);
-        }
-    });
-
-    /* HANDLE ACTIONS */
-    document.querySelectorAll(".attach-menu-item").forEach(item => {
-        item.addEventListener("click", () => {
-            const action = item.dataset.attachAction;
-
-            attachMenu.classList.remove("open");
-
-            if (action === "files") {
-                fileInput.click();
-            }
-            else if (action === "pdf") {
-                pdfInput.click();
-            }
-            else if (action === "deep-research") {
-                alert("Deep Research Mode Activated 🚀");
-            }
-        });
-    });
-
-    /* DEBUG (optional) */
-    fileInput.addEventListener("change", (e) => {
-        console.log("Files:", e.target.files);
-    });
-
-    pdfInput.addEventListener("change", (e) => {
-        console.log("PDF:", e.target.files);
-    });
 });
 
