@@ -528,12 +528,12 @@
                     
                     <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
                         <label for="profilePassword" style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">New Password</label>
-                        <input type="password" id="profilePassword" placeholder="At least 6 characters" required style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
+                        <input type="password" id="profilePassword" autocomplete="new-password" placeholder="At least 6 characters" required style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
                     </div>
 
                     <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
                         <label for="profileConfirmPassword" style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Confirm New Password</label>
-                        <input type="password" id="profileConfirmPassword" placeholder="Repeat password" required style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
+                        <input type="password" id="profileConfirmPassword" autocomplete="new-password" placeholder="Repeat password" required style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
                     </div>
 
                     <button type="submit" id="savePasswordBtn" class="btn btn-secondary" style="padding: 12px; font-weight: 600;">Update Password</button>
@@ -641,7 +641,7 @@
                 </div>
                 <div class="form-group">
                     <label for="signin-password">Password</label>
-                    <input type="password" id="signin-password" required placeholder="••••••••">
+                    <input type="password" id="signin-password" autocomplete="current-password" required placeholder="••••••••">
                 </div>
                 <button type="submit" class="btn btn-primary btn-block">Sign In</button>
                 <div id="signin-error" class="auth-error-msg"></div>
@@ -655,7 +655,7 @@
                 </div>
                 <div class="form-group">
                     <label for="signup-password">Password</label>
-                    <input type="password" id="signup-password" required minlength="6" placeholder="At least 6 characters">
+                    <input type="password" id="signup-password" autocomplete="new-password" required minlength="6" placeholder="At least 6 characters">
                 </div>
                 <button type="submit" class="btn btn-primary btn-block">Create Account</button>
                 <div id="signup-error" class="auth-error-msg"></div>

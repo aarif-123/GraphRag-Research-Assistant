@@ -12,3 +12,8 @@ project_summary_report.md
 fix_symbols.py
 .env
 .env.*
+requirements-local.txt
+*.svg
+*.png
+test_*.py
+

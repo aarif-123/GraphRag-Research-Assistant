@@ -462,7 +462,7 @@
                 </div>
                 <div class="form-group">
                     <label for="signin-password">Password</label>
-                    <input type="password" id="signin-password" required placeholder="••••••••">
+                    <input type="password" id="signin-password" autocomplete="current-password" required placeholder="••••••••">
                 </div>
                 <button type="submit" class="btn btn-primary btn-block">Sign In</button>
                 <div id="signin-error" class="auth-error-msg"></div>
@@ -476,7 +476,7 @@
                 </div>
                 <div class="form-group">
                     <label for="signup-password">Password</label>
-                    <input type="password" id="signup-password" required minlength="6" placeholder="At least 6 characters">
+                    <input type="password" id="signup-password" autocomplete="new-password" required minlength="6" placeholder="At least 6 characters">
                 </div>
                 <button type="submit" class="btn btn-primary btn-block">Create Account</button>
                 <div id="signup-error" class="auth-error-msg"></div>

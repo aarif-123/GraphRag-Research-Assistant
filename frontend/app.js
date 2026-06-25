@@ -1857,8 +1857,14 @@ function escapeHtml(str) {
 function sanitizeMermaidCode(code) {
     if (!code) return '';
     
+    // Pre-process double quoted strings to convert newlines and literal \\n to <br>
+    code = code.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/gs, (match, p1) => {
+        return '"' + p1.replace(/\r?\n/g, '<br>').replace(/\\n/g, '<br>').replace(/<br>\s+/g, '<br>') + '"';
+    });
+    
     let lines = code.split('\n');
     let processedLines = [];
+
     
     // Improved connection regex to handle spaces around pipe labels and -- text -->, etc.
     const connectionRegex = /(\s*(?:-->|==>|-\.->)\s*\|[^|]+\|\s*|\s*--\s*[^-]+?\s*-->\s*|\s*==\s*[^=]+?\s*==>\s*|\s*--\.\s*[^\.]+\s*\.-\s*>\s*|-->|---|==>|-\.-|-.->|->)/;
