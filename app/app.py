@@ -1957,7 +1957,8 @@ def _base_rules() -> str:
 
 ═══ FLOW DIAGRAMS & MERMAID ═══
 - MERMAID DIAGRAMS: Whenever the query involves a process flow, pipeline, model architecture, comparison path, or timeline sequence, you MUST include a clean Mermaid diagram using ` ```mermaid ` code blocks.
-- Draw flowcharts using `graph TD` or `graph LR` to visually map out relationships, steps, or differences.
+- Draw flowcharts using `graph TD` (Top-Down) or `graph LR` (Left-to-Right).
+- RECOMMENDATION FOR WIDE DIAGRAMS: For wide tree structures, model taxonomies, or comparisons with more than 3 siblings at any level, always use 'graph LR' instead of 'graph TD'. Left-to-right layouts stack sibling branches vertically rather than horizontally, which prevents the diagram from stretching too wide and becoming unreadable on standard screens.
 - STRICT SYNTAX RULES:
   1. Every node MUST use a simple alphanumeric identifier (e.g. `A`, `B`, `node1`, `step_2`, `transformer_block`).
   2. Node identifiers must NOT contain spaces, dashes, dots, parentheses, or special characters. Use underscores for separation if necessary.
@@ -2136,7 +2137,7 @@ def survey_prompt(
 
 ═══ SMART SURVEY INSTRUCTIONS ═══
 Synthesize the evidence into a smart, structured literature survey.
-- SURVEY TAXONOMY FLOW: Include a Mermaid diagram (e.g. `graph LR` or `graph TD`) depicting the taxonomic classification or methodological progression of models in this area.
+- SURVEY TAXONOMY FLOW: Include a Mermaid diagram (preferably 'graph LR' to stack taxonomic branches vertically and maximize text readability) depicting the taxonomic classification or methodological progression of models in this area.
 - SUGGESTED FRAMEWORK:
   1. **Area Overview**: A 2-3 sentence blockquote of the current state of this research area.
   2. **Model Taxonomy Diagram**: The Mermaid tree diagram illustrating models.
@@ -2206,7 +2207,7 @@ PAPERS ORDERED BY YEAR:
 
 ═══ SMART TIMELINE INSTRUCTIONS ═══
 Construct a smart, narrative-driven research timeline.
-- CHRONOLOGICAL MILESTONE FLOW: Include a Mermaid workflow diagram (e.g. `graph LR` or `graph TD` with timeline stages) showing the logical sequence of key milestones.
+- CHRONOLOGICAL MILESTONE FLOW: Include a Mermaid workflow diagram (preferably 'graph LR' to stack milestones vertically and prevent horizontal squeezing) showing the logical sequence of key milestones.
 - SUGGESTED FRAMEWORK:
   1. **Milestone Flow Diagram**: The Mermaid timeline roadmap.
   2. **Chronological Milestones**: For each key year: `[YEAR]` — **Paper Title** (Cited X×) — Key breakthrough [citation].
@@ -3876,7 +3877,7 @@ else:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "app:app",
+        "app.app:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8000")),
         reload=os.getenv("ENV", "prod") == "dev",

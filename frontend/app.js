@@ -644,6 +644,9 @@ function initEventListeners() {
             startNewChat();
         });
     }
+    
+    // Mermaid full-screen modal controls
+    initMermaidModal();
 }
 
 // SIDEBAR
@@ -1858,8 +1861,38 @@ function sanitizeMermaidCode(code) {
     let processedLines = [];
     
     // Improved connection regex to handle spaces around pipe labels and -- text -->, etc.
-    const connectionRegex = /(\s*(?:-->|==>|-\.->)\s*\|[^|]+\|\s*|\s*--\s*[^-]+?\s*-->\s*|\s*==\s*[^=]+?\s*==>\s*|\s*-\.\s*[^\.]+\s*\.-\s*>\s*|-->|---|==>|-\.-|-.->|->)/;
+    const connectionRegex = /(\s*(?:-->|==>|-\.->)\s*\|[^|]+\|\s*|\s*--\s*[^-]+?\s*-->\s*|\s*==\s*[^=]+?\s*==>\s*|\s*--\.\s*[^\.]+\s*\.-\s*>\s*|-->|---|==>|-\.-|-.->|->)/;
     
+    // Set up tracking for defined nodes to auto-generate labels for raw DB identifiers
+    const declaredNodes = new Set();
+    const allNodes = new Set();
+    
+    const registerNode = (id, hasLabel) => {
+        let cleanId = id.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+        if (cleanId) {
+            allNodes.add(cleanId);
+            if (hasLabel) {
+                declaredNodes.add(cleanId);
+            }
+        }
+        return cleanId;
+    };
+    
+    const getPrettyLabel = (id) => {
+        let label = id.trim();
+        // 1. Remove leading/trailing underscores
+        label = label.replace(/^_+|_+$/g, '');
+        // 2. Remove single letter prefix followed by underscore/dash, e.g. B_ or B- or _B_
+        label = label.replace(/^[A-Z][_-]/i, '');
+        // Clean leading/trailing underscores again
+        label = label.replace(/^_+|_+$/g, '');
+        // 3. Replace all underscores with spaces
+        label = label.replace(/_/g, ' ');
+        // 4. Trim double spaces
+        label = label.replace(/\s+/g, ' ').trim();
+        return label;
+    };
+
     const wrapLabel = (label) => {
         let clean = label.trim();
         // If it starts and ends with double quotes, strip them first to escape inner quotes properly
@@ -1880,70 +1913,81 @@ function sanitizeMermaidCode(code) {
         // Stadium: id([label])
         let stadiumMatch = p.match(/^([^\[\(\{\>"]+)\(\[(.+)\]\)$/);
         if (stadiumMatch) {
-            return `${stadiumMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}([${wrapLabel(stadiumMatch[2])}])`;
+            let id = registerNode(stadiumMatch[1], true);
+            return `${id}([${wrapLabel(stadiumMatch[2])}])`;
         }
         
         // Database: id[(label)]
         let dbMatch = p.match(/^([^\[\(\{\>"]+)\[\((.+)\)\]$/);
         if (dbMatch) {
-            return `${dbMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}[(${wrapLabel(dbMatch[2])})]`;
+            let id = registerNode(dbMatch[1], true);
+            return `${id}[(${wrapLabel(dbMatch[2])})]`;
         }
         
         // Circle: id((label))
         let circleMatch = p.match(/^([^\[\(\{\>"]+)\(\((.+)\)\)$/);
         if (circleMatch) {
-            return `${circleMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}((${wrapLabel(circleMatch[2])}))`;
+            let id = registerNode(circleMatch[1], true);
+            return `${id}((${wrapLabel(circleMatch[2])}))`;
         }
         
         // Hexagon: id{{label}}
         let hexMatch = p.match(/^([^\[\(\{\>"]+)\{\{(.+)\}\}$/);
         if (hexMatch) {
-            return `${hexMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}{{${wrapLabel(hexMatch[2])}}}`;
+            let id = registerNode(hexMatch[1], true);
+            return `${id}{{${wrapLabel(hexMatch[2])}}}`;
         }
         
         // Subroutine: id[[label]]
         let subMatch = p.match(/^([^\[\(\{\>"]+)\[\[(.+)\]\]$/);
         if (subMatch) {
-            return `${subMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}[[${wrapLabel(subMatch[2])}]]`;
+            let id = registerNode(subMatch[1], true);
+            return `${id}[[${wrapLabel(subMatch[2])}]]`;
         }
         
         // Parallelogram: id[/label/] or id[\label\]
         let paraMatch1 = p.match(/^([^\[\(\{\>"]+)\[\/(.+)\/\]$/);
         if (paraMatch1) {
-            return `${paraMatch1[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}[/${wrapLabel(paraMatch1[2])}/]`;
+            let id = registerNode(paraMatch1[1], true);
+            return `${id}[/${wrapLabel(paraMatch1[2])}/]`;
         }
         let paraMatch2 = p.match(/^([^\[\(\{\>"]+)\[\\(.+)\\\]$/);
         if (paraMatch2) {
-            return `${paraMatch2[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}[\\${wrapLabel(paraMatch2[2])}\\]`;
+            let id = registerNode(paraMatch2[1], true);
+            return `${id}[\\${wrapLabel(paraMatch2[2])}\\]`;
         }
         
         // Rounded edges: id(label)
         let singleRoundMatch = p.match(/^([^\[\(\{\>"]+)\((.+)\)$/);
         if (singleRoundMatch) {
-            return `${singleRoundMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}(${wrapLabel(singleRoundMatch[2])})`;
+            let id = registerNode(singleRoundMatch[1], true);
+            return `${id}(${wrapLabel(singleRoundMatch[2])})`;
         }
         
         // Rectangle: id[label]
         let rectMatch = p.match(/^([^\[\(\{\>"]+)\[(.+)\]$/);
         if (rectMatch) {
-            return `${rectMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}[${wrapLabel(rectMatch[2])}]`;
+            let id = registerNode(rectMatch[1], true);
+            return `${id}[${wrapLabel(rectMatch[2])}]`;
         }
         
         // Diamond: id{label}
         let diamondMatch = p.match(/^([^\[\(\{\>"]+)\{(.+)\}$/);
         if (diamondMatch) {
-            return `${diamondMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}{${wrapLabel(diamondMatch[2])}}`;
+            let id = registerNode(diamondMatch[1], true);
+            return `${id}{${wrapLabel(diamondMatch[2])}}`;
         }
         
         // Asymmetric: id>label]
         let asymMatch = p.match(/^([^\[\(\{\>"]+)>(.+)\]$/);
         if (asymMatch) {
-            return `${asymMatch[1].trim().replace(/[^a-zA-Z0-9_-]/g, '_')}>${wrapLabel(asymMatch[2])}]`;
+            let id = registerNode(asymMatch[1], true);
+            return `${id}>${wrapLabel(asymMatch[2])}]`;
         }
         
         // No shape found. It's just a raw node ID.
-        // Replace invalid characters with underscores
-        return p.replace(/[^a-zA-Z0-9_-]/g, '_');
+        let id = registerNode(p, false);
+        return id;
     };
     
     let isFlowchart = false;
@@ -2010,6 +2054,21 @@ function sanitizeMermaidCode(code) {
         }
         
         processedLines.push(processedParts.join(' '));
+    }
+    
+    // Auto-generate pretty labels for raw node IDs that lack descriptions
+    let autoDeclarations = [];
+    for (let id of allNodes) {
+        if (!declaredNodes.has(id)) {
+            let pretty = getPrettyLabel(id);
+            if (pretty && pretty !== id) {
+                autoDeclarations.push(`    ${id}["${pretty}"]`);
+            }
+        }
+    }
+    
+    if (autoDeclarations.length > 0) {
+        return processedLines.join('\n') + '\n' + autoDeclarations.join('\n');
     }
     
     return processedLines.join('\n');
@@ -2112,6 +2171,110 @@ async function postProcessResponse(container) {
                 
                 if (renderSuccess) {
                     wrapper.innerHTML = svgContent;
+                    wrapper.style.position = 'relative';
+                    
+                    // Add zoom controls
+                    const controls = document.createElement('div');
+                    controls.className = 'mermaid-controls';
+                    controls.style.position = 'absolute';
+                    controls.style.top = '8px';
+                    controls.style.right = '8px';
+                                        const btnZoom = document.createElement('button');
+                    btnZoom.className = 'mermaid-control-btn';
+                    btnZoom.title = 'Actual Size (Scroll) / Fit Width';
+                    btnZoom.innerHTML = `
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M4 12h16M4 12l4-4m-4 4l4 4m12-8l4 4-4 4"/>
+                        </svg>
+                    `;
+                    btnZoom.style.background = 'rgba(30, 41, 59, 0.8)';
+                    btnZoom.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+                    btnZoom.style.color = '#f8fafc';
+                    btnZoom.style.padding = '6px';
+                    btnZoom.style.borderRadius = 'var(--radius-sm)';
+                    btnZoom.style.cursor = 'pointer';
+                    btnZoom.style.display = 'flex';
+                    btnZoom.style.alignItems = 'center';
+                    btnZoom.style.justifyContent = 'center';
+                    btnZoom.style.transition = 'all 0.2s';
+                    
+                    btnZoom.addEventListener('mouseover', () => {
+                        btnZoom.style.background = 'var(--primary)';
+                        btnZoom.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+                    });
+                    btnZoom.addEventListener('mouseout', () => {
+                        btnZoom.style.background = 'rgba(30, 41, 59, 0.8)';
+                        btnZoom.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                    });
+
+                    // State: 'fit' by default, toggle to 'scroll'
+                    let zoomState = 'fit';
+                    btnZoom.addEventListener('click', () => {
+                        const svgEl = wrapper.querySelector('svg');
+                        if (!svgEl) return;
+                        
+                        if (zoomState === 'fit') {
+                            zoomState = 'scroll';
+                            svgEl.style.setProperty('max-width', 'none', 'important');
+                            svgEl.style.setProperty('width', 'auto', 'important');
+                            wrapper.style.alignItems = 'flex-start'; // Align left when scrolling
+                            btnZoom.innerHTML = `
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M20 12H4M8 8l-4 4 4 4m8-8l4 4-4 4"/>
+                                </svg>
+                            `;
+                        } else {
+                            zoomState = 'fit';
+                            svgEl.style.setProperty('max-width', '100%', 'important');
+                            svgEl.style.setProperty('width', '100%', 'important');
+                            wrapper.style.alignItems = 'center';
+                            btnZoom.innerHTML = `
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M4 12h16M4 12l4-4m-4 4l4 4m12-8l4 4-4 4"/>
+                                </svg>
+                            `;
+                        }
+                    });
+
+                    // Fullscreen control button
+                    const btnFullscreen = document.createElement('button');
+                    btnFullscreen.className = 'mermaid-control-btn';
+                    btnFullscreen.title = 'Open Interactive Fullscreen Viewer';
+                    btnFullscreen.innerHTML = `
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+                        </svg>
+                    `;
+                    btnFullscreen.style.background = 'rgba(30, 41, 59, 0.8)';
+                    btnFullscreen.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+                    btnFullscreen.style.color = '#f8fafc';
+                    btnFullscreen.style.padding = '6px';
+                    btnFullscreen.style.borderRadius = 'var(--radius-sm)';
+                    btnFullscreen.style.cursor = 'pointer';
+                    btnFullscreen.style.display = 'flex';
+                    btnFullscreen.style.alignItems = 'center';
+                    btnFullscreen.style.justifyContent = 'center';
+                    btnFullscreen.style.transition = 'all 0.2s';
+                    
+                    btnFullscreen.addEventListener('mouseover', () => {
+                        btnFullscreen.style.background = 'var(--primary)';
+                        btnFullscreen.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+                    });
+                    btnFullscreen.addEventListener('mouseout', () => {
+                        btnFullscreen.style.background = 'rgba(30, 41, 59, 0.8)';
+                        btnFullscreen.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                    });
+                    
+                    btnFullscreen.addEventListener('click', () => {
+                        const svgEl = wrapper.querySelector('svg');
+                        if (!svgEl) return;
+                        // Open the fullscreen interactive modal with the inner HTML of the wrapper (which contains the SVG)
+                        openMermaidModal(wrapper.innerHTML);
+                    });
+                    
+                    controls.appendChild(btnZoom);
+                    controls.appendChild(btnFullscreen);
+                    wrapper.appendChild(controls);
                 } else {
                     wrapper.innerHTML = `
                         <div class="mermaid-fallback" style="width: 100%; color: var(--text-muted); font-size: 14px; text-align: left;">
@@ -2623,4 +2786,185 @@ document.addEventListener('click', (e) => {
         }
     }
 });
+
+// =========================================================================
+// INTERACTIVE FULLSCREEN MERMAID VIEW PORT (Pan & Zoom)
+// =========================================================================
+
+// Modal zoom and pan state
+let modalZoomState = {
+    x: 0,
+    y: 0,
+    scale: 1,
+    isDragging: false,
+    startX: 0,
+    startY: 0
+};
+
+// Function to update the transform on the canvas
+function updateModalTransform() {
+    const canvas = document.getElementById('mermaidModalCanvas');
+    if (!canvas) return;
+    canvas.style.transform = `translate(${modalZoomState.x}px, ${modalZoomState.y}px) scale(${modalZoomState.scale})`;
+}
+
+// Function to open the Mermaid fullscreen modal
+function openMermaidModal(svgHtml) {
+    const modal = document.getElementById('mermaid-modal');
+    const canvas = document.getElementById('mermaidModalCanvas');
+    if (!modal || !canvas) return;
+    
+    // Inject the SVG into the canvas
+    canvas.innerHTML = svgHtml;
+    
+    // Clean controls overlay from the modal version of diagram
+    const controls = canvas.querySelector('.mermaid-controls');
+    if (controls) controls.remove();
+    
+    // Ensure the SVG within the modal behaves properly
+    const svgEl = canvas.querySelector('svg');
+    if (svgEl) {
+        svgEl.style.width = '100%';
+        svgEl.style.height = '100%';
+        svgEl.style.maxWidth = 'none';
+        svgEl.style.maxHeight = 'none';
+        svgEl.removeAttribute('width');
+        svgEl.removeAttribute('height');
+    }
+    
+    // Reset state
+    modalZoomState = {
+        x: 0,
+        y: 0,
+        scale: 1,
+        isDragging: false,
+        startX: 0,
+        startY: 0
+    };
+    updateModalTransform();
+    
+    // Display modal
+    modal.style.display = 'flex';
+    // Trigger transition
+    setTimeout(() => {
+        modal.classList.add('active');
+    }, 10);
+    
+    // Prevent background scrolling
+    document.body.style.overflow = 'hidden';
+}
+
+// Function to close the modal
+function closeMermaidModal() {
+    const modal = document.getElementById('mermaid-modal');
+    if (!modal) return;
+    
+    modal.classList.remove('active');
+    setTimeout(() => {
+        modal.style.display = 'none';
+        const canvas = document.getElementById('mermaidModalCanvas');
+        if (canvas) canvas.innerHTML = '';
+    }, 300);
+    
+    // Re-enable background scrolling
+    document.body.style.overflow = '';
+}
+
+// Initialize modal event listeners
+function initMermaidModal() {
+    const modal = document.getElementById('mermaid-modal');
+    const viewport = document.getElementById('mermaidModalViewport');
+    const closeBtn = document.getElementById('mermaidCloseBtn');
+    const btnIn = document.getElementById('btnMermaidZoomIn');
+    const btnOut = document.getElementById('btnMermaidZoomOut');
+    const btnReset = document.getElementById('btnMermaidReset');
+    
+    if (!modal || !viewport) return;
+    
+    // Close on click close button or backdrop
+    closeBtn.addEventListener('click', closeMermaidModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeMermaidModal();
+        }
+    });
+    
+    // Key escape to close
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.style.display === 'flex') {
+            closeMermaidModal();
+        }
+    });
+    
+    // Zoom In
+    btnIn.addEventListener('click', () => {
+        modalZoomState.scale = Math.min(modalZoomState.scale * 1.25, 8);
+        updateModalTransform();
+    });
+    
+    // Zoom Out
+    btnOut.addEventListener('click', () => {
+        modalZoomState.scale = Math.max(modalZoomState.scale / 1.25, 0.25);
+        updateModalTransform();
+    });
+    
+    // Reset
+    btnReset.addEventListener('click', () => {
+        modalZoomState.x = 0;
+        modalZoomState.y = 0;
+        modalZoomState.scale = 1;
+        updateModalTransform();
+    });
+    
+    // Double click viewport to reset
+    viewport.addEventListener('dblclick', () => {
+        modalZoomState.x = 0;
+        modalZoomState.y = 0;
+        modalZoomState.scale = 1;
+        updateModalTransform();
+    });
+    
+    // Mouse Drag to Pan
+    viewport.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return; // Only left click
+        modalZoomState.isDragging = true;
+        modalZoomState.startX = e.clientX - modalZoomState.x;
+        modalZoomState.startY = e.clientY - modalZoomState.y;
+        viewport.style.cursor = 'grabbing';
+        e.preventDefault();
+    });
+    
+    window.addEventListener('mousemove', (e) => {
+        if (!modalZoomState.isDragging) return;
+        modalZoomState.x = e.clientX - modalZoomState.startX;
+        modalZoomState.y = e.clientY - modalZoomState.startY;
+        updateModalTransform();
+    });
+    
+    window.addEventListener('mouseup', () => {
+        if (modalZoomState.isDragging) {
+            modalZoomState.isDragging = false;
+            viewport.style.cursor = 'grab';
+        }
+    });
+    
+    // Mouse wheel to zoom (zoom relative to viewport center or cursor)
+    viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        
+        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        const newScale = Math.min(Math.max(modalZoomState.scale * factor, 0.2), 8);
+        
+        const rect = viewport.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left - rect.width / 2;
+        const mouseY = e.clientY - rect.top - rect.height / 2;
+        
+        // Adjust translation offsets so the zoom is centered under mouse pointer
+        modalZoomState.x = mouseX - (mouseX - modalZoomState.x) * (newScale / modalZoomState.scale);
+        modalZoomState.y = mouseY - (mouseY - modalZoomState.y) * (newScale / modalZoomState.scale);
+        modalZoomState.scale = newScale;
+        
+        updateModalTransform();
+    }, { passive: false });
+}
 
