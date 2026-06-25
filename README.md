@@ -1,7 +1,7 @@
 # 🔬 GraphRAG Research Assistant
 
-> **Graph-Augmented Retrieval with Anti-Hallucination Verification**  
-> Ask research questions. Get grounded, cited answers from 196,000+ academic papers — powered by Neo4j knowledge graphs, Supabase vector search, and Groq LLMs.
+> **Graph-Augmented Retrieval with Academic Source Enrichment & Anti-Hallucination Verification**  
+> Ask research questions. Get grounded, cited answers enriched with Semantic Scholar stats and official code repositories — powered by Neo4j knowledge graphs, Supabase vector search, and Groq LLMs.
 
 ---
 
@@ -26,12 +26,14 @@
 
 ## 🧠 Overview
 
-**GraphRAG Research Assistant v3.0** is a full-stack AI research tool that combines:
+**GraphRAG Research Assistant v5.0** is a full-stack AI research tool that combines:
 
 - **Graph-based retrieval** via Neo4j (196,875 nodes, 398,961 relationships across 111,896 publication nodes)
 - **Vector similarity search** via Supabase pgvector
-- **Large Language Models** via Groq API (Llama 3.1 / 3.3)
+- **Academic Source Enrichment** via Semantic Scholar API and Papers With Code (HuggingFace Papers API)
+- **Large Language Models** via Groq API (Llama 3.3 70B / Llama 3.1 8B)
 - **Anti-hallucination pipeline** with dual-pass verification and confidence scoring
+- **Supabase Authentication** for secure user login and conversation persistence
 
 It serves both a **REST API** (FastAPI) and a **browser-based frontend UI** from a single server.
 
@@ -41,36 +43,45 @@ It serves both a **REST API** (FastAPI) and a **browser-based frontend UI** from
 ## 🏗️ Architecture
 ![Alt Text](aether_full_system_architecture.svg)
 
-## ✨ Features
-## 🛡️ Anti-Hallucination Pipeline
+---
 
-The 6-step pipeline that prevents LLM fabrication:
+## ✨ Features
+
+### 🔍 Advanced Hybrid Retrieval Pipeline
+- **Intent Classification** — auto-routes research vs. general/chitchat queries.
+- **Keyword Extraction** — extracts 3–5 search keywords from natural language.
+- **Graph Traversal** — Neo4j seed + expand via `CITES`, `WRITTEN_BY`, `PUBLISHED_IN` relationships.
+- **Tiered Vector Search** — seed papers searched first, then expanded neighbors.
+- **Reciprocal Rank Fusion (RRF)** — merges multiple result lists into a single ranked list.
+- **Non-blocking Async Offloading** — Database operations (Neo4j, Supabase) are offloaded to asynchronous threads, preventing blockage of the FastAPI event loop for high concurrency.
+
+### 🌐 Academic Source & Code Enrichment
+- **Semantic Scholar Integration** — automatically retrieves up-to-date citation counts, paper abstracts, and venue statistics.
+- **Papers With Code Integration** — extracts official code repositories (GitHub), linked models, datasets, and upvote metrics.
+
+### 🛡️ Anti-Hallucination Pipeline
+A rigorous 7-step pipeline prevents LLM fabrication:
+1. **Intent Classification**: Routing of query.
+2. **Keyword Extraction**: Embedding + entity extraction.
+3. **Graph Retrieval**: Neo4j seed expansion.
+4. **Vector Search**: Tiered pgvector search.
+5. **Relevance Filter**: Strict floor filtering (default `0.25`) to remove low-quality context.
+6. **Grounded Answer**: Zero-temperature prompting with mandatory inline citations.
+7. **Verification Pass**: Dual-pass LLM fact-checking for a final `PASS/FAIL` verdict with confidence scoring.
 
 ![Aether Intent Routing Flowchart](aether_intent_routing_flowchart.svg)
 
-1. **Intent Classification**: Identifies if the query is research, general, or chitchat.
-2. **Keyword Extraction**: Parallel embedding and entity extraction.
-3. **Graph Retrieval**: Neo4j seed expansion via `CITES` and `WRITTEN_BY` relationships.
-4. **Vector Search**: Tiered similarity search via Supabase pgvector.
-5. **Relevance Filter**: Strict floor filtering (default 0.25) to remove low-quality context.
-6. **Verification Pass**: Dual-pass LLM fact-checking for a final `PASS/FAIL` verdict.
-### 🔍 Retrieval Pipeline
-- **Intent Classification** — auto-routes research vs. general/chitchat queries
-- **Keyword Extraction** — extracts 3–5 search keywords from natural language
-- **Graph Traversal** — Neo4j seed + expand via `CITES`, `WRITTEN_BY`, `PUBLISHED_IN` relationships
-- **Tiered Vector Search** — seed papers searched first, then expanded neighbours
-- **Reciprocal Rank Fusion (RRF)** — merges multiple result lists into a single ranked list
-
-### 🌐 Frontend UI
-- Dark-mode research assistant interface
-- Conversation history sidebar
-- Adjustable settings (Top K, Min Similarity, Model, Hallucination Check)
-- System health monitor
-- Quick-start suggestion cards
+### 🖥️ Modern Frontend UI
+- Premium dark-mode research assistant interface.
+- **Supabase Authentication** with login/signup flow (`landing.html`).
+- **Robust Mermaid Rendering** with `mermaid.parse` validation and auto-healing/sanitization (prevents syntax errors from breaking the UI).
+- Conversation history sidebar synced via Supabase backend.
+- Adjustable parameters (Top K, Min Similarity, Model, Hallucination Check).
+- System health monitor.
 
 ### 🔌 API Compatibility
-- Native REST API (`/api/research`, `/api/chat`)
-- **OpenAI-compatible endpoints** (`/v1/chat/completions`, `/v1/models`) — drop-in for OpenAI SDK clients
+- Native REST API (`/api/research`, `/api/chat`, `/api/history`)
+- **OpenAI-compatible endpoints** (`/v1/chat/completions`, `/v1/models`) — drop-in for OpenAI SDK clients.
 
 ---
 
@@ -81,30 +92,39 @@ The 6-step pipeline that prevents LLM fabrication:
 | **Backend Framework** | FastAPI 0.115 + Uvicorn |
 | **Graph Database** | Neo4j Aura (cloud) |
 | **Vector Database** | Supabase (PostgreSQL + pgvector) |
-| **LLM Provider** | Groq API (Llama 3.1 8B / Llama 3.3 70B) |
-| **Embedding Model** | `Snowflake/snowflake-arctic-embed-l-v2.0` via HuggingFace Inference API |
-| **Frontend** | Vanilla HTML + CSS + JavaScript |
-| **HTTP Client** | HTTPX (async) |
-| **Data Validation** | Pydantic v2 |
-| **Environment** | python-dotenv |
+| **LLM Provider** | Groq API (`llama-3.3-70b-versatile` / `llama-3.1-8b-instant`) |
+| **Embedding Model** | `BAAI/bge-base-en` (local via `sentence-transformers` with fallback to HuggingFace Inference API) |
+| **Authentication** | Supabase Auth (GoTrue) |
+| **Frontend** | HTML5 + CSS3 (Glassmorphic) + Vanilla JavaScript |
+| **Diagram Engine** | Mermaid.js v10 (with custom error handling & auto-sanitizer) |
 
 ---
 
 ## 📁 Project Structure
 
 ```
-testing/
-├── app.py                  # Main FastAPI application (1261 lines)
-├── run.py                  # Server entry point (Uvicorn)
-├── test_connectivity.py    # Supabase + Neo4j connectivity tester
+GraphRag-Research-Assistant/
+├── api/
+│   └── index.py            # Vercel serverless entry point
+├── app/
+│   ├── app.py              # Main FastAPI application & API routes
+│   ├── embeddingService/   # Local embedding logic
+│   └── sources/            # Integrations: semantic_scholar.py & papers_with_code.py
+├── frontend/
+│   ├── index.html          # Main chat interface
+│   ├── landing.html        # Secure Login/Signup landing page
+│   ├── app.js              # Frontend logic (Supabase auth, query processing, Mermaid rendering)
+│   └── styles.css          # Dark-theme stylesheet
+├── ingestion/
+│   ├── dblp-v10.csv        # Dataset seed (git-ignored)
+│   └── ingestIntoSupabase.py # Ingestion script
+├── tests/                  # Backend tests
 ├── requirements.txt        # Python dependencies
-├── .env                    # Your actual environment variables (git-ignored)
+├── .env                    # Environment variables (git-ignored)
 ├── .env.example            # Template for environment variables
-├── connectivity_report.json # Auto-generated by test_connectivity.py
-└── frontend/
-    ├── index.html          # Frontend UI (served at /app)
-    ├── styles.css          # Dark-mode stylesheet
-    └── app.js              # Frontend JavaScript logic
+├── vercel.json             # Vercel deployment configuration
+├── test_prompt.py          # LLM prompt validation script
+└── test_sources.py         # Sources enrichment integration validation script
 ```
 
 ---
@@ -112,19 +132,19 @@ testing/
 ## 📦 Prerequisites
 
 - Python **3.10+**
-- A **Supabase** project with the `match_paper_chunks` RPC function deployed
-- A **Neo4j Aura** (or self-hosted) instance with publication graph data
-- A **Groq API** key — get one at [console.groq.com](https://console.groq.com)
-- A **HuggingFace** token — get one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+- A **Supabase** project with the `match_paper_chunks` RPC function and `chat_sessions` table deployed.
+- A **Neo4j Aura** (or self-hosted) instance with publication graph data.
+- A **Groq API** key — get one at [console.groq.com](https://console.groq.com).
+- A **HuggingFace** token (optional, used as fallback for embeddings if `sentence-transformers` is running on cloud platforms like Vercel).
 
 ---
 
 ## 🚀 Setup & Installation
 
-### 1. Clone / open the project
+### 1. Clone the project
 
 ```bash
-cd c:\Users\YourName\projects\testing
+cd c:\Users\YourName\projects\GraphRag-Research-Assistant
 ```
 
 ### 2. Create a virtual environment
@@ -165,6 +185,7 @@ Create a `.env` file in the project root with the following variables:
 # ── Required ─────────────────────────────────────────────────────────
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SUPABASE_KEY=your-anon-public-key
 
 NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
 NEO4J_USER=neo4j
@@ -174,7 +195,7 @@ GROQ_API_KEY=your-groq-api-key
 HF_TOKEN=your-huggingface-token
 
 # ── Optional (defaults shown) ─────────────────────────────────────────
-EMBED_MODEL=Snowflake/snowflake-arctic-embed-l-v2.0
+EMBED_MODEL=BAAI/bge-base-en
 REASON_MODEL=llama-3.1-8b-instant        # Fast model for routing & verification
 HEAVY_MODEL=llama-3.3-70b-versatile      # Powerful model for deep research
 MAX_GRAPH_NODES=20
@@ -187,16 +208,14 @@ WORKERS=1
 RELEVANCE_FLOOR=0.25                     # Minimum similarity to keep a chunk
 ```
 
-> **Note:** Never commit your `.env` file to version control. Only commit `.env.example`.
-
 ---
 
 ## ▶️ Running the Project
 
-### Start the server
+### Start the server locally
 
 ```bash
-python run.py
+python -m app.app
 ```
 
 You will see:
@@ -210,11 +229,17 @@ INFO | Application startup complete.
 INFO | Uvicorn running on http://0.0.0.0:8000
 ```
 
+### Run on Vercel locally
+
+```bash
+vercel dev
+```
+
 ### Access the application
 
 | URL | Purpose |
 |---|---|
-| `http://localhost:8000/app` | 🖥️ **Frontend UI** (main interface) |
+| `http://localhost:8000/app` | 🖥️ **Frontend UI** (redirects to `/app/landing.html` if unauthenticated) |
 | `http://localhost:8000/docs` | 📖 **Swagger API docs** (interactive) |
 | `http://localhost:8000/api/health` | 💚 **Health check** |
 | `http://localhost:8000/api/health/full` | 🔍 **Full diagnostics** |
@@ -230,10 +255,10 @@ Quick health check.
 {
   "status": "ok",
   "service": "GraphRAG Research API",
-  "version": "3.0.0",
+  "version": "5.0.0",
   "ready": true,
   "neo4j": true,
-  "features": ["anti-hallucination-verification", "relevance-filtering", "grounded-prompts", "multi-turn-chat"]
+  "features": ["anti-hallucination-verification", "relevance-filtering", "grounded-prompts", "multi-turn-chat", "academic-enrichment"]
 }
 ```
 
@@ -254,27 +279,6 @@ Main research query endpoint.
     "year": 2023,
     "domain": "computer science"
   }
-}
-```
-
-**Response:**
-```json
-{
-  "request_id": "uuid",
-  "answer": "According to [1]...",
-  "intent": "research",
-  "papers": [...],
-  "chunks": [...],
-  "verification": {
-    "confidence": 0.92,
-    "verified_claims": 8,
-    "total_claims": 9,
-    "flagged_claims": [],
-    "verdict": "PASS"
-  },
-  "latency_ms": 3200,
-  "model_used": "llama-3.1-8b-instant",
-  "warning": null
 }
 ```
 
@@ -300,27 +304,12 @@ Multi-turn conversation with RAG context.
 
 ---
 
-### `POST /api/research/bulk`
-Batch multiple research queries (max 10).
-
-**Request:**
-```json
-{
-  "queries": ["What is RAG?", "Explain knowledge graphs"],
-  "top_k": 3
-}
-```
-
----
-
-### `GET /v1/models` · `POST /v1/chat/completions`
-OpenAI-compatible endpoints. Drop-in replacement for OpenAI SDK clients pointing to `http://localhost:8000`.
+### `GET /api/history` · `POST /api/history` · `DELETE /api/history/{session_id}`
+Endpoints for listing, saving, and deleting user chat sessions synced to the Supabase database.
 
 ---
 
 ## 🖥️ Frontend Guide
-
-The frontend is served automatically at `http://localhost:8000/app`.
 
 ### Settings Panel (left sidebar)
 
@@ -333,14 +322,13 @@ The frontend is served automatically at `http://localhost:8000/app`.
 
 ### Using the UI
 
-1. Type your research question in the input box at the bottom
-2. Press **Enter** to send (or **Shift+Enter** for a new line)
+1. Authenticate via the Login/Signup page (`landing.html`).
+2. Type your research question in the input box at the bottom.
 3. The response includes:
    - A grounded answer with inline citations `[1]`, `[2]`, etc.
-   - Source papers used
-   - Verification confidence score
-4. Use the **quick suggestion cards** for popular topics
-5. Your conversation history appears in the left sidebar
+   - Enriched source papers (citations, code, upvotes).
+   - An interactive visual flowchart (auto-rendered via Mermaid.js).
+   - Verification confidence score.
 
 ---
 
@@ -363,47 +351,6 @@ python test_connectivity.py
 
 **Output:** A `connectivity_report.json` file is saved with full diagnostic results.
 
-**Exit codes:**
-| Code | Meaning |
-|---|---|
-| `0` | All services connected |
-| `1` | Partial connectivity |
-| `2` | No services connected |
-
----
-
-## 🛡️ Anti-Hallucination Pipeline
-
-The 6-step pipeline that prevents LLM fabrication:
-
-```
-Query
-  │
-  ▼
-1. Intent Classification (research / general / chitchat)
-  │
-  ▼
-2. Keyword Extraction + Embedding (parallel)
-  │
-  ▼
-3. Graph Retrieval (Neo4j seed → expand via CITES / WRITTEN_BY / PUBLISHED_IN)
-  │
-  ▼
-4. Vector Search (tiered: seed papers first, then expanded neighbours) + RRF Fusion
-  │
-  ▼
-5. Relevance Filter (drop chunks < 0.25 similarity)
-  │
-  ▼
-6. Grounded LLM Answer (temperature=0, mandatory citations)
-  │
-  ▼
-7. Verification Pass (second LLM checks every claim → confidence + verdict)
-  │
-  ▼
-Final Response with verification report
-```
-
 ---
 
 ## 🔧 Troubleshooting
@@ -419,15 +366,10 @@ Final Response with verification report
 
 ### Supabase RPC not found
 - The `match_paper_chunks` PostgreSQL function must be deployed in your Supabase project
-- Check the SQL functions section in your Supabase dashboard
 
 ### Embedding errors
-- Verify your `HF_TOKEN` is valid and has access to the embedding model
-- Try increasing `EMBED_TIMEOUT` in `.env` if it times out
-
-### Rate limit errors (429)
-- The API has a default limit of **30 requests/minute per IP**
-- Adjust `RATE_LIMIT_PER_MIN` in `.env` to increase it
+- Verify your `HF_TOKEN` is valid and has access to the embedding model if running on Vercel
+- Verify `sentence-transformers` is installed for local execution
 
 ---
 
@@ -438,30 +380,3 @@ This project is for research and educational purposes.
 ---
 
 *Built with ❤️ using FastAPI, Neo4j, Supabase, Groq, and HuggingFace*
-
-
-
-
-
-
-taskkill /IM python.exe /F
-
-
-plnning to implement
-
-
-                ┌──────────────┐
-                │   User Query │
-                └──────┬───────┘
-                       ↓
-               Intent Detection
-                       ↓
-     ┌──────────────┬──────────────┬──────────────┐
-     ↓              ↓              ↓
- Title Query   Metadata Query   Concept Query
-     ↓              ↓              ↓
- Graph + ID     Graph Only     Supabase First
-     ↓                             ↓
- Supabase (by ID)              Graph Expand
-     ↓                             ↓
-           LLM (Grounded Answer)
