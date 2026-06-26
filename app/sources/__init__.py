@@ -12,6 +12,9 @@ from .papers_with_code import (
     get_paper_datasets_pwc,
     enrich_arxiv_papers_with_pwc,
 )
+from .arxiv_mcp import (
+    query_arxiv_mcp,
+)
 
 __all__ = [
     "search_papers_s2",
@@ -20,4 +23,5 @@ __all__ = [
     "get_paper_repos_pwc",
     "get_paper_datasets_pwc",
     "enrich_arxiv_papers_with_pwc",
+    "query_arxiv_mcp",
 ]

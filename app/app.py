@@ -1580,6 +1580,16 @@ async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, A
     if not query.strip():
         return []
     
+    # Try ArXiv MCP Server if configured in env
+    if os.getenv("ARXIV_MCP_URL"):
+        try:
+            from sources.arxiv_mcp import query_arxiv_mcp
+            mcp_papers = await query_arxiv_mcp(query, limit=limit)
+            if mcp_papers:
+                return mcp_papers
+        except Exception as e:
+            log.warning(f"ArXiv MCP query failed: {e}. Falling back to standard XML feed.")
+    
     # URL encode query and format search
     clean_query = query.replace('"', '').replace("'", "")
     encoded_query = urllib.parse.quote(f'all:"{clean_query}"' if " " in clean_query else f"all:{clean_query}")
