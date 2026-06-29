@@ -2932,8 +2932,7 @@ mark.smart-highlight {
     opacity: 1;
     transform: translateY(0);
 }
-
-*/:root {
+:root {
     --primary: #6366f1;
     --text-primary: #ffffff;
 }
@@ -3348,6 +3347,31 @@ mjx-container:not([display="true"]) {
 
 .landing-body {
     background: #06070a;
+    
+    /* Force dark theme colors for the landing page (which is always dark themed) */
+    --bg-primary: #0a0a0f;
+    --bg-secondary: #111118;
+    --bg-main: #0B0E14;
+    --bg-paper: rgba(17, 21, 28, 0.7);
+    --bg-accent: rgba(30, 41, 59, 0.5);
+    --glass-bg: rgba(22, 27, 34, 0.6);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+    --bg-tertiary: #16161f;
+    --bg-elevated: #1c1c28;
+    --bg-hover: #22222f;
+    --bg-active: #282838;
+    --surface-glass: rgba(59, 59, 219, 0.7);
+    --surface-glass-border: rgba(100, 100, 180, 0.12);
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-dim: #64748b;
+    --text-tertiary: #6b6b80;
+    --text-muted: #4a4a5c;
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+    
     color: var(--text-primary);
     font-family: 'Outfit', 'Inter', system-ui, sans-serif;
     min-height: 100vh;
@@ -4711,6 +4735,8 @@ mjx-container:not([display="true"]) {
 
 /* ── Footer Elements ── */
 .landing-footer {
+    position: relative;
+    z-index: 10;
     width: 100%;
     max-width: 1200px;
     margin: 0 auto;
@@ -4859,6 +4885,11 @@ mjx-container:not([display="true"]) {
     border-color: rgba(99, 102, 241, 0.4);
     background: rgba(255, 255, 255, 0.04);
     box-shadow: 0 0 10px rgba(99, 102, 241, 0.1);
+}
+
+.newsletter-input-group input::placeholder {
+    color: var(--text-dim);
+    opacity: 0.8;
 }
 
 .btn-newsletter {
