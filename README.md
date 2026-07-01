@@ -26,14 +26,17 @@
 
 ## 🧠 Overview
 
-**GraphRAG Research Assistant v5.0** is a full-stack AI research tool that combines:
+**GraphRAG Research Assistant v4.0 — Aether Intelligence Edition** is a full-stack AI research tool that combines:
 
-- **Graph-based retrieval** via Neo4j (196,875 nodes, 398,961 relationships across 111,896 publication nodes)
-- **Vector similarity search** via Supabase pgvector
-- **Academic Source Enrichment** via Semantic Scholar API and Papers With Code (HuggingFace Papers API)
+- **Graph-based retrieval** via Neo4j Aura (196,875 nodes, 398,961 relationships across 111,896 publication nodes)
+- **Vector similarity search** via Supabase pgvector (3-tier: seed-exact → seed-fuzzy → expanded neighbours)
+- **Academic Source Enrichment** via Semantic Scholar API, Papers With Code, and ArXiv MCP Server
 - **Large Language Models** via Groq API (Llama 3.3 70B / Llama 3.1 8B)
-- **Anti-hallucination pipeline** with dual-pass verification and confidence scoring
+- **Unified Query Planning Brain** (`plan_query()`) — single LLM call producing a structured `QueryPlan` with route, graph anchors, vector keywords, and cache key
+- **MMR diversity re-ranking** (Maximal Marginal Relevance, λ=0.6) to prevent redundant results
+- **Anti-hallucination pipeline** with dual-pass verification and confidence scoring (PASS / PARTIAL / FAIL)
 - **Supabase Authentication** for secure user login and conversation persistence
+- **In-memory LRU cache** with user-partitioned buckets (graph · embed · llm · plan · relations · api)
 
 It serves both a **REST API** (FastAPI) and a **browser-based frontend UI** from a single server.
 
@@ -41,23 +44,27 @@ It serves both a **REST API** (FastAPI) and a **browser-based frontend UI** from
 ---
 
 ## 🏗️ Architecture
-![Alt Text](aether_full_system_architecture.svg)
+
+![Aether Full System Architecture v4.0](aether_full_system_architecture_v4.png)
 
 ---
 
 ## ✨ Features
 
 ### 🔍 Advanced Hybrid Retrieval Pipeline
-- **Intent Classification** — auto-routes research vs. general/chitchat queries.
-- **Keyword Extraction** — extracts 3–5 search keywords from natural language.
-- **Graph Traversal** — Neo4j seed + expand via `CITES`, `WRITTEN_BY`, `PUBLISHED_IN` relationships.
-- **Tiered Vector Search** — seed papers searched first, then expanded neighbors.
-- **Reciprocal Rank Fusion (RRF)** — merges multiple result lists into a single ranked list.
-- **Non-blocking Async Offloading** — Database operations (Neo4j, Supabase) are offloaded to asynchronous threads, preventing blockage of the FastAPI event loop for high concurrency.
+- **Unified Query Planning Brain** — `plan_query()` (single LLM call via `llama-3.1-8b-instant`) produces a `QueryPlan` with: route, graph anchors, vector keywords, required metrics, and a deterministic cache key.
+- **Intent Routing** — auto-routes to: `research`, `compare`, `timeline`, `survey`, or `chitchat`.
+- **Graph Traversal** — Neo4j seed paper ranking (exact → substring → word-overlap → recency) + expand via `CITES`, `WRITTEN_BY`, `PUBLISHED_IN`, `SIMILAR_TO` relationships.
+- **Co-citation Analysis** — Bibliographic coupling, author collaboration graph, venue clustering.
+- **3-Tier Vector Search** — seed-exact → seed-fuzzy → expanded graph neighbours via Supabase pgvector.
+- **RRF Fusion + MMR Re-ranking** — Reciprocal Rank Fusion merges lists; Maximal Marginal Relevance (λ=0.6) prevents redundancy.
+- **Relevance Floor Filter** — drops chunks below 0.22 cosine similarity.
+- **Non-blocking Async Offloading** — Neo4j and Supabase operations run in async threads, preserving FastAPI event loop throughput.
 
 ### 🌐 Academic Source & Code Enrichment
 - **Semantic Scholar Integration** — automatically retrieves up-to-date citation counts, paper abstracts, and venue statistics.
 - **Papers With Code Integration** — extracts official code repositories (GitHub), linked models, datasets, and upvote metrics.
+- **ArXiv MCP Server** — dedicated MCP sidecar (`arxiv-mcp-server/`) for paper search and full PDF fetch.
 
 ### 🛡️ Anti-Hallucination Pipeline
 A rigorous 7-step pipeline prevents LLM fabrication:
@@ -69,7 +76,7 @@ A rigorous 7-step pipeline prevents LLM fabrication:
 6. **Grounded Answer**: Zero-temperature prompting with mandatory inline citations.
 7. **Verification Pass**: Dual-pass LLM fact-checking for a final `PASS/FAIL` verdict with confidence scoring.
 
-![Aether Intent Routing Flowchart](aether_intent_routing_flowchart.svg)
+![Aether Intent Routing Flowchart v4.0](aether_intent_routing_flowchart_v4.png)
 
 ### 🖥️ Modern Frontend UI
 - Premium dark-mode research assistant interface.
@@ -80,7 +87,9 @@ A rigorous 7-step pipeline prevents LLM fabrication:
 - System health monitor.
 
 ### 🔌 API Compatibility
-- Native REST API (`/api/research`, `/api/chat`, `/api/history`)
+- Native REST API: `/api/research`, `/api/chat`, `/api/history`, `/api/stats`
+- **Graph endpoints**: `/api/graph/paper/{id}`, `/api/graph/author/{name}`, `/api/graph/citation-path`, `/api/graph/trending`, `/api/graph/compare`
+- **Research modes**: `/api/research/timeline`, `/api/research/survey`, `/api/research/bulk`
 - **OpenAI-compatible endpoints** (`/v1/chat/completions`, `/v1/models`) — drop-in for OpenAI SDK clients.
 
 ---
@@ -92,11 +101,15 @@ A rigorous 7-step pipeline prevents LLM fabrication:
 | **Backend Framework** | FastAPI 0.115 + Uvicorn |
 | **Graph Database** | Neo4j Aura (cloud) |
 | **Vector Database** | Supabase (PostgreSQL + pgvector) |
-| **LLM Provider** | Groq API (`llama-3.3-70b-versatile` / `llama-3.1-8b-instant`) |
-| **Embedding Model** | `BAAI/bge-base-en` (local via `sentence-transformers` with fallback to HuggingFace Inference API) |
-| **Authentication** | Supabase Auth (GoTrue) |
+| **LLM Provider** | Groq API — `llama-3.1-8b-instant` (plan/fast) · `llama-3.3-70b-versatile` (heavy) |
+| **Embedding Model** | `BAAI/bge-base-en` (local via `sentence-transformers`; HuggingFace Inference API fallback) |
+| **Query Planning** | `plan_query()` — unified brain producing structured `QueryPlan` JSON |
+| **Re-ranking** | Reciprocal Rank Fusion (RRF) + Maximal Marginal Relevance (MMR, λ=0.6) |
+| **Caching** | In-memory LRU (6 buckets, user-partitioned, TTL 5 min / 12 hr for API) |
+| **Authentication** | Supabase Auth (GoTrue JWT) |
 | **Frontend** | HTML5 + CSS3 (Glassmorphic) + Vanilla JavaScript |
 | **Diagram Engine** | Mermaid.js v10 (with custom error handling & auto-sanitizer) |
+| **External Sources** | Semantic Scholar API · Papers With Code · ArXiv MCP Server |
 
 ---
 
@@ -105,26 +118,37 @@ A rigorous 7-step pipeline prevents LLM fabrication:
 ```
 GraphRag-Research-Assistant/
 ├── api/
-│   └── index.py            # Vercel serverless entry point
+│   └── index.py                      # Vercel serverless entry point
 ├── app/
-│   ├── app.py              # Main FastAPI application & API routes
-│   ├── embeddingService/   # Local embedding logic
-│   └── sources/            # Integrations: semantic_scholar.py & papers_with_code.py
+│   ├── app.py                        # Main FastAPI application & all API routes (v4.0)
+│   ├── embeddingService/
+│   │   └── embeddings.py             # Local BAAI/bge-base-en + HF API fallback
+│   └── sources/
+│       ├── semantic_scholar.py       # Semantic Scholar citation & abstract enrichment
+│       ├── papers_with_code.py       # GitHub repos, datasets & upvote enrichment
+│       └── arxiv_mcp.py              # ArXiv MCP connector (paper search + PDF fetch)
+├── arxiv-mcp-server/
+│   ├── mcp_server.py                 # Standalone ArXiv MCP sidecar server
+│   ├── Dockerfile                    # Container for MCP server
+│   └── requirements.txt
 ├── frontend/
-│   ├── index.html          # Main chat interface
-│   ├── landing.html        # Secure Login/Signup landing page
-│   ├── app.js              # Frontend logic (Supabase auth, query processing, Mermaid rendering)
-│   └── styles.css          # Dark-theme stylesheet
+│   ├── index.html                    # Main chat interface
+│   ├── landing.html                  # Secure Login/Signup landing page
+│   ├── app.js                        # Frontend logic (Supabase auth, query processing, Mermaid rendering)
+│   └── styles.css                    # Dark-theme glassmorphic stylesheet
 ├── ingestion/
-│   ├── dblp-v10.csv        # Dataset seed (git-ignored)
-│   └── ingestIntoSupabase.py # Ingestion script
-├── tests/                  # Backend tests
-├── requirements.txt        # Python dependencies
-├── .env                    # Environment variables (git-ignored)
-├── .env.example            # Template for environment variables
-├── vercel.json             # Vercel deployment configuration
-├── test_prompt.py          # LLM prompt validation script
-└── test_sources.py         # Sources enrichment integration validation script
+│   ├── ingestIntoSupabase.py         # Primary ingestion script
+│   └── scripttouploadpaperchunkstable.py  # Paper chunks uploader
+├── docs/
+│   └── vercel_bundle_size_resolution.md  # Deployment notes
+├── tests/                            # Backend tests
+├── brain/                            # Conversation history (local dev only)
+├── requirements.txt                  # Python dependencies
+├── requirements-local.txt            # Local-only dependencies (sentence-transformers)
+├── .env                              # Environment variables (git-ignored)
+├── vercel.json                       # Vercel deployment configuration
+├── test_prompt.py                    # LLM prompt validation script
+└── test_sources.py                   # Sources enrichment integration validation script
 ```
 
 ---
@@ -375,7 +399,8 @@ python test_connectivity.py
 
 ## 📄 License
 
-This project is for research and educational purposes.
+This project is licensed under the **Apache License 2.0**.
+See the [LICENSE](LICENSE) file for full terms.
 
 ---
 
