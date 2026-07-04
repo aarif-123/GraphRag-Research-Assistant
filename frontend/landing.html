@@ -9,7 +9,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css?v=2.0">
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="landing-body">
     <!-- Animated Network Graph Canvas -->
@@ -404,6 +403,10 @@
                         <span id="status-supabase" class="micro-dot status-unknown"></span>
                     </div>
                     <div class="micro-status-item">
+                        <span class="micro-status-label">Auth DB</span>
+                        <span id="status-mongodb" class="micro-dot status-unknown"></span>
+                    </div>
+                    <div class="micro-status-item">
                         <span class="micro-status-label">Graph DB</span>
                         <span id="status-neo4j" class="micro-dot status-unknown"></span>
                     </div>
@@ -612,22 +615,22 @@
             }
         });
 
-        // ── Supabase Authentication ──
-        let supabaseClient = null;
-
+        // ── MongoDB Authentication & Status ──
         async function initAuth() {
-            try {
-                const res = await fetch('/api/config');
-                const config = await res.json();
-                supabaseClient = window.supabase.createClient(config.supabase_url, config.supabase_anon_key);
-                
-                // If user has session, auto redirect to app
-                const { data: { session } } = await supabaseClient.auth.getSession();
-                if (session) {
-                    window.location.href = '/app';
+            const token = localStorage.getItem('aether_token');
+            if (token) {
+                try {
+                    const res = await fetch('/api/auth/me', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (res.ok) {
+                        window.location.href = '/app';
+                    } else {
+                        localStorage.removeItem('aether_token');
+                    }
+                } catch (e) {
+                    console.error("Auth verification error:", e);
                 }
-            } catch (e) {
-                console.error("Supabase load error:", e);
             }
         }
 
@@ -639,6 +642,7 @@
 
             // Elements for micro-statuses
             const statusDb = document.getElementById('status-supabase');
+            const statusMongo = document.getElementById('status-mongodb');
             const statusGraph = document.getElementById('status-neo4j');
             const statusLlm = document.getElementById('status-groq');
             const statusEmbed = document.getElementById('status-embed');
@@ -654,12 +658,13 @@
                         
                         // Set local indicators to operational fast
                         if (statusDb) statusDb.className = 'micro-dot status-operational';
+                        if (statusMongo) statusMongo.className = 'micro-dot status-operational';
                         if (statusGraph) statusGraph.className = data.neo4j ? 'micro-dot status-operational' : 'micro-dot status-offline';
                         if (statusLlm) statusLlm.className = 'micro-dot status-operational';
                         if (statusEmbed) statusEmbed.className = 'micro-dot status-operational';
                         
                         // Now trigger the full health diagnostic in the background
-                        fetchFullHealth(statusDb, statusGraph, statusLlm, statusEmbed);
+                        fetchFullHealth(statusDb, statusMongo, statusGraph, statusLlm, statusEmbed);
                         return;
                     }
                 }
@@ -675,13 +680,14 @@
             function setAllMicroStatus(status) {
                 const className = `micro-dot status-${status}`;
                 if (statusDb) statusDb.className = className;
+                if (statusMongo) statusMongo.className = className;
                 if (statusGraph) statusGraph.className = className;
                 if (statusLlm) statusLlm.className = className;
                 if (statusEmbed) statusEmbed.className = className;
             }
         }
 
-        async function fetchFullHealth(statusDb, statusGraph, statusLlm, statusEmbed) {
+        async function fetchFullHealth(statusDb, statusMongo, statusGraph, statusLlm, statusEmbed) {
             try {
                 const res = await fetch('/api/health/full');
                 if (res.ok) {
@@ -689,6 +695,7 @@
                     const checks = data.checks || {};
                     
                     if (statusDb) statusDb.className = checks.supabase === 'ok' ? 'micro-dot status-operational' : 'micro-dot status-offline';
+                    if (statusMongo) statusMongo.className = checks.mongodb === 'ok' ? 'micro-dot status-operational' : 'micro-dot status-offline';
                     if (statusGraph) statusGraph.className = checks.neo4j === 'ok' ? 'micro-dot status-operational' : 'micro-dot status-offline';
                     if (statusLlm) statusLlm.className = checks.groq === 'ok' ? 'micro-dot status-operational' : 'micro-dot status-offline';
                     if (statusEmbed) statusEmbed.className = checks.embedding === 'ok' ? 'micro-dot status-operational' : 'micro-dot status-offline';
@@ -911,10 +918,6 @@
 
         async function handleAuth(event, type) {
             event.preventDefault();
-            if (!supabaseClient) {
-                alert("Auth system not ready yet. Please try again in a moment.");
-                return;
-            }
 
             if (type === 'signin') {
                 signInError.textContent = '';
@@ -926,16 +929,16 @@
                 submitBtn.textContent = 'Signing In...';
 
                 try {
-                    const { data, error } = await supabaseClient.auth.signInWithPassword({
-                        email,
-                        password,
+                    const res = await fetch('/api/auth/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
                     });
-
-                    if (error) {
-                        signInError.textContent = error.message;
-                    } else if (data.session) {
-                        // Store access token in localStorage for easy access
-                        localStorage.setItem('aether_token', data.session.access_token);
+                    const data = await res.json();
+                    if (!res.ok) {
+                        signInError.textContent = data.detail || 'Invalid email or password';
+                    } else if (data.access_token) {
+                        localStorage.setItem('aether_token', data.access_token);
                         window.location.href = '/app';
                     }
                 } catch (err) {
@@ -955,22 +958,17 @@
                 submitBtn.textContent = 'Creating Account...';
 
                 try {
-                    const { data, error } = await supabaseClient.auth.signUp({
-                        email,
-                        password,
+                    const res = await fetch('/api/auth/signup', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
                     });
-
-                    if (error) {
-                        signUpError.textContent = error.message;
-                    } else {
-                        // Check if we signed in automatically or need verification
-                        if (data.session) {
-                            localStorage.setItem('aether_token', data.session.access_token);
-                            window.location.href = '/app';
-                        } else {
-                            signUpSuccess.textContent = 'Sign up successful! Please check your email inbox to confirm your account.';
-                            signUpForm.reset();
-                        }
+                    const data = await res.json();
+                    if (!res.ok) {
+                        signUpError.textContent = data.detail || 'Failed to sign up';
+                    } else if (data.access_token) {
+                        localStorage.setItem('aether_token', data.access_token);
+                        window.location.href = '/app';
                     }
                 } catch (err) {
                     signUpError.textContent = 'An unexpected error occurred. Please try again.';

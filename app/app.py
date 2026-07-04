@@ -74,6 +74,9 @@ from pydantic import BaseModel, Field, field_validator
 import httpx
 import fitz
 import numpy as np
+import jwt
+import bcrypt
+from pymongo import MongoClient
 
 from supabase import create_client
 from neo4j import GraphDatabase, exceptions as neo4j_exceptions
@@ -125,6 +128,16 @@ load_dotenv(".env", override=False)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "aether_research_assistant")
+JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-aether-key-change-in-prod")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_HOURS = 24 * 7  # 1 week
+
+# MongoDB global reference
+mongo_client = None
+db = None
 NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
@@ -293,12 +306,23 @@ class Pool:
         self._ready = False
 
     async def init(self) -> None:
+        global mongo_client, db
         errors = []
         try:
             self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
             log.info("Supabase connected")
         except Exception as e:
             errors.append(f"Supabase: {e}")
+
+        try:
+            mongo_client = MongoClient(MONGODB_URI)
+            db = mongo_client[MONGODB_DB_NAME]
+            # Create a unique index on email
+            db.users.create_index("email", unique=True)
+            log.info("MongoDB connected and unique index on email verified")
+        except Exception as e:
+            errors.append(f"MongoDB: {e}")
+            log.error(f"MongoDB connection failed: {e}")
 
         try:
             self.neo4j = GraphDatabase.driver(
@@ -318,16 +342,20 @@ class Pool:
             timeout=httpx.Timeout(GROQ_TIMEOUT, connect=5.0),
             limits=httpx.Limits(max_connections=30, max_keepalive_connections=15),
         )
-        if self.supabase:
+        if self.supabase and db is not None:
             self._ready = True
         if errors:
             log.warning(f"Startup errors: {errors}")
 
     async def close(self) -> None:
+        global mongo_client
         if self.groq_http:
             await self.groq_http.aclose()
         if self.neo4j:
             self.neo4j.close()
+        if mongo_client:
+            mongo_client.close()
+            log.info("MongoDB connection closed")
         log.info("Pool closed")
 
     def assert_ready(self) -> None:
@@ -495,6 +523,77 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
     allow_credentials=False,
 )
+
+
+# ── Local ArXiv MCP Server Definition ───────────────────────────
+from mcp.server.fastmcp import FastMCP
+import urllib.parse
+import xml.etree.ElementTree as ET
+
+mcp_server = FastMCP("Aether ArXiv MCP Server")
+
+@mcp_server.tool()
+async def search_arxiv(query: str, limit: int = 5) -> list:
+    """
+    Search ArXiv for papers by query.
+    Returns a list of dictionaries containing title, summary, authors, published date, etc.
+    """
+    log.info(f"[MCP Server] search_arxiv called with query: '{query}', limit: {limit}")
+    if not query.strip():
+        return []
+    
+    clean_query = query.replace('"', '').replace("'", "")
+    encoded_query = urllib.parse.quote(f'all:"{clean_query}"' if " " in clean_query else f"all:{clean_query}")
+    url = f"https://export.arxiv.org/api/query?search_query={encoded_query}&max_results={limit}&sortBy=relevance"
+    
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.get(url)
+            if response.status_code != 200:
+                log.warning(f"[MCP Server] arXiv API returned status code {response.status_code}")
+                return []
+                
+            root = ET.fromstring(response.content)
+            ns = {'atom': 'http://www.w3.org/2005/Atom'}
+            
+            papers = []
+            for entry in root.findall('atom:entry', ns):
+                title_node = entry.find('atom:title', ns)
+                summary_node = entry.find('atom:summary', ns)
+                id_node = entry.find('atom:id', ns)
+                published_node = entry.find('atom:published', ns)
+                
+                title = title_node.text.strip().replace("\n", " ") if title_node is not None and title_node.text else "Unknown Title"
+                summary = summary_node.text.strip().replace("\n", " ") if summary_node is not None and summary_node.text else "No Abstract Available"
+                
+                arxiv_url = id_node.text.strip() if id_node is not None and id_node.text else ""
+                arxiv_id = arxiv_url.split('/abs/')[-1] if '/abs/' in arxiv_url else ""
+                
+                published = published_node.text.strip() if published_node is not None and published_node.text else ""
+                
+                authors = []
+                for author_node in entry.findall('atom:author', ns):
+                    name_node = author_node.find('atom:name', ns)
+                    if name_node is not None and name_node.text:
+                        authors.append(name_node.text.strip())
+                        
+                pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id else ""
+                
+                papers.append({
+                    "title": title,
+                    "summary": summary,
+                    "authors": authors,
+                    "published": published,
+                    "arxiv_id": arxiv_id,
+                    "pdf_url": pdf_url
+                })
+            return papers
+    except Exception as e:
+        log.error(f"[MCP Server] Error in search_arxiv tool: {e}", exc_info=True)
+        return []
+
+# Mount the MCP server's SSE application on Aether's /sse endpoint
+app.mount("/sse", mcp_server.sse_app())
 
 
 @app.exception_handler(Exception)
@@ -1581,9 +1680,18 @@ async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, A
         return []
     
     # Try ArXiv MCP Server if configured in env
-    if os.getenv("ARXIV_MCP_URL"):
+    mcp_url = os.getenv("ARXIV_MCP_URL")
+    is_self = False
+    if mcp_url:
+        import urllib.parse
+        parsed = urllib.parse.urlparse(mcp_url)
+        # Avoid calling ourselves via HTTP to prevent single-worker deadlocks
+        if "graphrag-research-assistant.onrender.com" in parsed.netloc or "localhost:8000" in parsed.netloc or "127.0.0.1:8000" in parsed.netloc:
+            is_self = True
+
+    if mcp_url and not is_self:
         try:
-            from sources.arxiv_mcp import query_arxiv_mcp
+            from app.sources.arxiv_mcp import query_arxiv_mcp
             mcp_papers = await query_arxiv_mcp(query, limit=limit)
             if mcp_papers:
                 return mcp_papers
@@ -1976,6 +2084,8 @@ def _base_rules() -> str:
   4. Draw connections strictly between node identifiers (e.g. `A --> B` or `step_1 ==> step_2`). Never use labels or text containing spaces to draw connections directly.
   5. Connection labels must always use the pipe syntax immediately following the arrow with no spaces, e.g. `A -->|Yes| B` or `A ==>|No| B`. Do not write `A --> |Yes| B` or `A -- Yes --> B`.
   6. Never use raw HTML tags (like `<br>` or `<b>`) inside node labels.
+  7. NEVER use styling instructions (like 'style', 'classDef', or 'class') inside the Mermaid code. Let the default stylesheet style all nodes to keep them clean, readable, and consistent.
+
 
 ═══ SMART GRAPH + VECTOR SYNTHESIS ═══
 - INTEGRATE KNOWLEDGE: Combine granular textual evidence from "RETRIEVED CHUNK EVIDENCE" with the structural metadata (venues, authors, year, direct links) from "GRAPH RELATIONSHIP CONTEXT".
@@ -2662,7 +2772,12 @@ async def _research_impl(req: ResearchRequest, request: Request):
         except GraphRetrievalError as e:
             raise HTTPException(502, str(e))
         if not papers:
-            sys_p = "You are Aether, a research assistant. Respond comprehensively, warmly, and in detail using your general scientific knowledge, since no matching papers were found in the local index."
+            sys_p = (
+                "You are Aether, a GraphRAG research assistant. No matching records were found in the database. "
+                "Since this is an academic research query, you have the flexibility to address it using your general scientific knowledge, "
+                "but ONLY if you are fully confident in the accuracy of the facts and there is a very low chance of hallucination or output degradation. "
+                "If you are not 100% confident or if the topic is highly obscure, decline to answer by stating that no matching records were found in the index."
+            )
             answer = await groq_chat(
                 [{"role": "system", "content": sys_p}, {"role": "user", "content": f"Entity lookup query: {query}"}],
                 REASON_MODEL,
@@ -2694,9 +2809,14 @@ async def _research_impl(req: ResearchRequest, request: Request):
         except GraphRetrievalError as e:
             raise HTTPException(502, str(e))
         if not papers:
-            sys_p = "You are Aether, a research assistant. Respond comprehensively, warmly, and in detail using your general scientific knowledge, listing potential papers/contributions you know of in this area, since no matching papers were found in the local index."
+            sys_p = (
+                "You are Aether, a GraphRAG research assistant. No papers matching the criteria were found in the database. "
+                "Since this is an academic research query, you have the flexibility to list potential papers/contributions or synthesize the area using your general scientific knowledge, "
+                "but ONLY if you are fully confident in the accuracy of the facts and there is a very low chance of hallucination or output degradation. "
+                "If you are not 100% confident, decline to explain that no matching records were found in the database."
+            )
             answer = await groq_chat(
-                [{"role": "system", "content": sys_p}, {"role": "user", "content": f"List papers related to: {query}"}],
+                [{"role": "system", "content": sys_p}, {"role": "user", "content": f"List papers/contributions related to: {query}"}],
                 REASON_MODEL,
                 temperature=req.temperature,
             )
@@ -2717,7 +2837,12 @@ async def _research_impl(req: ResearchRequest, request: Request):
         except GraphRetrievalError as e:
             raise HTTPException(502, str(e))
         if not papers:
-            sys_p = "You are Aether, a research assistant. Respond comprehensively, warmly, and in detail using your general scientific knowledge, providing details about the paper if you know it, since it was not found in the local index."
+            sys_p = (
+                "You are Aether, a GraphRAG research assistant. The specified paper was not found in the database. "
+                "Since this is an academic research query, you have the flexibility to provide details about the paper from your general knowledge, "
+                "but ONLY if you are fully confident in the accuracy of the facts and there is a very low chance of hallucination or output degradation. "
+                "If you are not 100% confident, decline by explaining that the paper is not in the database."
+            )
             answer = await groq_chat(
                 [{"role": "system", "content": sys_p}, {"role": "user", "content": f"Provide information on the paper: {query}"}],
                 REASON_MODEL,
@@ -2739,11 +2864,16 @@ async def _research_impl(req: ResearchRequest, request: Request):
 
     # ── 5. Route: chitchat ────────────────────────────────────────────
     if plan.route == "chitchat":
-        sys_p = "You are Aether, a research assistant. Respond comprehensively, warmly, and in detail. Don't invent academic facts."
+        sys_p = (
+            "You are Aether, an evidence-only academic research assistant. "
+            "Acknowledge the user's message briefly (aim for under 3-4 sentences) and complete your response. "
+            "State clearly that you are optimized for scientific and academic literature queries and cannot answer general chitchat."
+        )
         answer = await groq_chat(
             [{"role": "system", "content": sys_p}, {"role": "user", "content": query}],
             REASON_MODEL,
             temperature=req.temperature,
+            max_tokens=250,
         )
         return _empty_response(rid, answer, "chitchat", t0)
 
@@ -2801,7 +2931,41 @@ async def _research_impl(req: ResearchRequest, request: Request):
         s2_papers = await search_papers_s2(query, limit=5)
 
     if not chunks and not arxiv_papers and not s2_papers:
-        warning = (warning or "") + " No chunks or external papers retrieved."
+        sys_p = (
+            "You are Aether, a GraphRAG research assistant. No specific papers or context chunks could be retrieved for this query. "
+            "Since this is an academic research query, you have the flexibility to address it using your general scientific knowledge, "
+            "but ONLY if you are fully confident in the facts and there is a very low chance of hallucination or output degradation. "
+            "If you cannot provide a highly accurate, confident answer, explain clearly and briefly that you cannot verify the details due to the lack of source literature."
+        )
+        try:
+            answer = await groq_chat(
+                [{"role": "system", "content": sys_p}, {"role": "user", "content": query}],
+                REASON_MODEL,
+                temperature=req.temperature,
+            )
+        except LLMError as e:
+            raise HTTPException(502, str(e))
+        
+        latency = int((time.time() - t0) * 1000)
+        return {
+            "request_id": rid,
+            "answer": answer,
+            "route": plan.route,
+            "plan": {
+                "standalone_query": plan.standalone_query,
+                "reasoning_path": plan.reasoning_path,
+            },
+            "papers": [],
+            "chunks": [],
+            "arxiv_papers": [],
+            "s2_papers": [],
+            "datasets": [],
+            "code_repos": [],
+            "verification": None,
+            "latency_ms": latency,
+            "model_used": REASON_MODEL,
+            "warning": "No context or external papers retrieved.",
+        }
 
     # Collect all datasets/repos from enriched papers for response
     all_datasets = []
@@ -3010,9 +3174,17 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
                 return _empty_response(rid, answer, "chitchat", t0)
             else:
-                return _empty_response(
-                    rid, "⚠️ No matching paper found.", "entity_lookup", t0
+                sys_p = (
+                    "You are Aether, a GraphRAG research assistant. No matching records were found in the database. "
+                    "Since this is an academic research query, you have the flexibility to address it using your general scientific knowledge, "
+                    "but ONLY if you are fully confident in the accuracy of the facts and there is a very low chance of hallucination or output degradation. "
+                    "If you are not 100% confident, decline by explaining that no matching records were found."
                 )
+                msgs = [{"role": "system", "content": sys_p}] + [
+                    {"role": m.role, "content": m.content} for m in req.messages
+                ]
+                answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
+                return _empty_response(rid, answer, "entity_lookup", t0)
         p = papers[0]
         auths = ", ".join(a for a in (p.get("authors") or []) if a) or "Unknown"
         answer = (
@@ -3043,7 +3215,17 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
                 return _empty_response(rid, answer, "chitchat", t0)
             else:
-                return _empty_response(rid, "⚠️ No papers found.", "structured", t0)
+                sys_p = (
+                    "You are Aether, a GraphRAG research assistant. No matching papers were found in the database to compile this list. "
+                    "Since this is an academic research query, you have the flexibility to list potential papers or compile a summary from your general scientific knowledge, "
+                    "but ONLY if you are fully confident in the accuracy of the facts and there is a very low chance of hallucination or output degradation. "
+                    "If you are not 100% confident, decline by explaining that no matching records were found."
+                )
+                msgs = [{"role": "system", "content": sys_p}] + [
+                    {"role": m.role, "content": m.content} for m in req.messages
+                ]
+                answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
+                return _empty_response(rid, answer, "structured", t0)
         lines = [f"Found **{len(papers)}** papers:\n"]
         for p in papers:
             auths = ", ".join(a for a in (p.get("authors") or []) if a) or "Unknown"
@@ -3053,14 +3235,22 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     # ── Route: chitchat ───────────────────────────────────────────────
     if plan.route == "chitchat":
         sys_p = (
-            "You are Aether. Respond comprehensively, warmly, and in detail. Do not invent academic facts."
+            "You are Aether, an evidence-only academic research assistant. "
+            "Acknowledge the user's message briefly (aim for under 3-4 sentences) and complete your response. "
+            "State clearly that you are optimized for scientific and academic literature queries and cannot answer general chitchat."
+            "Do not invent academic facts."
         )
         if pdf_context:
+            sys_p = (
+                "You are Aether, an academic research assistant. "
+                "Respond to the chitchat using the provided document context if relevant, otherwise reply briefly. Keep the output complete."
+            )
             sys_p += f"\n\n{pdf_context}"
+            
         msgs = [{"role": "system", "content": sys_p}] + [
             {"role": m.role, "content": m.content} for m in req.messages
         ]
-        answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
+        answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature, max_tokens=350 if pdf_context else 250)
         return _empty_response(rid, answer, "chitchat", t0)
 
     # ── Full RAG ──────────────────────────────────────────────────────
@@ -3113,6 +3303,42 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         arxiv_papers = await enrich_arxiv_papers_with_s2(arxiv_papers)
     else:
         s2_papers = await search_papers_s2(query, limit=5)
+
+    if not chunks and not arxiv_papers and not s2_papers and not pdf_context:
+        sys_p = (
+            "You are Aether, a GraphRAG research assistant. No specific papers or context chunks could be retrieved for this query. "
+            "Since this is an academic research query, you have the flexibility to address it using your general scientific knowledge, "
+            "but ONLY if you are fully confident in the facts and there is a very low chance of hallucination or output degradation. "
+            "If you cannot provide a highly accurate, confident answer, explain clearly and briefly that you cannot verify the details due to the lack of source literature."
+        )
+        msgs = [{"role": "system", "content": sys_p}] + [
+            {"role": m.role, "content": m.content} for m in req.messages
+        ]
+        try:
+            answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
+        except LLMError as e:
+            raise HTTPException(502, str(e))
+        
+        latency = int((time.time() - t0) * 1000)
+        return {
+            "request_id": rid,
+            "answer": answer,
+            "route": plan.route,
+            "plan": {
+                "standalone_query": plan.standalone_query,
+                "reasoning_path": plan.reasoning_path,
+            },
+            "papers": [],
+            "chunks": [],
+            "arxiv_papers": [],
+            "s2_papers": [],
+            "datasets": [],
+            "code_repos": [],
+            "verification": None,
+            "latency_ms": latency,
+            "model_used": REASON_MODEL,
+            "warning": "No context or external papers retrieved.",
+        }
 
     # Collect datasets/repos
     all_datasets, all_repos = [], []
@@ -3534,12 +3760,42 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 # AUTH & HISTORY ENDPOINTS
 # ================================================================
 
+def hash_password(password: str) -> str:
+    pw_bytes = password.encode("utf-8")
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pw_bytes, salt)
+    return hashed.decode("utf-8")
+
+
+def verify_password(password: str, hashed_password: str) -> bool:
+    pw_bytes = password.encode("utf-8")
+    hashed_bytes = hashed_password.encode("utf-8")
+    return bcrypt.checkpw(pw_bytes, hashed_bytes)
+
+
+from datetime import datetime, timedelta, timezone
+
+def create_access_token(user_id: str, email: str) -> str:
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def decode_access_token(token: str) -> Optional[dict]:
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.PyJWTError:
+        return None
+
 async def set_user_context(request: Request) -> Optional[str]:
     try:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
-            user = await get_supabase_user(token)
+            user = await get_authenticated_user(token)
             if user:
                 uid = user.get("id")
                 current_user_id.set(uid)
@@ -3557,27 +3813,172 @@ def get_token_from_request(request: Request) -> str:
     return auth_header.split(" ")[1]
 
 
-async def get_supabase_user(token: str) -> Optional[Dict[str, Any]]:
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(
-                f"{SUPABASE_URL}/auth/v1/user",
-                headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {token}"
-                }
-            )
-            if resp.status_code == 200:
-                return resp.json()
-        except Exception as e:
-            log.error(f"Error validating Supabase token: {e}")
+async def get_authenticated_user(token: str) -> Optional[Dict[str, Any]]:
+    try:
+        payload = decode_access_token(token)
+        if not payload:
+            return None
+        uid = payload.get("sub")
+        if not uid:
+            return None
+        user = await asyncio.to_thread(db.users.find_one, {"_id": uid})
+        if not user:
+            return None
+        return {
+            "id": user["_id"],
+            "email": user["email"],
+            "user_metadata": user.get("user_metadata", {})
+        }
+    except Exception as e:
+        log.error(f"Error validating MongoDB user token: {e}")
     return None
+
+
+class SignUpRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    institution: Optional[str] = None
+    role: Optional[str] = None
+
+
+class PasswordUpdateRequest(BaseModel):
+    password: str
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(req: SignUpRequest):
+    email = req.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+    
+    # Check if user exists
+    existing = await asyncio.to_thread(db.users.find_one, {"email": email})
+    if existing:
+        raise HTTPException(status_code=400, detail="An account with this email already exists")
+    
+    # Create user
+    uid = str(uuid.uuid4())
+    password_hash = hash_password(req.password)
+    user_doc = {
+        "_id": uid,
+        "email": email,
+        "password_hash": password_hash,
+        "user_metadata": {
+            "full_name": email.split("@")[0].capitalize(),
+            "institution": "",
+            "role": ""
+        },
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc)
+    }
+    await asyncio.to_thread(db.users.insert_one, user_doc)
+    
+    # Issue token
+    token = create_access_token(uid, email)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": uid,
+            "email": email,
+            "user_metadata": user_doc["user_metadata"]
+        }
+    }
+
+
+@app.post("/api/auth/login")
+async def auth_login(req: LoginRequest):
+    email = req.email.strip().lower()
+    user = await asyncio.to_thread(db.users.find_one, {"email": email})
+    if not user or not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Invalid email or password")
+    
+    token = create_access_token(user["_id"], user["email"])
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["_id"],
+            "email": user["email"],
+            "user_metadata": user.get("user_metadata", {})
+        }
+    }
+
+
+@app.put("/api/auth/profile")
+async def auth_update_profile(req: ProfileUpdateRequest, request: Request):
+    token = get_token_from_request(request)
+    user = await get_authenticated_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    uid = user["id"]
+    
+    # Fetch from DB to ensure it exists
+    user_db = await asyncio.to_thread(db.users.find_one, {"_id": uid})
+    if not user_db:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Update fields
+    meta = user_db.get("user_metadata", {})
+    if req.full_name is not None:
+        meta["full_name"] = req.full_name
+    if req.institution is not None:
+        meta["institution"] = req.institution
+    if req.role is not None:
+        meta["role"] = req.role
+        
+    await asyncio.to_thread(
+        db.users.update_one,
+        {"_id": uid},
+        {"$set": {"user_metadata": meta, "updated_at": datetime.now(timezone.utc)}}
+    )
+    
+    return {
+        "id": uid,
+        "email": user_db["email"],
+        "user_metadata": meta
+    }
+
+
+@app.put("/api/auth/password")
+async def auth_update_password(req: PasswordUpdateRequest, request: Request):
+    token = get_token_from_request(request)
+    user = await get_authenticated_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    uid = user["id"]
+    
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+        
+    user_db = await asyncio.to_thread(db.users.find_one, {"_id": uid})
+    if not user_db:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    password_hash = hash_password(req.password)
+    await asyncio.to_thread(
+        db.users.update_one,
+        {"_id": uid},
+        {"$set": {"password_hash": password_hash, "updated_at": datetime.now(timezone.utc)}}
+    )
+    return {"status": "success"}
 
 
 @app.get("/api/auth/me")
 async def auth_me(request: Request):
     token = get_token_from_request(request)
-    user = await get_supabase_user(token)
+    user = await get_authenticated_user(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
     return {
@@ -3590,31 +3991,29 @@ async def auth_me(request: Request):
 @app.get("/api/history")
 async def list_history(request: Request):
     token = get_token_from_request(request)
-    user = await get_supabase_user(token)
+    user = await get_authenticated_user(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(
-                f"{SUPABASE_URL}/rest/v1/chat_sessions?user_id=eq.{user.get('id')}&select=*&order=updated_at.desc",
-                headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {token}"
-                }
-            )
-            if resp.status_code != 200:
-                log.error(f"Supabase GET history error {resp.status_code}: {resp.text}")
-                raise HTTPException(status_code=resp.status_code, detail=resp.text)
-            return resp.json()
-        except Exception as e:
-            log.error(f"Error fetching history: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+    try:
+        sessions = await asyncio.to_thread(
+            lambda: list(db.chat_sessions.find({"user_id": user["id"]}).sort("updated_at", -1))
+        )
+        for s in sessions:
+            s["id"] = s.pop("_id")
+            if isinstance(s.get("updated_at"), datetime):
+                s["updated_at"] = s["updated_at"].isoformat()
+            if isinstance(s.get("created_at"), datetime):
+                s["created_at"] = s["created_at"].isoformat()
+        return sessions
+    except Exception as e:
+        log.error(f"Error fetching history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/history")
 async def create_history(request: Request):
     token = get_token_from_request(request)
-    user = await get_supabase_user(token)
+    user = await get_authenticated_user(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
     
@@ -3626,36 +4025,32 @@ async def create_history(request: Request):
     title = body.get("title", "New Chat")
     messages = body.get("messages", [])
     
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.post(
-                f"{SUPABASE_URL}/rest/v1/chat_sessions",
-                headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                    "Prefer": "return=representation"
-                },
-                json={
-                    "user_id": user.get("id"),
-                    "title": title,
-                    "messages": messages
-                }
-            )
-            if resp.status_code not in (200, 201):
-                log.error(f"Supabase POST history error {resp.status_code}: {resp.text}")
-                raise HTTPException(status_code=resp.status_code, detail=resp.text)
-            res = resp.json()
-            return res[0] if isinstance(res, list) and len(res) > 0 else res
-        except Exception as e:
-            log.error(f"Error creating history session: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+    try:
+        session_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        session_doc = {
+            "_id": session_id,
+            "user_id": user["id"],
+            "title": title,
+            "messages": messages,
+            "created_at": now,
+            "updated_at": now
+        }
+        await asyncio.to_thread(db.chat_sessions.insert_one, session_doc)
+        
+        session_doc["id"] = session_doc.pop("_id")
+        session_doc["created_at"] = session_doc["created_at"].isoformat()
+        session_doc["updated_at"] = session_doc["updated_at"].isoformat()
+        return session_doc
+    except Exception as e:
+        log.error(f"Error creating history session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.put("/api/history/{session_id}")
 async def update_history(session_id: str, request: Request):
     token = get_token_from_request(request)
-    user = await get_supabase_user(token)
+    user = await get_authenticated_user(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
     try:
@@ -3669,77 +4064,65 @@ async def update_history(session_id: str, request: Request):
     if "messages" in body:
         update_data["messages"] = body["messages"]
     
-    from datetime import datetime, timezone
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    update_data["updated_at"] = datetime.now(timezone.utc)
     
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.patch(
-                f"{SUPABASE_URL}/rest/v1/chat_sessions?id=eq.{session_id}&user_id=eq.{user.get('id')}",
-                headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                    "Prefer": "return=representation"
-                },
-                json=update_data
-            )
-            if resp.status_code not in (200, 201):
-                log.error(f"Supabase PATCH history error {resp.status_code}: {resp.text}")
-                raise HTTPException(status_code=resp.status_code, detail=resp.text)
-            res = resp.json()
-            return res[0] if isinstance(res, list) and len(res) > 0 else res
-        except Exception as e:
-            log.error(f"Error updating history session: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+    try:
+        from pymongo import ReturnDocument
+        res = await asyncio.to_thread(
+            db.chat_sessions.find_one_and_update,
+            {"_id": session_id, "user_id": user["id"]},
+            {"$set": update_data},
+            return_document=ReturnDocument.AFTER
+        )
+        if not res:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+            
+        res["id"] = res.pop("_id")
+        if isinstance(res.get("created_at"), datetime):
+            res["created_at"] = res["created_at"].isoformat()
+        if isinstance(res.get("updated_at"), datetime):
+            res["updated_at"] = res["updated_at"].isoformat()
+        return res
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error updating history session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/history")
 async def delete_all_history(request: Request):
     token = get_token_from_request(request)
-    user = await get_supabase_user(token)
+    user = await get_authenticated_user(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.delete(
-                f"{SUPABASE_URL}/rest/v1/chat_sessions?user_id=eq.{user.get('id')}",
-                headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {token}"
-                }
-            )
-            if resp.status_code not in (200, 204):
-                log.error(f"Supabase DELETE all history error {resp.status_code}: {resp.text}")
-                raise HTTPException(status_code=resp.status_code, detail=resp.text)
-            return {"status": "success"}
-        except Exception as e:
-            log.error(f"Error deleting all history: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+    try:
+        await asyncio.to_thread(db.chat_sessions.delete_many, {"user_id": user["id"]})
+        return {"status": "success"}
+    except Exception as e:
+        log.error(f"Error deleting all history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/history/{session_id}")
 async def delete_history(session_id: str, request: Request):
     token = get_token_from_request(request)
-    user = await get_supabase_user(token)
+    user = await get_authenticated_user(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.delete(
-                f"{SUPABASE_URL}/rest/v1/chat_sessions?id=eq.{session_id}&user_id=eq.{user.get('id')}",
-                headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {token}"
-                }
-            )
-            if resp.status_code not in (200, 204):
-                log.error(f"Supabase DELETE history error {resp.status_code}: {resp.text}")
-                raise HTTPException(status_code=resp.status_code, detail=resp.text)
-            return {"status": "success"}
-        except Exception as e:
-            log.error(f"Error deleting history session: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+    try:
+        res = await asyncio.to_thread(
+            db.chat_sessions.delete_one,
+            {"_id": session_id, "user_id": user["id"]}
+        )
+        if res.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error deleting history session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ================================================================
@@ -3807,6 +4190,14 @@ async def full_health():
         checks["supabase"] = "ok"
     except Exception as e:
         checks["supabase"] = f"error: {e}"
+    try:
+        if mongo_client:
+            await asyncio.to_thread(mongo_client.admin.command, "ping")
+            checks["mongodb"] = "ok"
+        else:
+            checks["mongodb"] = "error: MongoClient not initialized"
+    except Exception as e:
+        checks["mongodb"] = f"error: {e}"
     try:
         await asyncio.to_thread(pool.neo4j.verify_connectivity)
         checks["neo4j"] = "ok"

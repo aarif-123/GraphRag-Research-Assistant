@@ -95,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadSettingsFromLocalStorage();
     initEventListeners();
     checkHealth();
-    initSupabase();
+    initAuth();
     renderAttachmentTray();
     els.queryInput.focus();
 });
@@ -465,29 +465,30 @@ function initEventListeners() {
             if (successEl) successEl.style.display = 'none';
             
             // Load user profile details
-            if (supabase) {
-                try {
-                    const { data: { user }, error } = await supabase.auth.getUser();
-                    if (error) throw error;
-                    if (user) {
-                        const emailInput = document.getElementById('profileEmail');
-                        const fullNameInput = document.getElementById('profileFullName');
-                        const institutionInput = document.getElementById('profileInstitution');
-                        const roleSelect = document.getElementById('profileRole');
-                        
-                        if (emailInput) emailInput.value = user.email || '';
-                        
-                        const meta = user.user_metadata || {};
-                        if (fullNameInput) fullNameInput.value = meta.full_name || '';
-                        if (institutionInput) institutionInput.value = meta.institution || '';
-                        if (roleSelect) roleSelect.value = meta.role || '';
-                        
-                        els.profileModal.classList.add('visible');
-                    }
-                } catch (err) {
-                    console.error("Failed to fetch profile details:", err);
-                    alert("Error loading profile: " + err.message);
-                }
+            try {
+                const token = localStorage.getItem('aether_token');
+                const res = await fetch('/api/auth/me', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error("Failed to authenticate session");
+                const user = await res.json();
+                
+                const emailInput = document.getElementById('profileEmail');
+                const fullNameInput = document.getElementById('profileFullName');
+                const institutionInput = document.getElementById('profileInstitution');
+                const roleSelect = document.getElementById('profileRole');
+                
+                if (emailInput) emailInput.value = user.email || '';
+                
+                const meta = user.user_metadata || {};
+                if (fullNameInput) fullNameInput.value = meta.full_name || '';
+                if (institutionInput) institutionInput.value = meta.institution || '';
+                if (roleSelect) roleSelect.value = meta.role || '';
+                
+                els.profileModal.classList.add('visible');
+            } catch (err) {
+                console.error("Failed to fetch profile details:", err);
+                alert("Error loading profile: " + err.message);
             }
         });
     }
@@ -526,35 +527,40 @@ function initEventListeners() {
             const institution = document.getElementById('profileInstitution')?.value.trim();
             const role = document.getElementById('profileRole')?.value;
             
-            if (supabase) {
-                try {
-                    const { data, error } = await supabase.auth.updateUser({
-                        data: {
-                            full_name: fullName,
-                            institution: institution,
-                            role: role
-                        }
-                    });
-                    
-                    if (error) throw error;
-                    
-                    if (successEl) {
-                        successEl.textContent = 'Profile details updated successfully!';
-                        successEl.style.display = 'block';
-                    }
-                    
-                    updateUserUI(data.user);
-                } catch (err) {
-                    console.error("Profile update error:", err);
-                    if (errorEl) {
-                        errorEl.textContent = err.message || 'An error occurred during update.';
-                        errorEl.style.display = 'block';
-                    }
-                } finally {
-                    if (submitBtn) {
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = 'Update Profile Details';
-                    }
+            try {
+                const token = localStorage.getItem('aether_token');
+                const res = await fetch('/api/auth/profile', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        full_name: fullName,
+                        institution: institution,
+                        role: role
+                    })
+                });
+                
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Failed to update profile');
+                
+                if (successEl) {
+                    successEl.textContent = 'Profile details updated successfully!';
+                    successEl.style.display = 'block';
+                }
+                
+                updateUserUI(data);
+            } catch (err) {
+                console.error("Profile update error:", err);
+                if (errorEl) {
+                    errorEl.textContent = err.message || 'An error occurred during update.';
+                    errorEl.style.display = 'block';
+                }
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Update Profile Details';
                 }
             }
         });
@@ -595,31 +601,36 @@ function initEventListeners() {
                 submitBtn.textContent = 'Updating Password...';
             }
             
-            if (supabase) {
-                try {
-                    const { error } = await supabase.auth.updateUser({
-                        password: password
-                    });
-                    
-                    if (error) throw error;
-                    
-                    if (successEl) {
-                        successEl.textContent = 'Password updated successfully!';
-                        successEl.style.display = 'block';
-                    }
-                    
-                    passwordForm.reset();
-                } catch (err) {
-                    console.error("Password update error:", err);
-                    if (errorEl) {
-                        errorEl.textContent = err.message || 'Failed to update password.';
-                        errorEl.style.display = 'block';
-                    }
-                } finally {
-                    if (submitBtn) {
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = 'Update Password';
-                    }
+            try {
+                const token = localStorage.getItem('aether_token');
+                const res = await fetch('/api/auth/password', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ password })
+                });
+                
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Failed to update password');
+                
+                if (successEl) {
+                    successEl.textContent = 'Password updated successfully!';
+                    successEl.style.display = 'block';
+                }
+                
+                passwordForm.reset();
+            } catch (err) {
+                console.error("Password update error:", err);
+                if (errorEl) {
+                    errorEl.textContent = err.message || 'Failed to update password.';
+                    errorEl.style.display = 'block';
+                }
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Update Password';
                 }
             }
         });
@@ -628,12 +639,9 @@ function initEventListeners() {
     // Logout Action
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
-        logoutBtn.addEventListener('click', async () => {
-            if (supabase) {
-                await supabase.auth.signOut();
-                localStorage.removeItem('aether_token');
-                window.location.href = '/';
-            }
+        logoutBtn.addEventListener('click', () => {
+            localStorage.removeItem('aether_token');
+            window.location.href = '/';
         });
     }
 
@@ -2040,8 +2048,11 @@ function sanitizeMermaidCode(code) {
             continue;
         }
         
-        // Style or click directives
-        if (trimmed.toLowerCase().startsWith('style ') || trimmed.toLowerCase().startsWith('click ') || trimmed.toLowerCase().startsWith('classdef ') || trimmed.toLowerCase().startsWith('class ')) {
+        // Discard styling directives to keep diagrams clean and highly legible
+        if (trimmed.toLowerCase().startsWith('style ') || trimmed.toLowerCase().startsWith('classdef ') || trimmed.toLowerCase().startsWith('class ')) {
+            continue; // Skip styling line
+        }
+        if (trimmed.toLowerCase().startsWith('click ')) {
             processedLines.push(line);
             continue;
         }
@@ -2660,33 +2671,29 @@ function updateUserUI(user) {
     }
 }
 
-async function initSupabase() {
+async function initAuth() {
     try {
-        const res = await fetch('/api/config');
-        const config = await res.json();
-        supabase = window.supabase.createClient(config.supabase_url, config.supabase_anon_key);
-        
-        supabase.auth.onAuthStateChange((event, session) => {
-            if (session) {
-                localStorage.setItem('aether_token', session.access_token);
-                updateUserUI(session.user);
-            } else if (event === 'SIGNED_OUT') {
-                localStorage.removeItem('aether_token');
-                window.location.href = '/';
-            }
-        });
-
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
+        const token = localStorage.getItem('aether_token');
+        if (!token) {
             window.location.href = '/';
             return;
         }
         
-        localStorage.setItem('aether_token', session.access_token);
-        updateUserUI(session.user);
+        const res = await fetch('/api/auth/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) {
+            localStorage.removeItem('aether_token');
+            window.location.href = '/';
+            return;
+        }
+        
+        const user = await res.json();
+        updateUserUI(user);
         await loadHistory();
     } catch (e) {
-        console.error("Failed to initialize Supabase:", e);
+        console.error("Failed to initialize Auth:", e);
+        window.location.href = '/';
     }
 }
 

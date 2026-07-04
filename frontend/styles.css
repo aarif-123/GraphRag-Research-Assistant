@@ -4112,6 +4112,8 @@ mjx-container:not([display="true"]) {
 .message-content .mermaid .node rect,
 .message-content .mermaid .node circle,
 .message-content .mermaid .node polygon,
+.message-content .mermaid .node ellipse,
+.message-content .mermaid .node .label-container,
 .message-content .mermaid .node path {
     fill: #0f172a !important;
     stroke: #6366f1 !important;
