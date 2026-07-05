@@ -147,7 +147,7 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-base-en")
 REASON_MODEL = os.getenv("REASON_MODEL", "llama-3.3-70b-versatile")
 HEAVY_MODEL = os.getenv("HEAVY_MODEL", "llama-3.3-70b-versatile")
-PLAN_MODEL = os.getenv("PLAN_MODEL", "llama-3.1-8b-instant")  # strategic brain
+PLAN_MODEL = os.getenv("PLAN_MODEL", "openai/gpt-oss-20b")  # strategic brain
 
 MAX_GRAPH_NODES = int(os.getenv("MAX_GRAPH_NODES", "25"))
 GROQ_TIMEOUT = int(os.getenv("GROQ_TIMEOUT", "30"))
@@ -639,10 +639,6 @@ async def groq_chat(
             log.debug("LLM cache hit")
             return cached
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
     payload: Dict[str, Any] = {
         "model": model,
         "messages": messages,
@@ -653,22 +649,44 @@ async def groq_chat(
         payload["response_format"] = {"type": "json_object"}
 
     last_err = None
-    for attempt in range(retries + 1):
+    max_attempts = max(retries + 1, len(GROQ_API_KEY))
+    
+    for attempt in range(max_attempts):
+        current_key = get_current_groq_key()
+        headers = {
+            "Authorization": f"Bearer {current_key}",
+            "Content-Type": "application/json",
+        }
         try:
             r = await pool.groq_http.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers=headers,
                 json=payload,
             )
-            if r.status_code == 429:
-                wait = min(int(r.headers.get("Retry-After", 5)), 15)
-                log.warning(f"Groq 429 — wait {wait}s")
-                await asyncio.sleep(wait)
-                continue
+            if r.status_code in (429, 413):
+                if len(GROQ_API_KEY) > 1:
+                    log.warning(f"Groq API returned {r.status_code}. Rotating API keys...")
+                    rotate_groq_key()
+                    await asyncio.sleep(1.0)
+                    continue
+                else:
+                    if r.status_code == 429:
+                        wait = min(int(r.headers.get("Retry-After", 5)), 15)
+                        log.warning(f"Groq 429 — wait {wait}s")
+                        await asyncio.sleep(wait)
+                        continue
+                    else:
+                        raise LLMError(f"Groq HTTP 413: Request too large. Provide backup keys or upgrade. Response: {r.text[:200]}")
+            
             if r.status_code in (500, 503):
                 await asyncio.sleep(2**attempt)
                 continue
             if r.status_code != 200:
+                if len(GROQ_API_KEY) > 1:
+                    log.warning(f"Groq HTTP {r.status_code} on key. Rotating keys and retrying...")
+                    rotate_groq_key()
+                    await asyncio.sleep(1.0)
+                    continue
                 raise LLMError(f"Groq HTTP {r.status_code}: {r.text[:300]}")
             result = r.json()["choices"][0]["message"]["content"]
             if ck:
@@ -676,8 +694,11 @@ async def groq_chat(
             return result
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             last_err = e
+            if len(GROQ_API_KEY) > 1:
+                log.warning(f"Network error on current key: {e}. Rotating keys...")
+                rotate_groq_key()
             await asyncio.sleep(1.5**attempt)
-    raise LLMError(f"Groq failed after {retries + 1} attempts: {last_err}")
+    raise LLMError(f"Groq failed after {max_attempts} attempts: {last_err}")
 
 
 # ================================================================
@@ -1683,7 +1704,6 @@ async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, A
     mcp_url = os.getenv("ARXIV_MCP_URL")
     is_self = False
     if mcp_url:
-        import urllib.parse
         parsed = urllib.parse.urlparse(mcp_url)
         # Avoid calling ourselves via HTTP to prevent single-worker deadlocks
         if "graphrag-research-assistant.onrender.com" in parsed.netloc or "localhost:8000" in parsed.netloc or "127.0.0.1:8000" in parsed.netloc:
@@ -2351,7 +2371,6 @@ def clean_and_resolve_links(
     - [X] -> Clickable link to Google Scholar for the paper title
     - Any hallucinated/placeholder markdown links -> Resolved to real URLs
     """
-    import urllib.parse
 
     # 1. Build a map of 1-based indices to real arXiv URLs
     arxiv_map = {}
@@ -2729,6 +2748,72 @@ async def apply_verification(
 def build_conversation_context(messages: List[ChatMessage], n: int = 3) -> str:
     recent = [m for m in messages[-n * 2 :] if m.role in ("user", "assistant")]
     return "\n".join(f"{m.role.upper()}: {m.content[:300]}" for m in recent) or "None"
+
+
+async def summarize_conversation(messages: List[Dict]) -> str:
+    """Generate a highly concise summary of the conversation history (topics discussed, key questions answered)."""
+    if not messages:
+        return ""
+    
+    # Format messages as text
+    history_text = "\n".join(f"{m['role'].upper()}: {m['content'][:1000]}" for m in messages)
+    
+    summary_prompt = [
+        {
+            "role": "system",
+            "content": (
+                "You are an expert AI context compressor. Summarize the following conversation history between a User and an AI Assistant "
+                "into a single concise paragraph. Focus ONLY on: 1) What topics/questions the user asked, and 2) Key decisions, conclusions, or answers "
+                "provided by the assistant. Avoid general fluff. Do not exceed 150 words."
+            )
+        },
+        {
+            "role": "user",
+            "content": f"Here is the conversation history to summarize:\n\n{history_text}"
+        }
+    ]
+    
+    try:
+        # Use PLAN_MODEL for fast, low-cost summarization
+        summary = await groq_chat(summary_prompt, PLAN_MODEL, temperature=0.0, max_tokens=200)
+        return summary.strip()
+    except Exception as e:
+        log.warning(f"Failed to summarize conversation history: {e}")
+        # Fallback: return a simple text slice
+        return "\n".join(f"{m['role'].upper()}: {m['content'][:150]}..." for m in messages[:3])
+
+
+async def compile_chat_messages(system_prompt: str, chat_messages: List[ChatMessage]) -> List[Dict]:
+    """
+    Applies sliding window context engineering + conversation history summarization.
+    Keeps system prompt and last 2 messages in full, and summarizes older messages
+    to conserve token space and prevent TPM rate limits.
+    """
+    if not chat_messages:
+        return [{"role": "system", "content": system_prompt}]
+        
+    last_msg = {"role": chat_messages[-1].role, "content": chat_messages[-1].content}
+    
+    history = chat_messages[:-1]
+    if len(history) <= 2:
+        return [{"role": "system", "content": system_prompt}] + [
+            {"role": m.role, "content": m.content} for m in chat_messages
+        ]
+        
+    recent_history = [
+        {"role": m.role, "content": m.content} for m in history[-2:]
+    ]
+    older_history = [
+        {"role": m.role, "content": m.content} for m in history[:-2]
+    ]
+    
+    older_summary = await summarize_conversation(older_history)
+    
+    enriched_system_prompt = system_prompt
+    if older_summary:
+        enriched_system_prompt += f"\n\n[Summary of earlier conversation history]\n{older_summary}"
+        
+    return [{"role": "system", "content": enriched_system_prompt}] + recent_history + [last_msg]
 
 
 # ================================================================
@@ -3168,9 +3253,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 # Fallback: run chitchat route with PDF context instead of returning empty
                 sys_p = "You are Aether. Respond comprehensively, warmly, and in detail. Do not invent academic facts."
                 sys_p += f"\n\n{pdf_context}"
-                msgs = [{"role": "system", "content": sys_p}] + [
-                    {"role": m.role, "content": m.content} for m in req.messages
-                ]
+                msgs = await compile_chat_messages(sys_p, req.messages)
                 answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
                 return _empty_response(rid, answer, "chitchat", t0)
             else:
@@ -3180,9 +3263,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                     "but ONLY if you are fully confident in the accuracy of the facts and there is a very low chance of hallucination or output degradation. "
                     "If you are not 100% confident, decline by explaining that no matching records were found."
                 )
-                msgs = [{"role": "system", "content": sys_p}] + [
-                    {"role": m.role, "content": m.content} for m in req.messages
-                ]
+                msgs = await compile_chat_messages(sys_p, req.messages)
                 answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
                 return _empty_response(rid, answer, "entity_lookup", t0)
         p = papers[0]
@@ -3209,9 +3290,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 # Fallback: run chitchat route with PDF context instead of returning empty
                 sys_p = "You are Aether. Respond comprehensively, warmly, and in detail. Do not invent academic facts."
                 sys_p += f"\n\n{pdf_context}"
-                msgs = [{"role": "system", "content": sys_p}] + [
-                    {"role": m.role, "content": m.content} for m in req.messages
-                ]
+                msgs = await compile_chat_messages(sys_p, req.messages)
                 answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
                 return _empty_response(rid, answer, "chitchat", t0)
             else:
@@ -3221,9 +3300,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                     "but ONLY if you are fully confident in the accuracy of the facts and there is a very low chance of hallucination or output degradation. "
                     "If you are not 100% confident, decline by explaining that no matching records were found."
                 )
-                msgs = [{"role": "system", "content": sys_p}] + [
-                    {"role": m.role, "content": m.content} for m in req.messages
-                ]
+                msgs = await compile_chat_messages(sys_p, req.messages)
                 answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
                 return _empty_response(rid, answer, "structured", t0)
         lines = [f"Found **{len(papers)}** papers:\n"]
@@ -3247,9 +3324,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             )
             sys_p += f"\n\n{pdf_context}"
             
-        msgs = [{"role": "system", "content": sys_p}] + [
-            {"role": m.role, "content": m.content} for m in req.messages
-        ]
+        msgs = await compile_chat_messages(sys_p, req.messages)
         answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature, max_tokens=350 if pdf_context else 250)
         return _empty_response(rid, answer, "chitchat", t0)
 
@@ -3311,9 +3386,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             "but ONLY if you are fully confident in the facts and there is a very low chance of hallucination or output degradation. "
             "If you cannot provide a highly accurate, confident answer, explain clearly and briefly that you cannot verify the details due to the lack of source literature."
         )
-        msgs = [{"role": "system", "content": sys_p}] + [
-            {"role": m.role, "content": m.content} for m in req.messages
-        ]
+        msgs = await compile_chat_messages(sys_p, req.messages)
         try:
             answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
         except LLMError as e:
@@ -3368,9 +3441,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     if pdf_context:
         prompt += f"\n\n{pdf_context}"
 
-    msgs = [{"role": "system", "content": prompt}] + [
-        {"role": m.role, "content": m.content} for m in req.messages
-    ]
+    msgs = await compile_chat_messages(prompt, req.messages)
     try:
         answer = await groq_chat(msgs, model, temperature=req.temperature, max_tokens=2000)
     except LLMError as e:
