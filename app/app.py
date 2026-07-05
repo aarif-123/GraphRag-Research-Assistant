@@ -3262,6 +3262,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             )
         except GraphRetrievalError as e:
             raise HTTPException(502, str(e))
+        if not papers:
             if pdf_context:
                 sys_p = "You are Aether. Respond comprehensively, warmly, and in detail. Do not invent academic facts."
                 sys_p += f"\n\n{pdf_context}"
