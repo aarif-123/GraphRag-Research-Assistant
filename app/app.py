@@ -3262,23 +3262,49 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             )
         except GraphRetrievalError as e:
             raise HTTPException(502, str(e))
-        if not papers:
             if pdf_context:
-                # Fallback: run chitchat route with PDF context instead of returning empty
                 sys_p = "You are Aether. Respond comprehensively, warmly, and in detail. Do not invent academic facts."
                 sys_p += f"\n\n{pdf_context}"
                 msgs = await compile_chat_messages(sys_p, req.messages)
                 answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
                 return _empty_response(rid, answer, "chitchat", t0)
             else:
-                sys_p = (
-                    "You are Aether, a GraphRAG research assistant. No matching records were found in the database for this query.\n"
-                    "CRITICAL: Do NOT invent, guess, or hallucinate metadata (authors, venue, year, domain).\n"
-                    "Explain clearly that no matching records were found in the database, and invite the user to provide the exact paper title, DOI, or upload the PDF."
-                )
-                msgs = await compile_chat_messages(sys_p, req.messages)
-                answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
-                return _empty_response(rid, answer, "entity_lookup", t0)
+                # ── DB miss: fall through to arXiv/S2 for real grounded answers ──
+                log.info(f"[{rid}] entity_lookup DB miss — falling back to arXiv/S2")
+                arxiv_fb = await retrieve_arxiv_context(query, limit=5)
+                s2_fb = await search_papers_s2(query, limit=5)
+                if arxiv_fb or s2_fb:
+                    fb_prompt = grounded_prompt(query, [], [], arxiv_fb, s2_fb)
+                    msgs = await compile_chat_messages(fb_prompt, req.messages)
+                    try:
+                        answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature, max_tokens=1500)
+                    except LLMError as e:
+                        raise HTTPException(502, str(e))
+                    return {
+                        "request_id": rid,
+                        "answer": answer,
+                        "route": "entity_lookup",
+                        "plan": {"standalone_query": plan.standalone_query, "reasoning_path": plan.reasoning_path},
+                        "papers": [],
+                        "chunks": [],
+                        "arxiv_papers": arxiv_fb,
+                        "s2_papers": s2_fb,
+                        "datasets": [],
+                        "code_repos": [],
+                        "verification": None,
+                        "latency_ms": int((time.time() - t0) * 1000),
+                        "model_used": REASON_MODEL,
+                        "warning": "Not found in local database — results sourced from arXiv/Semantic Scholar.",
+                    }
+                else:
+                    sys_p = (
+                        "You are Aether, a GraphRAG research assistant. No matching records were found in the database for this query.\n"
+                        "CRITICAL: Do NOT invent, guess, or hallucinate metadata (authors, venue, year, domain).\n"
+                        "Explain clearly that no matching records were found in the database or online (arXiv/Semantic Scholar), and invite the user to provide the exact paper title, DOI, or upload the PDF."
+                    )
+                    msgs = await compile_chat_messages(sys_p, req.messages)
+                    answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
+                    return _empty_response(rid, answer, "entity_lookup", t0)
         p = papers[0]
         auths = ", ".join(a for a in (p.get("authors") or []) if a) or "Unknown"
         answer = (
@@ -3300,21 +3326,53 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             raise HTTPException(502, str(e))
         if not papers:
             if pdf_context:
-                # Fallback: run chitchat route with PDF context instead of returning empty
                 sys_p = "You are Aether. Respond comprehensively, warmly, and in detail. Do not invent academic facts."
                 sys_p += f"\n\n{pdf_context}"
                 msgs = await compile_chat_messages(sys_p, req.messages)
                 answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
                 return _empty_response(rid, answer, "chitchat", t0)
             else:
-                sys_p = (
-                    "You are Aether, a GraphRAG research assistant. No matching papers were found in the database to compile this list.\n"
-                    "CRITICAL: Do NOT invent or guess paper lists, citations, or authors.\n"
-                    "State clearly that no records matching these criteria were found, and invite the user to upload relevant PDFs or specify exact titles/arXiv IDs."
-                )
-                msgs = await compile_chat_messages(sys_p, req.messages)
-                answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
-                return _empty_response(rid, answer, "structured", t0)
+                # ── DB miss: fall through to arXiv/S2 for real grounded list ──
+                log.info(f"[{rid}] structured DB miss — falling back to arXiv/S2")
+                arxiv_fb = await retrieve_arxiv_context(query, limit=10)
+                s2_fb = await search_papers_s2(query, limit=10)
+                if arxiv_fb or s2_fb:
+                    all_fb = arxiv_fb + s2_fb
+                    lines = [f"Found **{len(all_fb)}** papers (sourced from arXiv/Semantic Scholar):\n"]
+                    seen_titles = set()
+                    for p in all_fb:
+                        title = p.get("title") or p.get("name") or "?"
+                        if title in seen_titles:
+                            continue
+                        seen_titles.add(title)
+                        year = p.get("year") or p.get("published", "")[:4] or "?"
+                        auths = ", ".join((p.get("authors") or [])[:3]) or "Unknown"
+                        lines.append(f"• **{title}** ({year}) — {auths}")
+                    return {
+                        "request_id": rid,
+                        "answer": "\n".join(lines),
+                        "route": "structured",
+                        "plan": {"standalone_query": plan.standalone_query, "reasoning_path": plan.reasoning_path},
+                        "papers": [],
+                        "chunks": [],
+                        "arxiv_papers": arxiv_fb,
+                        "s2_papers": s2_fb,
+                        "datasets": [],
+                        "code_repos": [],
+                        "verification": None,
+                        "latency_ms": int((time.time() - t0) * 1000),
+                        "model_used": REASON_MODEL,
+                        "warning": "Not found in local database — results sourced from arXiv/Semantic Scholar.",
+                    }
+                else:
+                    sys_p = (
+                        "You are Aether, a GraphRAG research assistant. No matching papers were found in the database or online.\n"
+                        "CRITICAL: Do NOT invent or guess paper lists, citations, or authors.\n"
+                        "State clearly that no records matching these criteria were found anywhere, and invite the user to upload relevant PDFs or specify exact titles/arXiv IDs."
+                    )
+                    msgs = await compile_chat_messages(sys_p, req.messages)
+                    answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
+                    return _empty_response(rid, answer, "structured", t0)
         lines = [f"Found **{len(papers)}** papers:\n"]
         for p in papers:
             auths = ", ".join(a for a in (p.get("authors") or []) if a) or "Unknown"
