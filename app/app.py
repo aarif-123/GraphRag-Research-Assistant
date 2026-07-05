@@ -3272,10 +3272,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 return _empty_response(rid, answer, "chitchat", t0)
             else:
                 sys_p = (
-                    "You are Aether, a GraphRAG research assistant. No matching records were found in the database. "
-                    "Since this is an academic research query, you have the flexibility to address it using your general scientific knowledge, "
-                    "but ONLY if you are fully confident in the accuracy of the facts and there is a very low chance of hallucination or output degradation. "
-                    "If you are not 100% confident, decline by explaining that no matching records were found."
+                    "You are Aether, a GraphRAG research assistant. No matching records were found in the database for this query.\n"
+                    "CRITICAL: Do NOT invent, guess, or hallucinate metadata (authors, venue, year, domain).\n"
+                    "Explain clearly that no matching records were found in the database, and invite the user to provide the exact paper title, DOI, or upload the PDF."
                 )
                 msgs = await compile_chat_messages(sys_p, req.messages)
                 answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
@@ -3309,10 +3308,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 return _empty_response(rid, answer, "chitchat", t0)
             else:
                 sys_p = (
-                    "You are Aether, a GraphRAG research assistant. No matching papers were found in the database to compile this list. "
-                    "Since this is an academic research query, you have the flexibility to list potential papers or compile a summary from your general scientific knowledge, "
-                    "but ONLY if you are fully confident in the accuracy of the facts and there is a very low chance of hallucination or output degradation. "
-                    "If you are not 100% confident, decline by explaining that no matching records were found."
+                    "You are Aether, a GraphRAG research assistant. No matching papers were found in the database to compile this list.\n"
+                    "CRITICAL: Do NOT invent or guess paper lists, citations, or authors.\n"
+                    "State clearly that no records matching these criteria were found, and invite the user to upload relevant PDFs or specify exact titles/arXiv IDs."
                 )
                 msgs = await compile_chat_messages(sys_p, req.messages)
                 answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
@@ -3395,10 +3393,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
 
     if not chunks and not arxiv_papers and not s2_papers and not pdf_context:
         sys_p = (
-            "You are Aether, a GraphRAG research assistant. No specific papers or context chunks could be retrieved for this query. "
-            "Since this is an academic research query, you have the flexibility to address it using your general scientific knowledge, "
-            "but ONLY if you are fully confident in the facts and there is a very low chance of hallucination or output degradation. "
-            "If you cannot provide a highly accurate, confident answer, explain clearly and briefly that you cannot verify the details due to the lack of source literature."
+            "You are Aether, a GraphRAG research assistant. No specific papers or context chunks could be retrieved for this query.\n"
+            "CRITICAL: Do NOT hallucinate, guess, or invent citations, authors, papers, or specific scientific results.\n"
+            "Explain clearly that you do not have the source literature in your database, and ask the user to upload the PDF or provide a specific identifier (like DOI or arXiv ID)."
         )
         msgs = await compile_chat_messages(sys_p, req.messages)
         try:
