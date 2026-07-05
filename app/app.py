@@ -142,6 +142,20 @@ NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEYS = [k.strip() for k in GROQ_API_KEY.split(",") if k.strip()] if GROQ_API_KEY else []
+groq_key_index = 0
+
+def get_current_groq_key() -> str:
+    global groq_key_index
+    if not GROQ_API_KEYS:
+        return GROQ_API_KEY or ""
+    return GROQ_API_KEYS[groq_key_index % len(GROQ_API_KEYS)]
+
+def rotate_groq_key():
+    global groq_key_index
+    if GROQ_API_KEYS:
+        groq_key_index = (groq_key_index + 1) % len(GROQ_API_KEYS)
+        log.info(f"Rotated to Groq API Key index {groq_key_index}")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-base-en")
@@ -649,7 +663,7 @@ async def groq_chat(
         payload["response_format"] = {"type": "json_object"}
 
     last_err = None
-    max_attempts = max(retries + 1, len(GROQ_API_KEY))
+    max_attempts = max(retries + 1, len(GROQ_API_KEYS))
     
     for attempt in range(max_attempts):
         current_key = get_current_groq_key()
@@ -664,7 +678,7 @@ async def groq_chat(
                 json=payload,
             )
             if r.status_code in (429, 413):
-                if len(GROQ_API_KEY) > 1:
+                if len(GROQ_API_KEYS) > 1:
                     log.warning(f"Groq API returned {r.status_code}. Rotating API keys...")
                     rotate_groq_key()
                     await asyncio.sleep(1.0)
@@ -682,7 +696,7 @@ async def groq_chat(
                 await asyncio.sleep(2**attempt)
                 continue
             if r.status_code != 200:
-                if len(GROQ_API_KEY) > 1:
+                if len(GROQ_API_KEYS) > 1:
                     log.warning(f"Groq HTTP {r.status_code} on key. Rotating keys and retrying...")
                     rotate_groq_key()
                     await asyncio.sleep(1.0)
@@ -694,7 +708,7 @@ async def groq_chat(
             return result
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             last_err = e
-            if len(GROQ_API_KEY) > 1:
+            if len(GROQ_API_KEYS) > 1:
                 log.warning(f"Network error on current key: {e}. Rotating keys...")
                 rotate_groq_key()
             await asyncio.sleep(1.5**attempt)
