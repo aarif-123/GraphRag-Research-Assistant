@@ -7,3 +7,7 @@ supabase==2.9.1
 neo4j==5.25.0
 numpy==1.26.4
 pymupdf==1.24.2
+pymongo>=4.0.0
+bcrypt>=4.0.0
+pyjwt>=2.8.0
+mcp>=1.2.0
