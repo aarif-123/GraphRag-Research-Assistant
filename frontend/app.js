@@ -17,6 +17,8 @@ const state = {
     lastResponse: null,
     messageData: new Map(), // Store data for each assistant message for syncing
     pendingAttachments: [],
+    wikipediaMode: false,
+    deepResearchMode: false,
 };
 
 // DOM REFS
@@ -190,6 +192,8 @@ function initEventListeners() {
     }
     if (els.modelSelect) {
         els.modelSelect.addEventListener('change', () => {
+            state.deepResearchMode = els.modelSelect.value === 'heavy';
+            renderAttachmentTray();
             saveSettingsToLocalStorage();
         });
     }
@@ -287,12 +291,17 @@ function initEventListeners() {
         const handleUrlSubmit = () => {
             const url = els.paperUrlInput.value.trim();
             if (!url) return;
-            // Append URL to query input
-            const currentVal = els.queryInput.value.trim();
-            els.queryInput.value = currentVal ? `${currentVal} ${url}` : url;
-            // Focus queryInput and trigger change
-            els.queryInput.focus();
-            handleInputChange();
+            
+            // Add URL to pending attachments
+            state.pendingAttachments.push({
+                id: `link-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                name: url,
+                size: 0,
+                mime: 'text/url',
+                url: url
+            });
+            renderAttachmentTray();
+            
             // Close and clear modal
             els.linkModal.classList.remove('visible');
             els.paperUrlInput.value = '';
@@ -715,12 +724,19 @@ function handleAttachAction(action) {
             els.videoFileInput?.click();
             break;
         case 'deep-research':
+            state.deepResearchMode = true;
             els.modelSelect.value = 'heavy';
             els.verifyToggle.checked = true;
             if (els.groundedStudyToggle) {
                 els.groundedStudyToggle.checked = true;
                 syncStudyGuardrails();
             }
+            renderAttachmentTray();
+            break;
+        case 'wikipedia':
+            state.wikipediaMode = true;
+            renderAttachmentTray();
+            updateQueryInputPlaceholder();
             break;
         default:
             break;
@@ -770,27 +786,71 @@ function addPendingAttachments(fileList) {
 function renderAttachmentTray() {
     if (!els.attachmentTray) return;
 
-    if (!state.pendingAttachments.length) {
+    if (!state.pendingAttachments.length && !state.wikipediaMode && !state.deepResearchMode) {
         els.attachmentTray.classList.remove('visible');
         els.attachmentTray.innerHTML = '';
         return;
     }
 
     els.attachmentTray.classList.add('visible');
-    els.attachmentTray.innerHTML = state.pendingAttachments.map(file => {
+
+    let modeHtml = '';
+    if (state.wikipediaMode) {
+        modeHtml += `
+            <div class="attachment-card wikipedia-mode-card" style="border-color: rgba(99, 102, 241, 0.4); background: rgba(99, 102, 241, 0.05);">
+                <div class="attachment-icon-box" style="background: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 18px;">🌐</div>
+                <div class="attachment-info">
+                    <span class="attachment-name">Wikipedia Mode Active</span>
+                    <span class="attachment-type">Direct Wikipedia Search</span>
+                </div>
+                <button class="attachment-remove" id="disableWikiModeBtn" aria-label="Disable Wikipedia Mode">×</button>
+            </div>
+        `;
+    }
+
+    if (state.deepResearchMode) {
+        modeHtml += `
+            <div class="attachment-card deep-research-mode-card" style="border-color: rgba(167, 139, 250, 0.4); background: rgba(167, 139, 250, 0.05);">
+                <div class="attachment-icon-box" style="background: var(--accent-purple); display: flex; align-items: center; justify-content: center; font-size: 18px; color: white;">🔍</div>
+                <div class="attachment-info">
+                    <span class="attachment-name">Deep Research Mode Active</span>
+                    <span class="attachment-type">Using Heavy Reasoning Model</span>
+                </div>
+                <button class="attachment-remove" id="disableDeepResearchBtn" aria-label="Disable Deep Research Mode">×</button>
+            </div>
+        `;
+    }
+
+    const attachmentsHtml = state.pendingAttachments.map(file => {
         let kind = 'file';
-        if (file.mime.startsWith('image/')) kind = 'image';
-        if (file.mime.startsWith('video/')) kind = 'video';
-        if (file.mime === 'application/pdf') kind = 'PDF document';
-        if (file.name.endsWith('.docx') || file.name.endsWith('.doc')) kind = 'Word document';
+        let iconSvg = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                <polyline points="13 2 13 9 20 9"></polyline>
+            </svg>
+        `;
+        let iconBg = '';
+
+        if (file.mime === 'text/url') {
+            kind = 'Link';
+            iconBg = 'background: rgba(34, 211, 238, 0.15); color: var(--accent-cyan); border: 1px solid rgba(34, 211, 238, 0.3);';
+            iconSvg = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                </svg>
+            `;
+        } else {
+            if (file.mime.startsWith('image/')) kind = 'image';
+            if (file.mime.startsWith('video/')) kind = 'video';
+            if (file.mime === 'application/pdf') kind = 'PDF document';
+            if (file.name.endsWith('.docx') || file.name.endsWith('.doc')) kind = 'Word document';
+        }
 
         return `
             <div class="attachment-card">
-                <div class="attachment-icon-box">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
-                        <polyline points="13 2 13 9 20 9"></polyline>
-                    </svg>
+                <div class="attachment-icon-box" style="${iconBg}">
+                    ${iconSvg}
                 </div>
                 <div class="attachment-info">
                     <span class="attachment-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
@@ -801,10 +861,25 @@ function renderAttachmentTray() {
         `;
     }).join('');
 
+    els.attachmentTray.innerHTML = modeHtml + attachmentsHtml;
+
     els.attachmentTray.querySelectorAll('.attachment-remove').forEach(button => {
         button.addEventListener('click', () => {
-            state.pendingAttachments = state.pendingAttachments.filter(file => file.id !== button.dataset.attachmentId);
-            renderAttachmentTray();
+            if (button.id === 'disableWikiModeBtn') {
+                state.wikipediaMode = false;
+                renderAttachmentTray();
+                updateQueryInputPlaceholder();
+            } else if (button.id === 'disableDeepResearchBtn') {
+                state.deepResearchMode = false;
+                if (els.modelSelect) {
+                    els.modelSelect.value = 'light';
+                    saveSettingsToLocalStorage();
+                }
+                renderAttachmentTray();
+            } else {
+                state.pendingAttachments = state.pendingAttachments.filter(file => file.id !== button.dataset.attachmentId);
+                renderAttachmentTray();
+            }
         });
     });
 }
@@ -1133,12 +1208,33 @@ function updateSourcesPanel(data) {
                 const datasetsHtml = p.datasets && p.datasets.length > 0 ? `
                     <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
                         <span style="font-size: 11px; color: var(--text-tertiary);">Datasets:</span>
-                        ${p.datasets.map(ds => `
-                            <a href="${ds.url}" target="_blank" style="background: rgba(34, 211, 238, 0.05); border: 1px solid rgba(34, 211, 238, 0.2); color: var(--accent-cyan); padding: 2px 6px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="dataset-badge">
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z"/><path d="M2 7c0 2.76 4.477 5 10 5s10-2.24 10-5"/><path d="M2 12c0 2.76 4.477 5 10 5s10-2.24 10-5"/></svg>
+                        ${p.datasets.map(ds => {
+                            const url = ds.wikipedia_url || ds.url || '#';
+                            const isWiki = !!ds.wikipedia_url;
+                            const badgeBg = isWiki ? 'rgba(99, 102, 241, 0.1)' : 'rgba(34, 211, 238, 0.05)';
+                            const badgeBorder = isWiki ? 'rgba(99, 102, 241, 0.3)' : 'rgba(34, 211, 238, 0.2)';
+                            const badgeColor = isWiki ? 'var(--primary-light)' : 'var(--accent-cyan)';
+                            const iconSvg = isWiki 
+                                ? `<span style="font-size: 10px; margin-right: 2px;">🌐</span>`
+                                : `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 2px;"><path d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z"/><path d="M2 7c0 2.76 4.477 5 10 5s10-2.24 10-5"/><path d="M2 12c0 2.76 4.477 5 10 5s10-2.24 10-5"/></svg>`;
+                            
+                            let html = `
+                            <a href="${url}" target="_blank" title="${escapeHtml(ds.description || '')}" style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 2px 6px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="dataset-badge">
+                                ${iconSvg}
                                 ${escapeHtml(ds.name)}
                             </a>
-                        `).join('')}
+                            `;
+
+                            if (ds.kaggle_url) {
+                                html += `
+                                <a href="${ds.kaggle_url}" target="_blank" title="Find '${escapeHtml(ds.name)}' on Kaggle: ${escapeHtml(ds.kaggle_title || '')} (${ds.kaggle_votes || 0} votes)" style="background: rgba(32, 190, 255, 0.15); border: 1px solid rgba(32, 190, 255, 0.35); color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="kaggle-badge">
+                                    <span style="font-size: 10px; font-weight: 800; font-family: sans-serif; color: #00b0ff; margin-right: 1px;">K</span>
+                                    Kaggle
+                                </a>
+                                `;
+                            }
+                            return html;
+                        }).join('')}
                     </div>
                 ` : '';
 
@@ -1227,35 +1323,114 @@ function updateSourcesPanel(data) {
         renderGraph(data.papers);
     }
 
-    // Verification
-    const verifTab = document.getElementById('tabVerification');
-    if (data.verification) {
-        const v = data.verification;
-        const confidencePercent = (v.confidence * 100).toFixed(0);
-        verifTab.innerHTML = `
-            <div class="verif-summary">
-                <div class="verif-score-circle" style="--percent: ${confidencePercent}">
-                    <span class="score-val">${confidencePercent}%</span>
+    // Datasets & Data Sources
+    const datasetsTab = document.getElementById('tabDatasets');
+    if (datasetsTab) {
+        const datasets = data.datasets || [];
+        const codeRepos = data.code_repos || [];
+
+        if (datasets.length === 0 && codeRepos.length === 0) {
+            datasetsTab.innerHTML = `
+                <div class="sources-empty">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                        <path d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z"/>
+                        <path d="M2 7c0 2.76 4.477 5 10 5s10-2.24 10-5"/>
+                        <path d="M2 12c0 2.76 4.477 5 10 5s10-2.24 10-5"/>
+                    </svg>
+                    <span>No datasets or code repositories identified.</span>
                 </div>
-                <div class="verif-meta">
-                    <h3>${v.verdict || 'PASSED'}</h3>
-                    <p>Evidence consistency check completed.</p>
-                </div>
-            </div>
-            ${v.flagged_claims && v.flagged_claims.length > 0 ? `
-                <div class="verif-flagged">
-                    <h4>Low-Confidence Claims</h4>
-                    ${v.flagged_claims.map(c => `<div class="flag-item">! ${escapeHtml(c)}</div>`).join('')}
-                </div>
-            ` : '<div class="verif-success">OK All claims backed by sources.</div>'}
-        `;
-    } else {
-        verifTab.innerHTML = '<div class="sources-empty">No verification data available.</div>';
+            `;
+        } else {
+            let html = '';
+
+            if (datasets.length > 0) {
+                html += `<div class="datasource-section-title" style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--accent-cyan); margin: 10px 0 15px 0; letter-spacing: 0.5px;">Datasets & Benchmarks</div>`;
+                html += `<div class="dataset-grid" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">`;
+                html += datasets.map(ds => {
+                    let linksHtml = '';
+                    if (ds.url) {
+                        linksHtml += `
+                            <a href="${ds.url}" target="_blank" class="ds-link-badge pwc-badge" style="background: rgba(34, 211, 238, 0.05); border: 1px solid rgba(34, 211, 238, 0.2); color: var(--accent-cyan); padding: 3px 8px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="dataset-badge">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                PwC
+                            </a>`;
+                    }
+                    if (ds.wikipedia_url) {
+                        linksHtml += `
+                            <a href="${ds.wikipedia_url}" target="_blank" class="ds-link-badge wiki-badge" style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); color: var(--primary-light); padding: 3px 8px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                                🌐 Wikipedia
+                            </a>`;
+                    }
+                    if (ds.kaggle_url) {
+                        linksHtml += `
+                            <a href="${ds.kaggle_url}" target="_blank" class="ds-link-badge kaggle-badge" style="background: rgba(32, 190, 255, 0.15); border: 1px solid rgba(32, 190, 255, 0.35); color: #38bdf8; padding: 3px 8px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                                <span style="font-size: 10px; font-weight: 800; font-family: sans-serif; color: #00b0ff;">K</span> Kaggle
+                            </a>`;
+                    }
+
+                    const subInfo = ds.kaggle_votes ? `<span class="dataset-votes" style="font-size: 11px; color: var(--accent-amber); font-family: var(--font-mono);">★ ${ds.kaggle_votes} votes</span>` : '';
+
+                    return `
+                        <div class="dataset-card" style="background: var(--bg-tertiary); border: 1px solid var(--surface-glass-border); border-radius: var(--radius-md); padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                            <div class="dataset-card-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <svg class="dataset-card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-cyan);">
+                                        <path d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z"/>
+                                        <path d="M2 7c0 2.76 4.477 5 10 5s10-2.24 10-5"/>
+                                        <path d="M2 12c0 2.76 4.477 5 10 5s10-2.24 10-5"/>
+                                    </svg>
+                                    <h4 class="dataset-card-name" style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 0;">${escapeHtml(ds.name)}</h4>
+                                </div>
+                                ${subInfo}
+                            </div>
+                            ${ds.description ? `<p class="dataset-card-desc" style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; margin: 0;">${escapeHtml(ds.description)}</p>` : ''}
+                            <div class="dataset-card-links" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
+                                ${linksHtml}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                html += `</div>`;
+            }
+
+            if (codeRepos.length > 0) {
+                html += `<div class="datasource-section-title" style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--primary-light); margin: 20px 0 15px 0; letter-spacing: 0.5px;">Code Repositories</div>`;
+                html += `<div class="repo-grid" style="display: flex; flex-direction: column; gap: 10px;">`;
+                html += codeRepos.map(repo => {
+                    const starsText = repo.stars ? `★ ${repo.stars.toLocaleString()}` : '';
+                    const fwBadge = repo.framework ? `<span class="repo-fw-badge ${repo.framework.toLowerCase()}" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 1px 5px; border-radius: 3px; font-size: 9px; text-transform: uppercase; font-weight: 700;">${escapeHtml(repo.framework)}</span>` : '';
+                    const sourceText = repo.source ? `<span class="repo-source-text" style="font-size: 11px; color: var(--text-muted);">via ${escapeHtml(repo.source)}</span>` : '';
+
+                    return `
+                        <a href="${repo.url}" target="_blank" class="repo-card" style="background: var(--bg-tertiary); border: 1px solid var(--surface-glass-border); border-radius: var(--radius-md); padding: 12px; text-decoration: none; display: block; transition: all 0.2s ease;">
+                            <div class="repo-card-header" style="display: flex; align-items: flex-start; gap: 10px;">
+                                <svg class="repo-card-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary); margin-top: 2px; flex-shrink: 0;">
+                                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                                </svg>
+                                <div class="repo-card-meta" style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
+                                    <div class="repo-card-title" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap;">
+                                        <span class="repo-card-name" style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${escapeHtml(repo.name)}</span>
+                                        ${fwBadge}
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-top:4px;">
+                                        <span class="repo-card-stars" style="font-size: 11px; color: var(--accent-amber); font-family: var(--font-mono); font-weight: 600;">${starsText}</span>
+                                        ${sourceText}
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                    `;
+                }).join('');
+                html += `</div>`;
+            }
+
+            datasetsTab.innerHTML = html;
+        }
     }
 
     const elementsToTypeset = [];
     if (chunkList) elementsToTypeset.push(chunkList);
-    if (verifTab) elementsToTypeset.push(verifTab);
+    if (datasetsTab) elementsToTypeset.push(datasetsTab);
     typesetMath(elementsToTypeset);
 }
 
@@ -1298,7 +1473,7 @@ function setSourcesLoading() {
     }
     document.getElementById('tabChunks').innerHTML = `<div class="sources-empty"><span>Accessing Knowledge Base...</span></div>`;
     document.getElementById('tabPapers').innerHTML = `<div class="sources-empty"><span>Retrieving Research Network...</span></div>`;
-    document.getElementById('tabVerification').innerHTML = `<div class="sources-empty"><span>Preparing Grounding Pass...</span></div>`;
+    document.getElementById('tabDatasets').innerHTML = `<div class="sources-empty"><span>Retrieving datasets & repos...</span></div>`;
 
     // Switch to status indicators
     const tabs = document.querySelectorAll('.sources-tab');
@@ -1329,6 +1504,16 @@ function handleInputChange() {
     els.queryInput.style.height = Math.min(els.queryInput.scrollHeight, 150) + 'px';
 }
 
+function updateQueryInputPlaceholder() {
+    if (els.queryInput) {
+        if (state.wikipediaMode) {
+            els.queryInput.placeholder = "Search Wikipedia for datasets or topics...";
+        } else {
+            els.queryInput.placeholder = "Ask anything";
+        }
+    }
+}
+
 function handleInputKeydown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -1355,10 +1540,25 @@ async function sendQuery() {
 
     // Add user message
     const outgoingAttachments = [...state.pendingAttachments];
-    addMessage('user', query, { attachments: outgoingAttachments });
-    state.messages.push({ role: 'user', content: query });
+    const isWikipediaQuery = state.wikipediaMode;
+
+    const msgAttachments = [...outgoingAttachments];
+    if (isWikipediaQuery) {
+        msgAttachments.push({ name: 'Wikipedia Mode', size: 0, mime: 'text/wikipedia' });
+    }
+
+    // Extract pasted URLs from attachments
+    const urlAttachments = outgoingAttachments.filter(att => att.mime === 'text/url');
+    const urlString = urlAttachments.map(att => att.url).join(' ');
+    const fullQuery = urlString ? `${query} ${urlString}`.trim() : query;
+
+    addMessage('user', query, { attachments: msgAttachments });
+    state.messages.push({ role: 'user', content: fullQuery });
+    
     state.pendingAttachments = [];
+    state.wikipediaMode = false;
     renderAttachmentTray();
+    updateQueryInputPlaceholder();
 
     // Clear input
     els.queryInput.value = '';
@@ -1369,7 +1569,9 @@ async function sendQuery() {
     setSourcesLoading();
 
     // Pipeline status simulation
-    const steps = ["Planning Strategy", "Searching Knowledge Graph", "Retrieving Papers", "Semantic Vector Search", "Applying MMR Reranking", "Reasoning & Synthesis", "Verifying for Hallucinations"];
+    const steps = isWikipediaQuery
+        ? ["Searching Wikipedia", "Fetching Article Details", "Synthesizing Summary"]
+        : ["Planning Strategy", "Searching Knowledge Graph", "Retrieving Papers", "Semantic Vector Search", "Applying MMR Reranking", "Reasoning & Synthesis", "Verifying for Hallucinations"];
     let stepIdx = 0;
     updatePipelineStep(steps[stepIdx]);
     const stepInterval = setInterval(() => {
@@ -1377,7 +1579,7 @@ async function sendQuery() {
             stepIdx++;
             updatePipelineStep(steps[stepIdx]);
         }
-    }, 2500);
+    }, 2000);
 
     // Build request
     const useChat = state.messages.length > 2;
@@ -1390,6 +1592,7 @@ async function sendQuery() {
             temperature: els.temperature ? parseFloat(els.temperature.value) : 0.0,
             use_heavy: els.modelSelect ? els.modelSelect.value === 'heavy' : false,
             verify: els.verifyToggle ? els.verifyToggle.checked : true,
+            mode: isWikipediaQuery ? 'wikipedia' : 'research',
         };
 
         if (useChat) {
@@ -1401,7 +1604,7 @@ async function sendQuery() {
         } else {
             data = await apiCall('/api/research', {
                 ...requestData,
-                query: query,
+                query: fullQuery,
             });
         }
 
@@ -1595,6 +1798,12 @@ function addAssistantMessage(data, stream = true) {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         ${data.papers.length} Papers Found
     </span>`);
+    if (data.datasets && data.datasets.length > 0) {
+        stats.push(`<span class="message-stat clickable" style="border-color: rgba(34, 211, 238, 0.25); color: var(--accent-cyan);" onclick="openSourcesPanel(); switchSourceTab('datasets')">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle; margin-right:2px;"><path d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z"/><path d="M2 7c0 2.76 4.477 5 10 5s10-2.24 10-5"/><path d="M2 12c0 2.76 4.477 5 10 5s10-2.24 10-5"/></svg>
+            ${data.datasets.length} Datasets
+        </span>`);
+    }
     if (data.chunks) stats.push(`<span class="message-stat clickable" onclick="openSourcesPanel(); switchSourceTab('chunks')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="13 2 13 9 20 9"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
         ${data.chunks.length} Knowledge Chunks
@@ -2705,6 +2914,8 @@ function loadSettingsFromLocalStorage() {
         const verify = localStorage.getItem('aether_settings_verify') !== 'false'; // defaults to true
         const studyMode = localStorage.getItem('aether_settings_studyMode') === 'true'; // defaults to false
         const model = localStorage.getItem('aether_settings_model') || 'light';
+        
+        state.deepResearchMode = model === 'heavy';
         
         if (els.topK) {
             els.topK.value = topK;

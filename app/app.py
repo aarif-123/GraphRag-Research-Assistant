@@ -97,14 +97,26 @@ try:
     from sources.papers_with_code import (
         enrich_arxiv_papers_with_pwc,
     )
+    from sources.wikipedia import (
+        search_wikipedia_summary,
+        enrich_datasets_with_wikipedia,
+    )
+    from sources.kaggle import (
+        search_kaggle_dataset,
+        enrich_datasets_with_kaggle,
+    )
     _SOURCES_AVAILABLE = True
 except ImportError:
     _SOURCES_AVAILABLE = False
     log = logging.getLogger("graphrag")
-    log.warning("External source connectors not found — S2/PwC disabled")
+    log.warning("External source connectors not found — S2/PwC/Wikipedia/Kaggle disabled")
     async def enrich_arxiv_papers_with_s2(papers, **kw): return papers
     async def search_papers_s2(query, **kw): return []
     async def enrich_arxiv_papers_with_pwc(papers, **kw): return papers
+    async def search_wikipedia_summary(query, **kw): return None
+    async def enrich_datasets_with_wikipedia(datasets, **kw): return datasets
+    async def search_kaggle_dataset(query, **kw): return None
+    async def enrich_datasets_with_kaggle(datasets, **kw): return datasets
 
 # ================================================================
 # THREAD-LOCAL SUPABASE CLIENT
@@ -414,6 +426,7 @@ class ResearchRequest(BaseModel):
     verify: bool = True
     filters: Optional[Dict[str, Any]] = None
     temperature: float = Field(0.0, ge=0.0, le=2.0)
+    mode: Optional[str] = "research"
 
     @field_validator("query", "text", mode="before")
     @classmethod
@@ -441,6 +454,7 @@ class ConversationRequest(BaseModel):
     filters: Optional[Dict[str, Any]] = None
     last_paper_context: Optional[str] = None
     temperature: float = Field(0.0, ge=0.0, le=2.0)
+    mode: Optional[str] = "research"
 
 
 class BulkRequest(BaseModel):
@@ -1732,9 +1746,34 @@ async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, A
         except Exception as e:
             log.warning(f"ArXiv MCP query failed: {e}. Falling back to standard XML feed.")
     
-    # URL encode query and format search
-    clean_query = query.replace('"', '').replace("'", "")
-    encoded_query = urllib.parse.quote(f'all:"{clean_query}"' if " " in clean_query else f"all:{clean_query}")
+    # ── Smart query extraction: strip NL question filler words, keep domain terms ──
+    _NL_STOPWORDS = {
+        "what", "how", "does", "do", "show", "explain", "describe", "tell",
+        "find", "give", "list", "can", "you", "me", "my", "please",
+        "is", "are", "a", "an", "the", "to", "for", "with", "about",
+        "from", "by", "at", "on", "it", "its", "this", "that",
+        "which", "where", "when", "who", "why",
+        "some", "any", "more", "recent", "related", "information",
+        "paper", "papers", "work", "works", "reference", "references",
+    }
+    clean_query = query.replace('"', '').replace("'", "").replace("?", "").strip()
+    words = clean_query.split()
+    # If it looks like a NL question (>5 words), extract meaningful keywords
+    if len(words) > 5:
+        keywords = [w for w in words if w.lower() not in _NL_STOPWORDS and len(w) > 2]
+        # Use up to 8 most meaningful keywords
+        search_term = " ".join(keywords[:8]) if keywords else " ".join(words[:6])
+    else:
+        search_term = clean_query
+
+    # Build arXiv query using title+abstract field search for <=5 words phrase,
+    # or combined ti/abs keyword search for longer queries
+    if len(search_term.split()) <= 5:
+        # Phrase match works well for short precise queries like "BERT masked language modeling"
+        encoded_query = urllib.parse.quote(f'all:"{search_term}"')
+    else:
+        # Title + abstract keyword search for longer keyword sets
+        encoded_query = urllib.parse.quote(f'ti:{search_term} OR abs:{search_term}')
     url = f"https://export.arxiv.org/api/query?search_query={encoded_query}&max_results={limit}&sortBy=relevance"
     
     try:
@@ -2857,6 +2896,87 @@ async def _research_impl(req: ResearchRequest, request: Request):
     raw_query = req.resolved_query()
     log.info(f"\n{'='*70}\n[{rid}] QUERY: {raw_query}\n{'='*70}")
 
+    # ── Wikipedia Mode Direct Search ──
+    if req.mode == "wikipedia":
+        log.info(f"[{rid}] Processing query in Wikipedia Mode: {raw_query}")
+        wiki_res = await search_wikipedia_summary(raw_query)
+        if not wiki_res:
+            answer = f"No Wikipedia page was found matching the query '{raw_query}'. You can try searching in normal Research mode for academic papers."
+            latency = int((time.time() - t0) * 1000)
+            return {
+                "request_id": rid,
+                "answer": answer,
+                "route": "wikipedia",
+                "plan": {
+                    "standalone_query": raw_query,
+                    "reasoning_path": "Wikipedia search returned no results.",
+                },
+                "papers": [],
+                "chunks": [],
+                "arxiv_papers": [],
+                "s2_papers": [],
+                "datasets": [],
+                "code_repos": [],
+                "verification": None,
+                "latency_ms": latency,
+                "model_used": REASON_MODEL,
+                "warning": "Wikipedia page not found.",
+            }
+
+        sys_p = (
+            "You are Aether, an academic research assistant. "
+            "A user has queried Wikipedia. Use the retrieved page details below to formulate a beautifully structured, comprehensive explanation of the topic. "
+            "Highlight its context, key details, applications, and any related datasets or sources.\n\n"
+            f"Wikipedia Page Title: {wiki_res['title']}\n"
+            f"URL: {wiki_res['url']}\n"
+            f"Summary/Extract: {wiki_res['extract']}\n\n"
+            "Format your response with proper Markdown headings and lists. "
+            "You MUST clearly cite Wikipedia as the source and include the page link in your answer."
+        )
+
+        try:
+            answer = await groq_chat(
+                [{"role": "system", "content": sys_p}, {"role": "user", "content": raw_query}],
+                REASON_MODEL,
+                temperature=req.temperature,
+                max_tokens=1500,
+            )
+        except Exception as e:
+            log.warning(f"Groq synthesis failed for Wikipedia mode: {e}")
+            answer = (
+                f"### {wiki_res['title']}\n\n"
+                f"{wiki_res['extract']}\n\n"
+                f"Source: [Wikipedia]({wiki_res['url']})"
+            )
+
+        latency = int((time.time() - t0) * 1000)
+        return {
+            "request_id": rid,
+            "answer": answer,
+            "route": "wikipedia",
+            "plan": {
+                "standalone_query": raw_query,
+                "reasoning_path": f"Direct Wikipedia search retrieved '{wiki_res['title']}'",
+            },
+            "papers": [],
+            "chunks": [],
+            "arxiv_papers": [],
+            "s2_papers": [],
+            "datasets": [{
+                "name": wiki_res["title"],
+                "full_name": wiki_res["title"],
+                "url": wiki_res["url"],
+                "wikipedia_url": wiki_res["url"],
+                "description": wiki_res["extract"],
+                "source": "wikipedia"
+            }],
+            "code_repos": [],
+            "verification": None,
+            "latency_ms": latency,
+            "model_used": REASON_MODEL,
+            "warning": None,
+        }
+
     # ── 1. Strategic planning brain ───────────────────────────────────
     plan = await plan_query(raw_query)
     query = plan.standalone_query
@@ -3026,6 +3146,17 @@ async def _research_impl(req: ResearchRequest, request: Request):
             search_papers_s2(query, limit=5),
         )
         arxiv_papers = await enrich_arxiv_papers_with_s2(arxiv_papers)
+        # Enrich dataset definitions with Wikipedia links/summaries + Kaggle datasets
+        for p in arxiv_papers:
+            if "datasets" in p and p["datasets"]:
+                try:
+                    p["datasets"] = await enrich_datasets_with_wikipedia(p["datasets"])
+                except Exception as e:
+                    log.warning(f"Error enriching paper datasets with Wikipedia: {e}")
+                try:
+                    p["datasets"] = await enrich_datasets_with_kaggle(p["datasets"])
+                except Exception as e:
+                    log.warning(f"Error enriching paper datasets with Kaggle: {e}")
     else:
         s2_papers = await search_papers_s2(query, limit=5)
 
@@ -3174,6 +3305,82 @@ async def _chat_impl(req: ConversationRequest, request: Request):
 
     log.info(f"[{rid}] CHAT: {last_user_msg}")
 
+    # ── Wikipedia Mode Direct Search in Chat ──
+    if req.mode == "wikipedia":
+        log.info(f"[{rid}] Multi-turn query in Wikipedia Mode: {last_user_msg}")
+        wiki_res = await search_wikipedia_summary(last_user_msg)
+        
+        wiki_context = ""
+        unique_datasets = []
+        if wiki_res:
+            wiki_context = (
+                f"\n\n━━━ WIKIPEDIA CONTEXT FOR {wiki_res['title']} ━━━\n"
+                f"URL: {wiki_res['url']}\n"
+                f"Summary: {wiki_res['extract']}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            )
+            unique_datasets = [{
+                "name": wiki_res["title"],
+                "full_name": wiki_res["title"],
+                "url": wiki_res["url"],
+                "wikipedia_url": wiki_res["url"],
+                "description": wiki_res["extract"],
+                "source": "wikipedia"
+            }]
+            
+        sys_p = (
+            "You are Aether, an academic research assistant. "
+            "Use the provided Wikipedia context (if any) to address the user's query. "
+            "Cite Wikipedia and provide links where appropriate."
+        )
+        sys_p += wiki_context
+        
+        # Compile messages
+        chat_msgs = []
+        chat_msgs.append({"role": "system", "content": sys_p})
+        for msg in req.messages:
+            if msg.role != "system":
+                chat_msgs.append({"role": msg.role, "content": msg.content})
+                
+        try:
+            answer = await groq_chat(
+                chat_msgs,
+                REASON_MODEL,
+                temperature=req.temperature,
+                max_tokens=1500,
+            )
+        except Exception as e:
+            log.warning(f"Groq synthesis failed for Wikipedia mode in chat: {e}")
+            if wiki_res:
+                answer = (
+                    f"### {wiki_res['title']}\n\n"
+                    f"{wiki_res['extract']}\n\n"
+                    f"Source: [Wikipedia]({wiki_res['url']})"
+                )
+            else:
+                answer = f"No Wikipedia page was found matching the query '{last_user_msg}'."
+
+        latency = int((time.time() - t0) * 1000)
+        return {
+            "request_id": rid,
+            "answer": answer,
+            "route": "wikipedia",
+            "plan": {
+                "standalone_query": last_user_msg,
+                "reasoning_path": f"Multi-turn Wikipedia search for '{wiki_res['title'] if wiki_res else last_user_msg}'",
+            },
+            "papers": [],
+            "chunks": [],
+            "arxiv_papers": [],
+            "s2_papers": [],
+            "datasets": unique_datasets,
+            "code_repos": [],
+            "verification": None,
+            "latency_ms": latency,
+            "model_used": REASON_MODEL,
+            "warning": None if wiki_res else "No matching Wikipedia page found.",
+        }
+
     # 1. Parse and cache PDF/arXiv URLs
     latest_urls = extract_paper_urls(last_user_msg)
     history_urls = []
@@ -3272,8 +3479,10 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             else:
                 # ── DB miss: fall through to arXiv/S2 for real grounded answers ──
                 log.info(f"[{rid}] entity_lookup DB miss — falling back to arXiv/S2")
-                arxiv_fb = await retrieve_arxiv_context(query, limit=5)
-                s2_fb = await search_papers_s2(query, limit=5)
+                # Use extracted anchors as search terms (much better than raw NL query)
+                arxiv_search = " ".join(anchors) if anchors else query
+                arxiv_fb = await retrieve_arxiv_context(arxiv_search, limit=5)
+                s2_fb = await search_papers_s2(arxiv_search, limit=5)
                 if arxiv_fb or s2_fb:
                     fb_prompt = grounded_prompt(query, [], [], arxiv_fb, s2_fb)
                     msgs = await compile_chat_messages(fb_prompt, req.messages)
@@ -3335,8 +3544,10 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             else:
                 # ── DB miss: fall through to arXiv/S2 for real grounded list ──
                 log.info(f"[{rid}] structured DB miss — falling back to arXiv/S2")
-                arxiv_fb = await retrieve_arxiv_context(query, limit=10)
-                s2_fb = await search_papers_s2(query, limit=10)
+                # Use extracted keywords as search terms
+                arxiv_search = " ".join(kw) if kw else query
+                arxiv_fb = await retrieve_arxiv_context(arxiv_search, limit=10)
+                s2_fb = await search_papers_s2(arxiv_search, limit=10)
                 if arxiv_fb or s2_fb:
                     all_fb = arxiv_fb + s2_fb
                     lines = [f"Found **{len(all_fb)}** papers (sourced from arXiv/Semantic Scholar):\n"]
@@ -3431,8 +3642,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             raise HTTPException(502, str(e))
 
     async def fetch_arxiv():
-        # Retrieve relevant abstracts from arXiv dynamically in parallel
-        return await retrieve_arxiv_context(query, limit=5)
+        # Retrieve relevant abstracts from arXiv using extracted keywords (not raw NL query)
+        arxiv_search = " ".join(plan.vector_keywords or plan.graph_anchors or [query])
+        return await retrieve_arxiv_context(arxiv_search, limit=5)
 
     graph_nodes, chunks, arxiv_papers = await asyncio.gather(
         fetch_graph(), fetch_supabase(), fetch_arxiv()
@@ -3447,6 +3659,17 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             search_papers_s2(query, limit=5),
         )
         arxiv_papers = await enrich_arxiv_papers_with_s2(arxiv_papers)
+        # Enrich dataset definitions with Wikipedia links/summaries + Kaggle datasets
+        for p in arxiv_papers:
+            if "datasets" in p and p["datasets"]:
+                try:
+                    p["datasets"] = await enrich_datasets_with_wikipedia(p["datasets"])
+                except Exception as e:
+                    log.warning(f"Error enriching paper datasets with Wikipedia: {e}")
+                try:
+                    p["datasets"] = await enrich_datasets_with_kaggle(p["datasets"])
+                except Exception as e:
+                    log.warning(f"Error enriching paper datasets with Kaggle: {e}")
     else:
         s2_papers = await search_papers_s2(query, limit=5)
 

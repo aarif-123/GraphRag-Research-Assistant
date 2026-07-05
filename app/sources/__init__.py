@@ -15,6 +15,14 @@ from .papers_with_code import (
 from .arxiv_mcp import (
     query_arxiv_mcp,
 )
+from .wikipedia import (
+    search_wikipedia_summary,
+    enrich_datasets_with_wikipedia,
+)
+from .kaggle import (
+    search_kaggle_dataset,
+    enrich_datasets_with_kaggle,
+)
 
 __all__ = [
     "search_papers_s2",
@@ -24,4 +32,8 @@ __all__ = [
     "get_paper_datasets_pwc",
     "enrich_arxiv_papers_with_pwc",
     "query_arxiv_mcp",
+    "search_wikipedia_summary",
+    "enrich_datasets_with_wikipedia",
+    "search_kaggle_dataset",
+    "enrich_datasets_with_kaggle",
 ]
