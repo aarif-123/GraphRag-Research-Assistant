@@ -56,6 +56,14 @@ import collections
 _UnameResult = collections.namedtuple("uname_result", ["system", "node", "release", "version", "machine", "processor"])
 platform.uname = lambda: _UnameResult("Windows", "localhost", "10", "10.0.19045", "AMD64", "Intel")
 platform.win32_ver = lambda *args, **kwargs: ("10", "10.0.19045", "", "")
+
+# Force HuggingFace Hub offline mode (uses local cache, prevents startup SSL network check)
+os.environ["HF_HUB_OFFLINE"] = "1"
+
+# Bypass Python SSL verification for local dev behind proxies/VPNs
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
 import uuid
 import hashlib
 import asyncio
@@ -90,26 +98,26 @@ import threading
 
 # External source connectors (Semantic Scholar, Papers with Code)
 try:
-    from sources.semantic_scholar import (
+    from app.sources.semantic_scholar import (
         enrich_arxiv_papers_with_s2,
         search_papers_s2,
     )
-    from sources.papers_with_code import (
+    from app.sources.papers_with_code import (
         enrich_arxiv_papers_with_pwc,
     )
-    from sources.wikipedia import (
+    from app.sources.wikipedia import (
         search_wikipedia_summary,
         enrich_datasets_with_wikipedia,
     )
-    from sources.kaggle import (
+    from app.sources.kaggle import (
         search_kaggle_dataset,
         enrich_datasets_with_kaggle,
     )
     _SOURCES_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     _SOURCES_AVAILABLE = False
     log = logging.getLogger("graphrag")
-    log.warning("External source connectors not found — S2/PwC/Wikipedia/Kaggle disabled")
+    log.warning(f"External source connectors not found — S2/PwC/Wikipedia/Kaggle disabled (error: {e})")
     async def enrich_arxiv_papers_with_s2(papers, **kw): return papers
     async def search_papers_s2(query, **kw): return []
     async def enrich_arxiv_papers_with_pwc(papers, **kw): return papers
@@ -171,7 +179,7 @@ def rotate_groq_key():
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-base-en")
-REASON_MODEL = os.getenv("REASON_MODEL", "llama-3.3-70b-versatile")
+REASON_MODEL = os.getenv("REASON_MODEL", "openai/gpt-oss-20b")
 HEAVY_MODEL = os.getenv("HEAVY_MODEL", "llama-3.3-70b-versatile")
 PLAN_MODEL = os.getenv("PLAN_MODEL", "openai/gpt-oss-20b")  # strategic brain
 
@@ -203,7 +211,9 @@ for _v in _REQUIRED:
 
 _log_handlers = [logging.StreamHandler()]
 if not os.getenv("VERCEL"):
-    _log_handlers.insert(0, logging.FileHandler("app.log", encoding="utf-8"))
+    log_dir = Path(".logs")
+    log_dir.mkdir(exist_ok=True)
+    _log_handlers.insert(0, logging.FileHandler(log_dir / "app.log", encoding="utf-8"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -300,6 +310,143 @@ _rate_store: Dict[str, List[float]] = {}
 _last_cleanup = time.time()
 
 
+# ================================================================
+# PLAN & CREDIT SYSTEM
+# ================================================================
+
+FREE_CREDITS_PER_DAY = int(os.getenv("FREE_CREDITS_PER_DAY", "20"))
+FREE_TOP_K_MAX = 8
+PRO_TOP_K_MAX = 20
+
+# Credit costs per action
+CREDIT_COSTS: Dict[str, int] = {
+    "query": 1,        # /api/research
+    "chat": 1,         # /api/chat
+    "timeline": 3,     # /api/research/timeline
+    "compare": 3,      # /api/graph/compare
+    "pdf": 5,          # PDF upload
+}
+
+
+async def get_user_plan(request: Request) -> Dict[str, Any]:
+    """Return {plan, credits_used, credits_reset_at} for the authenticated user.
+    Falls back to {'plan': 'free', ...} for unauthenticated requests."""
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return {"plan": "free", "credits_used": 0, "credits_reset_at": None}
+        token = auth_header.split(" ")[1]
+        payload = decode_access_token(token)
+        if not payload:
+            return {"plan": "free", "credits_used": 0, "credits_reset_at": None}
+        uid = payload.get("sub")
+        user = await asyncio.to_thread(db.users.find_one, {"_id": uid})
+        if not user:
+            return {"plan": "free", "credits_used": 0, "credits_reset_at": None}
+
+        now = datetime.now(timezone.utc)
+        now_naive = now.replace(tzinfo=None)
+        reset_at = user.get("credits_reset_at")
+        credits_used = user.get("credits_used", 0)
+
+        reset_at_naive = reset_at
+        if isinstance(reset_at, datetime) and reset_at.tzinfo is not None:
+            reset_at_naive = reset_at.astimezone(timezone.utc).replace(tzinfo=None)
+
+        # Reset daily credits if the reset time has passed
+        if reset_at is None or (isinstance(reset_at_naive, datetime) and now_naive >= reset_at_naive):
+            new_reset = (now + timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            new_reset_naive = new_reset.replace(tzinfo=None)
+            await asyncio.to_thread(
+                db.users.update_one,
+                {"_id": uid},
+                {"$set": {"credits_used": 0, "credits_reset_at": new_reset_naive}},
+            )
+            credits_used = 0
+            reset_at = new_reset_naive
+
+        return {
+            "plan": user.get("plan", "free"),
+            "credits_used": credits_used,
+            "credits_reset_at": reset_at.isoformat() if isinstance(reset_at, datetime) else None,
+            "user_id": uid,
+        }
+    except Exception as e:
+        log.warning(f"get_user_plan error: {e}")
+        return {"plan": "free", "credits_used": 0, "credits_reset_at": None}
+
+
+async def check_and_deduct_credit(request: Request, action: str) -> None:
+    """Check if user has credits remaining and deduct one. Raises 402 if exhausted.
+    Pro users bypass the credit system entirely."""
+    plan_info = await get_user_plan(request)
+    plan = plan_info.get("plan", "free")
+    if plan == "pro":
+        return  # Pro users: unlimited
+
+    cost = CREDIT_COSTS.get(action, 1)
+    credits_used = plan_info.get("credits_used", 0)
+
+    if credits_used + cost > FREE_CREDITS_PER_DAY:
+        reset_at = plan_info.get("credits_reset_at", "tomorrow")
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "credit_exhausted",
+                "message": f"You have used all {FREE_CREDITS_PER_DAY} daily credits. "
+                           f"Upgrade to Pro for unlimited access, or wait until {reset_at}.",
+                "credits_used": credits_used,
+                "credits_limit": FREE_CREDITS_PER_DAY,
+                "reset_at": reset_at,
+                "upgrade_url": "/upgrade",
+            },
+        )
+
+    uid = plan_info.get("user_id")
+    if uid:
+        await asyncio.to_thread(
+            db.users.update_one,
+            {"_id": uid},
+            {"$inc": {"credits_used": cost}},
+        )
+
+
+async def append_credits_snapshot(res: Any, request: Request) -> Any:
+    """Helper to append the updated credit snapshot to any API response dict."""
+    if isinstance(res, dict):
+        try:
+            post_plan = await get_user_plan(request)
+            _plan = post_plan.get("plan", "free")
+            _used = post_plan.get("credits_used", 0)
+            res["credits"] = {
+                "plan": _plan,
+                "credits_used": _used,
+                "credits_remaining": None if _plan == "pro" else max(0, FREE_CREDITS_PER_DAY - _used),
+                "credits_limit": None if _plan == "pro" else FREE_CREDITS_PER_DAY,
+                "is_unlimited": _plan == "pro",
+            }
+        except Exception as e:
+            log.warning(f"Failed to append credits snapshot: {e}")
+    return res
+
+
+async def require_pro(request: Request, feature_name: str = "This feature") -> None:
+    """Raise 403 with upgrade prompt if user is not on Pro plan."""
+    plan_info = await get_user_plan(request)
+    if plan_info.get("plan") != "pro":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "pro_required",
+                "message": f"{feature_name} is available on the Pro plan. "
+                           "Upgrade to unlock unlimited surveys, bulk research, heavy models, and more.",
+                "upgrade_url": "/upgrade",
+            },
+        )
+
+
 async def check_rate_limit(client_ip: str) -> None:
     global _last_cleanup, _rate_store
     now = time.time()
@@ -352,7 +499,9 @@ class Pool:
 
         try:
             self.neo4j = GraphDatabase.driver(
-                NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD)
+                NEO4J_URI,
+                auth=(NEO4J_USER, NEO4J_PASSWORD),
+                notifications_min_severity='OFF'
             )
             await asyncio.wait_for(
                 asyncio.to_thread(self.neo4j.verify_connectivity), timeout=10.0
@@ -650,6 +799,99 @@ async def global_exception_handler(request: Request, exc: Exception):
 # GROQ LLM  (retry + backoff + deterministic cache)
 # ================================================================
 
+def compress_rag_prompt(content: str) -> str:
+    """
+    Compresses RAG prompt by keeping the main points:
+    - Truncates long abstracts (under '  Abstract: ') to the first 120 characters + [...]
+    - Truncates long chunk texts (in '=== RETRIEVED CHUNK EVIDENCE ===') to the first 150 characters + [...]
+    """
+    new_lines = []
+    in_chunks = False
+    for line in content.splitlines():
+        if "=== RETRIEVED CHUNK EVIDENCE ===" in line:
+            in_chunks = True
+            new_lines.append(line)
+            continue
+        if in_chunks and (line.startswith("━━━") or line.startswith("═══") or "QUERY" in line):
+            in_chunks = False
+        
+        if in_chunks:
+            # If it's a chunk header line (like [1] Title | sim=0.85)
+            if line.strip().startswith("[") and " | " in line:
+                new_lines.append(line)
+            elif line.strip():
+                # Compress the chunk body text
+                stripped = line.strip()
+                if len(stripped) > 150:
+                    indent = len(line) - len(line.lstrip())
+                    new_lines.append(" " * indent + stripped[:150] + " [...]")
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+        else:
+            # Outside chunk section, check for Abstract
+            if line.startswith("  Abstract: "):
+                abstract_text = line[12:]
+                if len(abstract_text) > 120:
+                    new_lines.append("  Abstract: " + abstract_text[:120] + " [...]")
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+    return "\n".join(new_lines)
+
+
+def truncate_messages(messages: List[Dict], max_total_chars: int = 12000) -> List[Dict]:
+    """
+    Finds the longest message in the list and truncates it so that the sum of
+    all message contents is <= max_total_chars.
+    Attempts to compress RAG context intelligently first (keeping main points),
+    then falls back to character-level slicing if still over limit.
+    """
+    total_chars = sum(len(m.get("content", "")) for m in messages)
+    if total_chars <= max_total_chars:
+        return messages
+
+    # Find the index of the longest message
+    longest_idx = -1
+    longest_len = -1
+    for i, m in enumerate(messages):
+        content_len = len(m.get("content", ""))
+        if content_len > longest_len:
+            longest_len = content_len
+            longest_idx = i
+
+    if longest_idx == -1 or longest_len == 0:
+        return messages
+
+    truncated_messages = [dict(m) for m in messages]
+    content = truncated_messages[longest_idx]["content"]
+
+    # 1. Try smart RAG prompt compression
+    compressed_content = compress_rag_prompt(content)
+    
+    # 2. If smart compression reduced the size, use it
+    if len(compressed_content) < len(content):
+        truncated_messages[longest_idx]["content"] = compressed_content
+        # Recalculate total characters to see if we need further character-level truncation
+        new_total = sum(len(m.get("content", "")) for m in truncated_messages)
+        if new_total <= max_total_chars:
+            return truncated_messages
+        # If still too large, update variables and do character-level fallback
+        content = compressed_content
+        total_chars = new_total
+        longest_len = len(content)
+
+    # 3. Fallback character-level truncation
+    suffix = "\n\n[... Context truncated due to rate/size limits ...]"
+    excess = total_chars - max_total_chars + len(suffix)
+    target_len = max(0, longest_len - excess)
+    truncated_messages[longest_idx]["content"] = content[:target_len] + suffix
+    return truncated_messages
+
+
+
 
 async def groq_chat(
     messages: List[Dict],
@@ -658,6 +900,7 @@ async def groq_chat(
     max_tokens: int = 1024,
     retries: int = 2,
     json_mode: bool = False,
+    purpose: str = "",
 ) -> str:
     ck = None
     if temperature == 0.0:
@@ -679,8 +922,49 @@ async def groq_chat(
     last_err = None
     max_attempts = max(retries + 1, len(GROQ_API_KEYS))
     
+    start_idx = 0
+    if GROQ_API_KEYS:
+        # Determine purpose statelessly
+        if not purpose:
+            try:
+                import inspect
+                frame = inspect.currentframe()
+                while frame:
+                    func_name = frame.f_code.co_name
+                    if func_name in ("plan_query", "summarize_conversation"):
+                        purpose = "plan"
+                        break
+                    req_val = frame.f_locals.get("req")
+                    if req_val and hasattr(req_val, "use_heavy") and req_val.use_heavy:
+                        purpose = "heavy"
+                        break
+                    if "survey" in func_name or "heavy" in func_name:
+                        purpose = "heavy"
+                        break
+                    frame = frame.f_back
+            except Exception:
+                pass
+        
+        if purpose == "plan":
+            start_idx = 0
+        elif purpose == "reason":
+            start_idx = 1 if len(GROQ_API_KEYS) > 1 else 0
+        elif purpose == "heavy":
+            start_idx = 2 if len(GROQ_API_KEYS) > 2 else (1 if len(GROQ_API_KEYS) > 1 else 0)
+        else:
+            if model == PLAN_MODEL:
+                start_idx = 0
+            elif model == REASON_MODEL:
+                start_idx = 1 if len(GROQ_API_KEYS) > 1 else 0
+            elif model == HEAVY_MODEL:
+                start_idx = 2 if len(GROQ_API_KEYS) > 2 else (1 if len(GROQ_API_KEYS) > 1 else 0)
+
     for attempt in range(max_attempts):
-        current_key = get_current_groq_key()
+        current_key = GROQ_API_KEY or ""
+        if GROQ_API_KEYS:
+            key_idx = (start_idx + attempt) % len(GROQ_API_KEYS)
+            current_key = GROQ_API_KEYS[key_idx]
+            
         headers = {
             "Authorization": f"Bearer {current_key}",
             "Content-Type": "application/json",
@@ -691,28 +975,61 @@ async def groq_chat(
                 headers=headers,
                 json=payload,
             )
-            if r.status_code in (429, 413):
-                if len(GROQ_API_KEYS) > 1:
-                    log.warning(f"Groq API returned {r.status_code}. Rotating API keys...")
-                    rotate_groq_key()
+            
+            is_too_large = (r.status_code == 413) or (r.status_code == 400 and "request too large" in r.text.lower())
+            
+            if is_too_large:
+                if len(GROQ_API_KEYS) > 1 and attempt < len(GROQ_API_KEYS) - 1:
+                    log.warning(f"Groq API returned too large error. Retrying with next key ({attempt + 1}/{len(GROQ_API_KEYS)})...")
+                    await asyncio.sleep(1.0)
+                    continue
+                
+                # If only 1 key or all keys failed, fall back to HEAVY_MODEL or truncate context
+                if model != HEAVY_MODEL:
+                    log.warning(f"Request too large for model {model}. Cascading fallback to heavy model {HEAVY_MODEL}...")
+                    return await groq_chat(
+                        messages=messages,
+                        model=HEAVY_MODEL,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        retries=retries,
+                        json_mode=json_mode,
+                        purpose="heavy",
+                    )
+                else:
+                    truncated_messages = truncate_messages(messages, max_total_chars=12000)
+                    if sum(len(m.get("content", "")) for m in truncated_messages) < sum(len(m.get("content", "")) for m in messages):
+                        log.warning("Request too large for heavy model. Truncating context and retrying...")
+                        return await groq_chat(
+                            messages=truncated_messages,
+                            model=model,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            retries=retries,
+                            json_mode=json_mode,
+                            purpose="heavy",
+                        )
+                    else:
+                        raise LLMError(f"Groq HTTP 413: Request too large (already truncated). Response: {r.text[:200]}")
+
+            if r.status_code == 429:
+                if len(GROQ_API_KEYS) > 1 and attempt < len(GROQ_API_KEYS) - 1:
+                    log.warning(f"Groq API returned 429. Retrying with next key...")
                     await asyncio.sleep(1.0)
                     continue
                 else:
-                    if r.status_code == 429:
-                        wait = min(int(r.headers.get("Retry-After", 5)), 15)
-                        log.warning(f"Groq 429 — wait {wait}s")
-                        await asyncio.sleep(wait)
-                        continue
-                    else:
-                        raise LLMError(f"Groq HTTP 413: Request too large. Provide backup keys or upgrade. Response: {r.text[:200]}")
+                    wait = min(int(r.headers.get("Retry-After", 5)), 15)
+                    log.warning(f"Groq 429 — wait {wait}s")
+                    await asyncio.sleep(wait)
+                    continue
             
             if r.status_code in (500, 503):
                 await asyncio.sleep(2**attempt)
                 continue
             if r.status_code != 200:
-                if len(GROQ_API_KEYS) > 1:
-                    log.warning(f"Groq HTTP {r.status_code} on key. Rotating keys and retrying...")
-                    rotate_groq_key()
+                last_err = f"HTTP {r.status_code}: {r.text[:200]}"
+                if len(GROQ_API_KEYS) > 1 and attempt < len(GROQ_API_KEYS) - 1:
+                    log.warning(f"Groq HTTP {r.status_code} on key. Retrying with next key...")
                     await asyncio.sleep(1.0)
                     continue
                 raise LLMError(f"Groq HTTP {r.status_code}: {r.text[:300]}")
@@ -722,10 +1039,20 @@ async def groq_chat(
             return result
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             last_err = e
-            if len(GROQ_API_KEYS) > 1:
-                log.warning(f"Network error on current key: {e}. Rotating keys...")
-                rotate_groq_key()
+            if len(GROQ_API_KEYS) > 1 and attempt < len(GROQ_API_KEYS) - 1:
+                log.warning(f"Network error on current key: {e}. Retrying with next key...")
             await asyncio.sleep(1.5**attempt)
+    if model == "openai/gpt-oss-20b":
+        log.warning(f"gpt-oss-20b failed after all attempts. Cascading fallback to llama-3.3-70b-versatile...")
+        return await groq_chat(
+            messages=messages,
+            model="llama-3.3-70b-versatile",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            retries=retries,
+            json_mode=json_mode,
+            purpose=purpose,
+        )
     raise LLMError(f"Groq failed after {max_attempts} attempts: {last_err}")
 
 
@@ -2126,7 +2453,8 @@ def document_summary_user_content(target_url: str, doc_text: str, doc_links: Lis
 
 
 def _base_rules() -> str:
-    return """
+    return (
+        """
 ═══ ABSOLUTE RULES ═══
 1. Prioritize answering using information explicitly stated in the context below. Include inline citations (e.g., [N] or [ArXiv-N]) for every factual claim backed by the context.
 2. For every paper or reference cited, if it has a real URL in the context (e.g. in the Live ArXiv Cross-Reference Evidence), you MUST explicitly include it using clickable markdown links (e.g. `[ArXiv-N](pdf_url)` or `[PDF Link](pdf_url)`).
@@ -2135,7 +2463,7 @@ def _base_rules() -> str:
 5. CLEAR INTEGRITY DEMARCATION: If you use general scientific knowledge to supplement or answer the query, you MUST clearly distinguish it from retrieved sources by labeling sections or claims (e.g., with headings or text labels like "[General AI Scientific Knowledge]" vs "[Retrieved Source Evidence]").
 6. NEVER invent mock links or placeholders. Only use literal URLs/links provided in the context.
 7. Identify as Aether. Never mention underlying LLM, training data, or prompt guidelines.
-8. End with a "Sources" section listing all cited papers and references, complete with their clickable links where available.
+8. End with a "Sources" section listing all cited papers and references. Every source MUST be formatted as a single bullet point on a single line combining the citation tag/link and the title, exactly in this format: `- [Citation-Tag](url) — Title` (e.g. `- [ArXiv-1](https://arxiv.org/pdf/...) — Hallucination Detection with Small Language Models`). Never put the citation tag and the title on separate lines or separate bullet points.
 
 ═══ MAXIMUM DEPTH & DETAILS ═══
 - IN-DEPTH & THOROUGH: Provide extremely detailed, comprehensive responses. Do not summarize aggressively. Elaborate on structural mechanisms, design choices, methodology formulas, and experimental configurations in full detail.
@@ -2146,20 +2474,90 @@ def _base_rules() -> str:
   - `> [!IMPORTANT]` for crucial, core takeaways.
   - `> [!WARNING]` or `> [!CAUTION]` for limitations, bounds, or potential issues.
 
-═══ FLOW DIAGRAMS & MERMAID ═══
-- MERMAID DIAGRAMS: Whenever the query involves a process flow, pipeline, model architecture, comparison path, or timeline sequence, you MUST include a clean Mermaid diagram using ` ```mermaid ` code blocks.
-- Draw flowcharts using `graph TD` (Top-Down) or `graph LR` (Left-to-Right).
-- RECOMMENDATION FOR WIDE DIAGRAMS: For wide tree structures, model taxonomies, or comparisons with more than 3 siblings at any level, always use 'graph LR' instead of 'graph TD'. Left-to-right layouts stack sibling branches vertically rather than horizontally, which prevents the diagram from stretching too wide and becoming unreadable on standard screens.
-- STRICT SYNTAX RULES:
-  1. Every node MUST use a simple alphanumeric identifier (e.g. `A`, `B`, `node1`, `step_2`, `transformer_block`).
-  2. Node identifiers must NOT contain spaces, dashes, dots, parentheses, or special characters. Use underscores for separation if necessary.
-  3. Every node label text must ALWAYS be enclosed in double quotes (e.g. `A["Transformer Layer (L=24)"]` or `B(["Input Tokens"])` or `C{"Check Condition"}`). Never leave labels unquoted.
-  4. Draw connections strictly between node identifiers (e.g. `A --> B` or `step_1 ==> step_2`). Never use labels or text containing spaces to draw connections directly.
-  5. Connection labels must always use the pipe syntax immediately following the arrow with no spaces, e.g. `A -->|Yes| B` or `A ==>|No| B`. Do not write `A --> |Yes| B` or `A -- Yes --> B`.
-  6. Never use raw HTML tags (like `<br>` or `<b>`) inside node labels.
-  7. NEVER use styling instructions (like 'style', 'classDef', or 'class') inside the Mermaid code. Let the default stylesheet style all nodes to keep them clean, readable, and consistent.
+  ═══ FLOW DIAGRAMS & MERMAID ═══
+# ═══════════════════════════════════════════════════════════════
+# MASTER MERMAID DIAGRAM GENERATION FRAMEWORK
+# ═══════════════════════════════════════════════════════════════
 
+## OBJECTIVE
+When the user's query involves explaining concepts, processes, architectures, workflows, algorithms, taxonomies, frameworks, comparisons, research landscapes, or hierarchical relationships, generate ONE high-quality Mermaid diagram that improves understanding.
+The goal is not simply to visualize information but to communicate knowledge clearly, logically, and professionally—similar to figures found in textbooks, technical documentation, and research survey papers.
+Do NOT generate Mermaid diagrams for casual conversations or when a diagram adds no value.
 
+1. THINK BEFORE DRAWING
+Before generating the diagram, internally perform these steps:
+1. Identify the primary topic.
+2. Determine the purpose of the visualization.
+3. Extract important concepts.
+4. Remove duplicate or redundant concepts.
+5. Group semantically related concepts.
+6. Infer intermediate categories when beneficial.
+7. Organize information from general → specific.
+8. Select the most appropriate diagram type.
+9. Verify that every relationship is meaningful.
+10. Only then generate the Mermaid diagram.
+Never directly convert paragraphs into nodes. Always organize information first.
+
+2. AUTOMATIC DIAGRAM TYPE SELECTION
+Choose the diagram type that best represents the information:
+• Workflow: Processes, pipelines, algorithms, lifecycles, data flow.
+• Hierarchy: Classification, taxonomies, knowledge organization, topic decomposition.
+• Architecture: Software/ML systems, infrastructure, APIs, networks.
+• Decision Tree: Conditional logic, decision making, rule-based systems.
+• Comparison Tree: Feature comparisons, alternatives, trade-offs.
+• Research Landscape: Literature surveys, research areas, methods, challenges, future directions.
+Never force every topic into the same structure.
+
+3. INFORMATION ARCHITECTURE
+Every diagram should answer: What is the topic? What are its major components? How are they related? How does information flow? What are the important subcomponents?
+Prefer progressive abstraction: Topic → Categories → Subcategories → Methods → Examples/Applications.
+
+4. SINGLE CONNECTED GRAPH
+Every Mermaid diagram MUST form one connected graph.
+Requirements: Exactly ONE root node; every node must be reachable from the root; no disconnected trees, isolated nodes, floating branches, or independent clusters. If multiple top-level concepts exist, automatically create a meaningful parent node.
+Example:
+Artificial Intelligence
+├── Machine Learning
+├── Deep Learning
+└── Reinforcement Learning
+Never generate floating/disconnected elements.
+
+5. SEMANTIC GROUPING
+Group concepts by meaning (function, responsibility, dependency, stage, layer, category, purpose) rather than by appearance. Avoid alphabetical ordering. Every child node should naturally belong to its parent.
+
+6. BALANCED HIERARCHY
+Avoid extremely wide diagrams. If a node has many children, create intermediate grouping nodes. Prefer depth over excessive width (e.g. limit to 5-7 direct children per node).
+
+7. RELATIONSHIPS
+Relationships should explain meaning. Prefer: Model -->|"Extract Features"| Encoder instead of Model --> Encoder. Use edge labels only when they improve understanding. Avoid unnecessary labels.
+
+8. LAYOUT SELECTION
+• Use `graph TD` for workflows, algorithms, pipelines, timelines, lifecycles, and sequential processing.
+• Use `graph LR` for taxonomies, hierarchies, research landscapes, comparisons, and knowledge trees.
+Choose the layout that maximizes readability.
+
+9. NODE DESIGN
+Every node MUST have a valid identifier and a descriptive label. Example: A["Feature Engineering"]. Identifiers may contain letters, numbers, and underscores; they must NOT contain spaces, hyphens, dots, parentheses, or special characters. Every label must be enclosed in double quotes, be concise, and avoid unnecessary wording.
+
+10. CONNECTION RULES
+Connections must reference identifiers only (e.g., A --> B). Never draw connections directly between text/labels. Use edge labels only with pipe syntax: A -->|"Yes"| B.
+
+11. MERMAID RESTRICTIONS
+Do NOT use HTML, Markdown, style, class, classDef, click, CSS, or JavaScript. Do not embed formatting inside labels.
+
+12. LARGE KNOWLEDGE HANDLING
+For large inputs: cluster related concepts, introduce intermediate categories, reduce edge crossings, balance branch sizes, avoid visual clutter, and maintain logical grouping.
+
+13. RESEARCH-QUALITY DESIGN
+The diagram should resemble a figure from a survey paper: reveal structure, explain relationships, expose hierarchy, simplify complexity, improve learning, and avoid redundancy.
+
+14. QUALITY VALIDATION
+Before producing the final answer, internally verify: exactly one root node, every node is connected, no isolated components, correct diagram type selected, logical hierarchy, semantic grouping, meaningful relationships, balanced branches, concise labels, valid Mermaid syntax, unique identifiers, no HTML/styling, and high readability.
+
+15. OUTPUT FORMAT
+Return exactly one Mermaid code block using either ```mermaid\ngraph TD\n...\n``` or ```mermaid\ngraph LR\n...\n```. Do not generate multiple disconnected diagrams.
+"""
+"""
 ═══ SMART GRAPH + VECTOR SYNTHESIS ═══
 - INTEGRATE KNOWLEDGE: Combine granular textual evidence from "RETRIEVED CHUNK EVIDENCE" with the structural metadata (venues, authors, year, direct links) from "GRAPH RELATIONSHIP CONTEXT".
 - TRACE RESEARCH LINEAGE: Highlight if key papers share authors, are co-cited, or publish in the same venue/domain to show how the research is connected.
@@ -2172,6 +2570,7 @@ def _base_rules() -> str:
 - BIG PICTURE: Use Blockquotes (>) for high-level research conclusions.
 - MATHEMATICS & FORMULAS: Write ALL mathematical formulas, variables, equations, and expressions using standard LaTeX syntax. Wrap inline formulas in single dollar signs (e.g., $x_i$ or $\alpha$) and block/display equations in double dollar signs (e.g., $$y = f(x)$$) so they render properly using MathJax. Never use plain text formulas.
 """
+    )
 
 
 
@@ -2227,7 +2626,7 @@ Analyze the query and all provided evidence. Structure your response as follows:
 5. **Key Papers & Citation Impact** — List the most important papers with citation counts from context.
 6. **Datasets & Code Resources** — If code repos or datasets appear in the context, list them with links.
 7. **Productivity & Practical Applications** — Concrete takeaways: tools researchers/engineers can use TODAY, open problems, recommended next papers to read.
-8. **References** — Full citation list with links (arXiv/DOI/PDF).
+8. **References** — Full citation list with links. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
 
 Only include sections that have relevant evidence or relevant general scientific knowledge. Prioritize retrieved evidence, but feel free to synthesize general scientific knowledge to make the answer comprehensive and detailed.
 """
@@ -2281,7 +2680,7 @@ Analyze the query, the paper comparison aspects, and the graph relationships.
   6. **Shared Foundations & Connections**: Describe how the papers relate to each other.
   7. **Which to Use When**: Concrete, evidence-backed decision guidelines for researchers. Use Callouts (`> [!TIP]`) to recommend selections.
   8. **Productivity & Practical Applications** — Tools engineers can use TODAY, datasets to experiment with. Use HTML details accordions for long parameter lists or logs.
-  9. **Sources**: A list of cited sources.
+  9. **Sources**: A list of cited sources. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
 
 {s2_ctx}
 
@@ -2340,7 +2739,7 @@ Synthesize the evidence into a smart, structured literature survey.
   6. **Datasets & Code Resources**: List all datasets and code repos found in the evidence with links.
   7. **Productivity & Practical Applications** — Tools researchers can use TODAY, open problems, next papers to read. Wrap long benchmark specs inside HTML details accordions.
   8. **Open Challenges & Future Directions**: Unsolved problems from the evidence. Use callouts (`> [!WARNING]`) to highlight research gaps.
-  9. **Sources**: A list of cited sources with links.
+  9. **Sources**: A list of cited sources with links. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
 """
 
 
@@ -2408,7 +2807,7 @@ Construct a smart, narrative-driven research timeline.
   4. **Datasets & Code**: If datasets or repos appear, list them with links.
   5. **Productivity & Practical Applications** — Tools researchers can use TODAY, open problems.
   6. **Open Challenges & Research Gaps**: Unsolved problems at the end of the timeline.
-  7. **Sources**: A list of cited sources.
+  7. **Sources**: A list of cited sources. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
 """
 
 
@@ -2874,14 +3273,165 @@ async def compile_chat_messages(system_prompt: str, chat_messages: List[ChatMess
 # ================================================================
 
 
+async def search_huggingface_datasets(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """Search Hugging Face Hub for datasets matching a query."""
+    url = "https://huggingface.co/api/datasets"
+    params = {"search": query, "limit": limit}
+    headers = {
+        "User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"
+    }
+    try:
+        async with httpx.AsyncClient(headers=headers, timeout=8.0) as client:
+            resp = await client.get(url, params=params)
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            results = []
+            for item in data[:limit]:
+                dataset_id = item.get("id")
+                if dataset_id:
+                    results.append({
+                        "name": dataset_id,
+                        "full_name": dataset_id,
+                        "url": f"https://huggingface.co/datasets/{dataset_id}",
+                        "description": f"Hugging Face dataset: {item.get('downloads', 0)} downloads, {item.get('likes', 0)} likes.",
+                        "modalities": [],
+                        "source": "huggingface_search"
+                    })
+            return results
+    except Exception as e:
+        log.error(f"Error querying Hugging Face datasets API: {e}")
+        return []
+
+
+async def retrieve_datasets_and_repos(
+    query: str,
+    arxiv_papers: List[Dict],
+    s2_papers: List[Dict],
+    graph_nodes: List[Dict],
+) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Enrich all retrieved papers and search Kaggle/HF Hub to return a list of
+    datasets and code repositories relevant to the papers or query.
+    """
+    try:
+        from app.sources.kaggle import search_kaggle_datasets_bulk
+    except ImportError:
+        try:
+            from sources.kaggle import search_kaggle_datasets_bulk
+        except ImportError:
+            async def search_kaggle_datasets_bulk(q, **kw): return []
+
+    # 1. Parallel PwC enrichment for all paper lists
+    tasks = []
+    # Make sure we pass copies or ensure tasks return lists
+    tasks.append(enrich_arxiv_papers_with_pwc(arxiv_papers))
+    tasks.append(enrich_arxiv_papers_with_pwc(s2_papers))
+    tasks.append(enrich_arxiv_papers_with_pwc(graph_nodes))
+
+    try:
+        res_results = await asyncio.gather(*tasks)
+    except Exception as e:
+        log.warning(f"PwC enrichment failed: {e}")
+        res_results = [[], [], []]
+
+    # Update lists (safely handling when results are None or empty)
+    res_arxiv = res_results[0] or []
+    res_s2 = res_results[1] or []
+    res_graph = res_results[2] or []
+
+    if arxiv_papers and len(res_arxiv) == len(arxiv_papers):
+        for idx, p in enumerate(res_arxiv):
+            arxiv_papers[idx].update(p)
+    if s2_papers and len(res_s2) == len(s2_papers):
+        for idx, p in enumerate(res_s2):
+            s2_papers[idx].update(p)
+    if graph_nodes and len(res_graph) == len(graph_nodes):
+        for idx, p in enumerate(res_graph):
+            graph_nodes[idx].update(p)
+
+    # Collect mentioned datasets and repos
+    all_datasets = []
+    all_repos = []
+    mentioned_ds_names = set()
+
+    for papers_list in (arxiv_papers, s2_papers, graph_nodes):
+        if not papers_list:
+            continue
+        for p in papers_list:
+            if isinstance(p, dict):
+                for ds in p.get("datasets") or []:
+                    all_datasets.append(ds)
+                    if isinstance(ds, dict) and ds.get("name"):
+                        mentioned_ds_names.add(ds["name"])
+                for repo in p.get("code_repos") or []:
+                    all_repos.append(repo)
+
+    # 2. Search Kaggle & HF in parallel for the query + top mentioned datasets
+    search_queries = [query]
+    # Add top mentioned dataset names to search specifically for them
+    for ds_name in list(mentioned_ds_names)[:2]:
+        if ds_name.lower() not in query.lower():
+            search_queries.append(ds_name)
+
+    search_tasks = []
+    for sq in search_queries:
+        search_tasks.append(search_kaggle_datasets_bulk(sq, limit=3))
+        search_tasks.append(search_huggingface_datasets(sq, limit=3))
+
+    try:
+        search_results = await asyncio.gather(*search_tasks)
+        for results in search_results:
+            if results:
+                all_datasets.extend(results)
+    except Exception as e:
+        log.warning(f"Error searching datasets in bulk: {e}")
+
+    # 3. Deduplicate datasets by name/slug (case-insensitive)
+    seen_ds = set()
+    unique_datasets = []
+    for d in all_datasets:
+        if not isinstance(d, dict):
+            continue
+        name = d.get("name") or d.get("full_name") or ""
+        if name:
+            slug = name.lower().strip()
+            if slug not in seen_ds:
+                seen_ds.add(slug)
+                unique_datasets.append({
+                    "name": name,
+                    "full_name": d.get("full_name") or name,
+                    "url": d.get("url") or f"https://paperswithcode.com/dataset/{slug.replace(' ', '-')}",
+                    "description": d.get("description") or "",
+                    "modalities": d.get("modalities") or [],
+                    "source": d.get("source") or "paper_extracted",
+                })
+
+    # Deduplicate repos by URL
+    seen_repos = set()
+    unique_repos = []
+    for r in all_repos:
+        if not isinstance(r, dict):
+            continue
+        url = r.get("url") or ""
+        if url:
+            url_clean = url.lower().rstrip("/").strip()
+            if url_clean not in seen_repos:
+                seen_repos.add(url_clean)
+                unique_repos.append(r)
+
+    return unique_datasets, unique_repos
+
+
 @app.post("/api/research")
 async def research(req: ResearchRequest, request: Request):
     rid = str(uuid.uuid4())
     request.state.request_id = rid
     try:
-        return await asyncio.wait_for(
+        res = await asyncio.wait_for(
             _research_impl(req, request), timeout=REQUEST_TIMEOUT
         )
+        return await append_credits_snapshot(res, request)
     except asyncio.TimeoutError:
         raise HTTPException(504, f"Timed out after {REQUEST_TIMEOUT}s.")
 
@@ -2892,6 +3442,19 @@ async def _research_impl(req: ResearchRequest, request: Request):
     await check_rate_limit(request.client.host if request.client else "unknown")
     await set_user_context(request)
     t0 = time.time()
+
+    # ── Plan enforcement ──────────────────────────────────────────────
+    plan_info = await get_user_plan(request)
+    user_plan = plan_info.get("plan", "free")
+
+    # Clamp top_k by plan
+    if user_plan == "free":
+        req.top_k = min(req.top_k, FREE_TOP_K_MAX)
+        req.use_heavy = False  # Free users always use REASON_MODEL
+
+    # Deduct credit (raises 402 if exhausted)
+    await check_and_deduct_credit(request, "query")
+    # ─────────────────────────────────────────────────────────────────
 
     raw_query = req.resolved_query()
     log.info(f"\n{'='*70}\n[{rid}] QUERY: {raw_query}\n{'='*70}")
@@ -3139,26 +3702,17 @@ async def _research_impl(req: ResearchRequest, request: Request):
     chunks = merge_adjacent_chunks(chunks)
     chunks = pack_context_within_budget(chunks, limit_tokens=5000)
 
-    # ── Enrich arXiv papers with S2 (citation counts, TLDR) + PwC (code, datasets) ──
-    if arxiv_papers:
-        arxiv_papers, s2_papers = await asyncio.gather(
-            enrich_arxiv_papers_with_pwc(arxiv_papers),
-            search_papers_s2(query, limit=5),
-        )
-        arxiv_papers = await enrich_arxiv_papers_with_s2(arxiv_papers)
-        # Enrich dataset definitions with Wikipedia links/summaries + Kaggle datasets
-        for p in arxiv_papers:
-            if "datasets" in p and p["datasets"]:
-                try:
-                    p["datasets"] = await enrich_datasets_with_wikipedia(p["datasets"])
-                except Exception as e:
-                    log.warning(f"Error enriching paper datasets with Wikipedia: {e}")
-                try:
-                    p["datasets"] = await enrich_datasets_with_kaggle(p["datasets"])
-                except Exception as e:
-                    log.warning(f"Error enriching paper datasets with Kaggle: {e}")
-    else:
+    try:
         s2_papers = await search_papers_s2(query, limit=5)
+    except Exception as e:
+        log.warning(f"Failed to fetch S2 papers: {e}")
+        s2_papers = []
+
+    if arxiv_papers:
+        try:
+            arxiv_papers = await enrich_arxiv_papers_with_s2(arxiv_papers)
+        except Exception as e:
+            log.warning(f"Failed to enrich arXiv papers with S2: {e}")
 
     if not chunks and not arxiv_papers and not s2_papers:
         sys_p = (
@@ -3197,20 +3751,19 @@ async def _research_impl(req: ResearchRequest, request: Request):
             "warning": "No context or external papers retrieved.",
         }
 
-    # Collect all datasets/repos from enriched papers for response
-    all_datasets = []
-    all_repos = []
-    for p in arxiv_papers:
-        all_datasets.extend(p.get("datasets") or [])
-        all_repos.extend(p.get("code_repos") or [])
-    # Deduplicate datasets by name
-    seen_ds = set()
-    unique_datasets = []
-    for d in all_datasets:
-        key = d.get("name", "")
-        if key and key not in seen_ds:
-            seen_ds.add(key)
-            unique_datasets.append(d)
+    unique_datasets, all_repos = await retrieve_datasets_and_repos(
+        query, arxiv_papers, s2_papers, graph_nodes
+    )
+
+    if unique_datasets:
+        try:
+            unique_datasets = await enrich_datasets_with_wikipedia(unique_datasets)
+        except Exception as e:
+            log.warning(f"Error enriching unique datasets with Wikipedia: {e}")
+        try:
+            unique_datasets = await enrich_datasets_with_kaggle(unique_datasets)
+        except Exception as e:
+            log.warning(f"Error enriching unique datasets with Kaggle: {e}")
 
     # Pick prompt by route
     model = HEAVY_MODEL if req.use_heavy else REASON_MODEL
@@ -3253,6 +3806,18 @@ async def _research_impl(req: ResearchRequest, request: Request):
     latency = int((time.time() - t0) * 1000)
     log.info(f"[{rid}] Done — {plan.route} | {model} | {latency}ms")
 
+    # Build credit snapshot to return to frontend
+    post_plan = await get_user_plan(request)
+    _plan = post_plan.get("plan", "free")
+    _used = post_plan.get("credits_used", 0)
+    credits_snap = {
+        "plan": _plan,
+        "credits_used": _used,
+        "credits_remaining": None if _plan == "pro" else max(0, FREE_CREDITS_PER_DAY - _used),
+        "credits_limit": None if _plan == "pro" else FREE_CREDITS_PER_DAY,
+        "is_unlimited": _plan == "pro",
+    }
+
     show_external = plan.route not in ("chitchat", "structured", "title_lookup", "entity_lookup")
     return {
         "request_id": rid,
@@ -3272,6 +3837,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
         "latency_ms": latency,
         "model_used": model,
         "warning": warning,
+        "credits": credits_snap,
     }
 
 
@@ -3285,7 +3851,8 @@ async def chat_with_context(req: ConversationRequest, request: Request):
     rid = str(uuid.uuid4())
     request.state.request_id = rid
     try:
-        return await asyncio.wait_for(_chat_impl(req, request), timeout=REQUEST_TIMEOUT)
+        res = await asyncio.wait_for(_chat_impl(req, request), timeout=REQUEST_TIMEOUT)
+        return await append_credits_snapshot(res, request)
     except asyncio.TimeoutError:
         raise HTTPException(504, f"Timed out after {REQUEST_TIMEOUT}s.")
 
@@ -3296,6 +3863,15 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     await check_rate_limit(request.client.host if request.client else "unknown")
     await set_user_context(request)
     t0 = time.time()
+
+    # ── Plan enforcement ──────────────────────────────────────────────
+    plan_info = await get_user_plan(request)
+    user_plan = plan_info.get("plan", "free")
+    if user_plan == "free":
+        req.top_k = min(req.top_k, FREE_TOP_K_MAX)
+        req.use_heavy = False
+    await check_and_deduct_credit(request, "chat")
+    # ─────────────────────────────────────────────────────────────────
 
     last_user_msg = next(
         (m.content for m in reversed(req.messages) if m.role == "user"), None
@@ -3653,27 +4229,56 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     chunks = pack_context_within_budget(chunks, limit_tokens=5000)
 
     # ── Enrich arXiv papers with S2 + PwC ──
-    if arxiv_papers:
-        arxiv_papers, s2_papers = await asyncio.gather(
-            enrich_arxiv_papers_with_pwc(arxiv_papers),
-            search_papers_s2(query, limit=5),
-        )
-        arxiv_papers = await enrich_arxiv_papers_with_s2(arxiv_papers)
-        # Enrich dataset definitions with Wikipedia links/summaries + Kaggle datasets
-        for p in arxiv_papers:
-            if "datasets" in p and p["datasets"]:
-                try:
-                    p["datasets"] = await enrich_datasets_with_wikipedia(p["datasets"])
-                except Exception as e:
-                    log.warning(f"Error enriching paper datasets with Wikipedia: {e}")
-                try:
-                    p["datasets"] = await enrich_datasets_with_kaggle(p["datasets"])
-                except Exception as e:
-                    log.warning(f"Error enriching paper datasets with Kaggle: {e}")
-    else:
+    try:
         s2_papers = await search_papers_s2(query, limit=5)
+    except Exception as e:
+        log.warning(f"Failed to fetch S2 papers: {e}")
+        s2_papers = []
 
-    if not chunks and not arxiv_papers and not s2_papers and not pdf_context:
+    if arxiv_papers:
+        try:
+            arxiv_papers = await enrich_arxiv_papers_with_s2(arxiv_papers)
+        except Exception as e:
+            log.warning(f"Failed to enrich arXiv papers with S2: {e}")
+
+    # [BEGIN OPTION A FALLBACK FIX] - Commented out original unconditional fallback
+    # if not chunks and not arxiv_papers and not s2_papers and not pdf_context:
+    #     sys_p = (
+    #         "You are Aether, a GraphRAG research assistant. No specific papers or context chunks could be retrieved for this query.\n"
+    #         "CRITICAL: Do NOT hallucinate, guess, or invent citations, authors, papers, or specific scientific results.\n"
+    #         "Explain clearly that you do not have the source literature in your database, and ask the user to upload the PDF or provide a specific identifier (like DOI or arXiv ID)."
+    #     )
+    #     msgs = await compile_chat_messages(sys_p, req.messages)
+    #     try:
+    #         answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
+    #     except LLMError as e:
+    #         raise HTTPException(502, str(e))
+    #     
+    #     latency = int((time.time() - t0) * 1000)
+    #     return {
+    #         "request_id": rid,
+    #         "answer": answer,
+    #         "route": plan.route,
+    #         "plan": {
+    #             "standalone_query": plan.standalone_query,
+    #             "reasoning_path": plan.reasoning_path,
+    #         },
+    #         "papers": [],
+    #         "chunks": [],
+    #         "arxiv_papers": [],
+    #         "s2_papers": [],
+    #         "datasets": [],
+    #         "code_repos": [],
+    #         "verification": None,
+    #         "latency_ms": latency,
+    #         "model_used": REASON_MODEL,
+    #         "warning": "No context or external papers retrieved.",
+    #     }
+
+    # New conditional empty-evidence check:
+    # Only force defensive refusal if the user was looking for specific entities/anchors (plan.graph_anchors is not empty).
+    # If graph_anchors is empty, let it fall through to the main LLM generation (which uses Rule 4/5 for general synthesis).
+    if not chunks and not arxiv_papers and not s2_papers and not pdf_context and plan.graph_anchors:
         sys_p = (
             "You are Aether, a GraphRAG research assistant. No specific papers or context chunks could be retrieved for this query.\n"
             "CRITICAL: Do NOT hallucinate, guess, or invent citations, authors, papers, or specific scientific results.\n"
@@ -3705,19 +4310,21 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             "model_used": REASON_MODEL,
             "warning": "No context or external papers retrieved.",
         }
+    # [END OPTION A FALLBACK FIX]
 
-    # Collect datasets/repos
-    all_datasets, all_repos = [], []
-    for p in arxiv_papers:
-        all_datasets.extend(p.get("datasets") or [])
-        all_repos.extend(p.get("code_repos") or [])
-    seen_ds: set = set()
-    unique_datasets = []
-    for d in all_datasets:
-        key = d.get("name", "")
-        if key and key not in seen_ds:
-            seen_ds.add(key)
-            unique_datasets.append(d)
+    unique_datasets, all_repos = await retrieve_datasets_and_repos(
+        query, arxiv_papers, s2_papers, graph_nodes
+    )
+
+    if unique_datasets:
+        try:
+            unique_datasets = await enrich_datasets_with_wikipedia(unique_datasets)
+        except Exception as e:
+            log.warning(f"Error enriching unique datasets with Wikipedia: {e}")
+        try:
+            unique_datasets = await enrich_datasets_with_kaggle(unique_datasets)
+        except Exception as e:
+            log.warning(f"Error enriching unique datasets with Kaggle: {e}")
 
     model = HEAVY_MODEL if req.use_heavy else REASON_MODEL
 
@@ -3776,6 +4383,13 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         "latency_ms": latency,
         "model_used": model,
         "warning": warning,
+        "credits": {
+            "plan": user_plan,
+            "credits_used": plan_info.get("credits_used", 0) + CREDIT_COSTS.get("chat", 1),
+            "credits_remaining": None if user_plan == "pro" else max(0, FREE_CREDITS_PER_DAY - plan_info.get("credits_used", 0) - CREDIT_COSTS.get("chat", 1)),
+            "credits_limit": None if user_plan == "pro" else FREE_CREDITS_PER_DAY,
+            "is_unlimited": user_plan == "pro",
+        },
     }
 
 
@@ -3823,11 +4437,12 @@ async def trending(limit: int = 10, request: Request = None):
 
 @app.post("/api/graph/compare")
 async def compare_papers(req: CompareRequest, request: Request):
-    """Deep structured comparison of two papers using graph + vector evidence."""
+    """Deep structured comparison of two papers. [3 credits for Free, unlimited for Pro]"""
     rid = str(uuid.uuid4())
     request.state.request_id = rid
     pool.assert_ready()
     await check_rate_limit(request.client.host if request.client else "unknown")
+    await check_and_deduct_credit(request, "compare")
     t0 = time.time()
 
     aspects_str = (
@@ -3893,11 +4508,12 @@ async def compare_papers(req: CompareRequest, request: Request):
 
 @app.post("/api/research/timeline")
 async def research_timeline(req: TimelineRequest, request: Request):
-    """Chronological evolution of a research topic."""
+    """Chronological evolution of a research topic. [3 credits for Free, unlimited for Pro]"""
     rid = str(uuid.uuid4())
     request.state.request_id = rid
     pool.assert_ready()
     await check_rate_limit(request.client.host if request.client else "unknown")
+    await check_and_deduct_credit(request, "timeline")
     t0 = time.time()
 
     filters: Dict[str, Any] = {}
@@ -3955,11 +4571,12 @@ async def research_timeline(req: TimelineRequest, request: Request):
 
 @app.post("/api/research/survey")
 async def research_survey(req: SurveyRequest, request: Request):
-    """Auto-generate a mini literature survey on a topic."""
+    """Auto-generate a mini literature survey on a topic. [PRO ONLY]"""
     rid = str(uuid.uuid4())
     request.state.request_id = rid
     pool.assert_ready()
     await check_rate_limit(request.client.host if request.client else "unknown")
+    await require_pro(request, "Literature Survey")
     t0 = time.time()
 
     async def fetch_graph():
@@ -4031,8 +4648,10 @@ async def research_survey(req: SurveyRequest, request: Request):
 
 @app.post("/api/research/bulk")
 async def bulk_research(req: BulkRequest, request: Request):
+    """Batch research queries. [PRO ONLY]"""
     pool.assert_ready()
     await check_rate_limit(request.client.host if request.client else "unknown")
+    await require_pro(request, "Bulk Research")
     sem = asyncio.Semaphore(3)
 
     async def single(q: str):
@@ -4068,7 +4687,9 @@ async def stats():
 
 
 @app.get("/v1/models")
-async def list_models():
+async def list_models(request: Request):
+    """List available models. [PRO ONLY]"""
+    await require_pro(request, "API Access (/v1/models)")
     return {
         "object": "list",
         "data": [
@@ -4090,10 +4711,12 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
+    """OpenAI-compatible completions. [PRO ONLY]"""
     rid = str(uuid.uuid4())
     request.state.request_id = rid
     pool.assert_ready()
     await check_rate_limit(request.client.host if request.client else "unknown")
+    await require_pro(request, "API Access (/v1/chat/completions)")
     model = HEAVY_MODEL if req.model in (HEAVY_MODEL, "heavy") else REASON_MODEL
     try:
         answer = await groq_chat(req.messages, model, req.temperature, req.max_tokens)
@@ -4234,6 +4857,8 @@ async def auth_signup(req: SignUpRequest):
     # Create user
     uid = str(uuid.uuid4())
     password_hash = hash_password(req.password)
+    now = datetime.now(timezone.utc)
+    credits_reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     user_doc = {
         "_id": uid,
         "email": email,
@@ -4243,8 +4868,15 @@ async def auth_signup(req: SignUpRequest):
             "institution": "",
             "role": ""
         },
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc)
+        # --- Plan & credit fields ---
+        "plan": "free",              # "free" | "pro"
+        "credits_used": 0,           # resets daily
+        "credits_reset_at": credits_reset,
+        "stripe_customer_id": None,  # set on first Stripe checkout
+        "stripe_subscription_id": None,
+        # ----------------------------
+        "created_at": now,
+        "updated_at": now,
     }
     await asyncio.to_thread(db.users.insert_one, user_doc)
     
@@ -4490,6 +5122,136 @@ async def delete_history(session_id: str, request: Request):
 
 
 # ================================================================
+# PLAN MANAGEMENT ENDPOINTS
+# ================================================================
+
+
+@app.get("/api/credits")
+async def get_credits(request: Request):
+    """Return remaining daily credits and plan info for the authenticated user."""
+    plan_info = await get_user_plan(request)
+    plan = plan_info.get("plan", "free")
+    credits_used = plan_info.get("credits_used", 0)
+    credits_remaining = None if plan == "pro" else max(0, FREE_CREDITS_PER_DAY - credits_used)
+    return {
+        "plan": plan,
+        "credits_used": credits_used,
+        "credits_limit": None if plan == "pro" else FREE_CREDITS_PER_DAY,
+        "credits_remaining": credits_remaining,
+        "credits_reset_at": plan_info.get("credits_reset_at"),
+        "is_unlimited": plan == "pro",
+        "credit_costs": CREDIT_COSTS,
+    }
+
+
+@app.get("/api/auth/plan")
+async def get_plan(request: Request):
+    """Return the current user's subscription plan and credit status."""
+    token = get_token_from_request(request)
+    user = await get_authenticated_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    plan_info = await get_user_plan(request)
+    plan = plan_info.get("plan", "free")
+    credits_used = plan_info.get("credits_used", 0)
+    return {
+        "plan": plan,
+        "is_pro": plan == "pro",
+        "credits_used": credits_used,
+        "credits_limit": None if plan == "pro" else FREE_CREDITS_PER_DAY,
+        "credits_remaining": None if plan == "pro" else max(0, FREE_CREDITS_PER_DAY - credits_used),
+        "credits_reset_at": plan_info.get("credits_reset_at"),
+        "features": {
+            "survey": plan == "pro",
+            "bulk_research": plan == "pro",
+            "heavy_model": plan == "pro",
+            "api_access": plan == "pro",
+            "top_k_max": PRO_TOP_K_MAX if plan == "pro" else FREE_TOP_K_MAX,
+            "citation_network_full": plan == "pro",
+        },
+    }
+
+
+@app.post("/api/auth/upgrade")
+async def stripe_webhook(request: Request):
+    """Stripe webhook receiver — flips user plan to pro on payment, back to free on cancellation.
+    Set this URL as your Stripe webhook endpoint.
+    Events handled: checkout.session.completed, customer.subscription.deleted
+    """
+    import hmac
+    import hashlib
+
+    STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    # Verify Stripe signature if secret is configured
+    if STRIPE_WEBHOOK_SECRET:
+        try:
+            # Simple timestamp+signature check (full stripe SDK not required)
+            parts = {p.split("=")[0]: p.split("=")[1] for p in sig_header.split(",") if "=" in p}
+            ts = parts.get("t", "")
+            sig = parts.get("v1", "")
+            signed_payload = f"{ts}.{payload.decode()}"
+            expected = hmac.new(
+                STRIPE_WEBHOOK_SECRET.encode(),
+                signed_payload.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(expected, sig):
+                raise HTTPException(status_code=400, detail="Invalid Stripe signature")
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.warning(f"Stripe signature verification error: {e}")
+            raise HTTPException(status_code=400, detail="Signature verification failed")
+
+    try:
+        event = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    event_type = event.get("type", "")
+    data = event.get("data", {}).get("object", {})
+
+    if event_type == "checkout.session.completed":
+        # Payment successful → upgrade user to Pro
+        customer_email = data.get("customer_details", {}).get("email") or data.get("customer_email")
+        customer_id = data.get("customer")
+        subscription_id = data.get("subscription")
+        if customer_email:
+            await asyncio.to_thread(
+                db.users.update_one,
+                {"email": customer_email.lower()},
+                {"$set": {
+                    "plan": "pro",
+                    "stripe_customer_id": customer_id,
+                    "stripe_subscription_id": subscription_id,
+                    "updated_at": datetime.now(timezone.utc),
+                }},
+            )
+            log.info(f"[Stripe] Upgraded {customer_email} to Pro (sub: {subscription_id})")
+
+    elif event_type in ("customer.subscription.deleted", "customer.subscription.paused"):
+        # Subscription cancelled/paused → downgrade to Free
+        customer_id = data.get("customer")
+        if customer_id:
+            await asyncio.to_thread(
+                db.users.update_one,
+                {"stripe_customer_id": customer_id},
+                {"$set": {
+                    "plan": "free",
+                    "stripe_subscription_id": None,
+                    "updated_at": datetime.now(timezone.utc),
+                }},
+            )
+            log.info(f"[Stripe] Downgraded customer {customer_id} to Free")
+
+    return {"received": True, "event": event_type}
+
+
+# ================================================================
 # HEALTH ENDPOINTS
 # ================================================================
 
@@ -4645,7 +5407,8 @@ if __name__ == "__main__":
         "app.app:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8000")),
-        reload=os.getenv("ENV", "prod") == "dev",
+        reload=os.getenv("ENV", "dev") == "dev",
+        reload_excludes=["*.log", "app.log", "__pycache__/*"],
         log_level="info",
         workers=int(os.getenv("WORKERS", "1")),
     )

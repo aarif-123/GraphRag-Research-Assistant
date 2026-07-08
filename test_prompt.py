@@ -9,8 +9,10 @@ load_dotenv(".env.local", override=True)
 load_dotenv(".env", override=False)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-# Use llama-3.1-8b-instant due to rate limit on 70b
-HEAVY_MODEL = "llama-3.1-8b-instant"
+if GROQ_API_KEY and "," in GROQ_API_KEY:
+    GROQ_API_KEY = GROQ_API_KEY.split(",")[0].strip()
+# Use openai/gpt-oss-20b by default (cascades to llama-3.3-70b-versatile on failure)
+HEAVY_MODEL = "openai/gpt-oss-20b"
 
 from app.app import get_or_parse_pdf_safe
 
@@ -78,13 +80,25 @@ async def main():
     }
     
     async with httpx.AsyncClient(timeout=60.0) as client:
-        print("Calling Groq...")
+        print(f"Calling Groq with {payload['model']}...")
         r = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers=headers,
             json=payload,
         )
         print(f"Status Code: {r.status_code}")
+        
+        # Cascading fallback: if gpt-oss-20b fails, retry with llama-3.3-70b-versatile
+        if r.status_code != 200 and payload["model"] == "openai/gpt-oss-20b":
+            print("gpt-oss-20b failed. Cascading fallback to llama-3.3-70b-versatile...")
+            payload["model"] = "llama-3.3-70b-versatile"
+            r = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            print(f"Status Code (Fallback): {r.status_code}")
+
         if r.status_code == 200:
             result = r.json()["choices"][0]["message"]["content"]
             print("Writing response to test_response_multiturn.txt...")

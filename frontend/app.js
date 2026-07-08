@@ -28,6 +28,7 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 const els = {
     sidebar: document.getElementById('sidebar'),
+    sidebarOverlay: document.getElementById('sidebarOverlay'),
     sidebarToggle: document.getElementById('sidebarToggle'),
     mobileMenuBtn: document.getElementById('mobileMenuBtn'),
     pipelineStep: document.getElementById('pipelineStep'),
@@ -96,6 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     loadSettingsFromLocalStorage();
     initEventListeners();
+    initMobileSidebar();
     checkHealth();
     initAuth();
     renderAttachmentTray();
@@ -156,8 +158,18 @@ function initEventListeners() {
     }
     if (els.mobileMenuBtn) {
         els.mobileMenuBtn.addEventListener('click', () => {
-            els.sidebar.classList.remove('collapsed');
+            if (isMobileViewport()) {
+                openMobileSidebar();
+            } else {
+                // Desktop: hamburger shown when sidebar is collapsed — restore it
+                els.sidebar.classList.remove('collapsed');
+            }
         });
+    }
+    // Close mobile sidebar when tapping the dim overlay
+    if (els.sidebarOverlay) {
+        els.sidebarOverlay.addEventListener('click', closeMobileSidebar);
+        els.sidebarOverlay.addEventListener('touchstart', closeMobileSidebar, { passive: true });
     }
 
     // Settings
@@ -291,7 +303,7 @@ function initEventListeners() {
         const handleUrlSubmit = () => {
             const url = els.paperUrlInput.value.trim();
             if (!url) return;
-            
+
             // Add URL to pending attachments
             state.pendingAttachments.push({
                 id: `link-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -301,7 +313,7 @@ function initEventListeners() {
                 url: url
             });
             renderAttachmentTray();
-            
+
             // Close and clear modal
             els.linkModal.classList.remove('visible');
             els.paperUrlInput.value = '';
@@ -380,6 +392,11 @@ function initEventListeners() {
 
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
+            // Close mobile sidebar on Escape
+            if (isMobileViewport() && els.sidebar.classList.contains('mobile-open')) {
+                closeMobileSidebar();
+                return;
+            }
             if (state.attachMenuOpen) {
                 setAttachMenuOpen(false);
                 els.queryInput.focus();
@@ -399,32 +416,8 @@ function initEventListeners() {
         }
     });
 
-    // Theme toggle
-    const themeBtn = document.getElementById('themeToggle');
-    const themeIcon = document.getElementById('themeIcon');
-
-    function updateThemeIcon(theme) {
-        if (!themeIcon) return;
-        if (theme === 'light') {
-            themeIcon.innerHTML = `<circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>`;
-        } else {
-            themeIcon.innerHTML = `<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>`;
-        }
-    }
-
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    updateThemeIcon(savedTheme);
-
-    if (themeBtn) {
-        themeBtn.addEventListener('click', () => {
-            const currentTheme = document.documentElement.getAttribute('data-theme');
-            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-            document.documentElement.setAttribute('data-theme', newTheme);
-            localStorage.setItem('theme', newTheme);
-            updateThemeIcon(newTheme);
-        });
-    }
+    // Force premium dark-mode theme permanently
+    document.documentElement.setAttribute('data-theme', 'dark');
 
     // Clear History
     if (els.clearHistoryBtn) {
@@ -454,7 +447,7 @@ function initEventListeners() {
             e.stopPropagation();
             dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
         });
-        
+
         // Close dropdown on click outside
         document.addEventListener('click', () => {
             if (dropdown) dropdown.style.display = 'none';
@@ -466,13 +459,13 @@ function initEventListeners() {
         els.profileSettingsBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             if (dropdown) dropdown.style.display = 'none';
-            
+
             // Clear message alerts
             const errorEl = document.getElementById('profileError');
             const successEl = document.getElementById('profileSuccess');
             if (errorEl) errorEl.style.display = 'none';
             if (successEl) successEl.style.display = 'none';
-            
+
             // Load user profile details
             try {
                 const token = localStorage.getItem('aether_token');
@@ -481,19 +474,21 @@ function initEventListeners() {
                 });
                 if (!res.ok) throw new Error("Failed to authenticate session");
                 const user = await res.json();
-                
+
                 const emailInput = document.getElementById('profileEmail');
+                const passwordUsernameInput = document.getElementById('passwordFormUsername');
                 const fullNameInput = document.getElementById('profileFullName');
                 const institutionInput = document.getElementById('profileInstitution');
                 const roleSelect = document.getElementById('profileRole');
-                
+
                 if (emailInput) emailInput.value = user.email || '';
-                
+                if (passwordUsernameInput) passwordUsernameInput.value = user.email || '';
+
                 const meta = user.user_metadata || {};
                 if (fullNameInput) fullNameInput.value = meta.full_name || '';
                 if (institutionInput) institutionInput.value = meta.institution || '';
                 if (roleSelect) roleSelect.value = meta.role || '';
-                
+
                 els.profileModal.classList.add('visible');
             } catch (err) {
                 console.error("Failed to fetch profile details:", err);
@@ -523,19 +518,19 @@ function initEventListeners() {
             const errorEl = document.getElementById('profileError');
             const successEl = document.getElementById('profileSuccess');
             const submitBtn = document.getElementById('saveProfileBtn');
-            
+
             if (errorEl) errorEl.style.display = 'none';
             if (successEl) successEl.style.display = 'none';
-            
+
             if (submitBtn) {
                 submitBtn.disabled = true;
                 submitBtn.textContent = 'Saving Profile...';
             }
-            
+
             const fullName = document.getElementById('profileFullName')?.value.trim();
             const institution = document.getElementById('profileInstitution')?.value.trim();
             const role = document.getElementById('profileRole')?.value;
-            
+
             try {
                 const token = localStorage.getItem('aether_token');
                 const res = await fetch('/api/auth/profile', {
@@ -550,15 +545,15 @@ function initEventListeners() {
                         role: role
                     })
                 });
-                
+
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || 'Failed to update profile');
-                
+
                 if (successEl) {
                     successEl.textContent = 'Profile details updated successfully!';
                     successEl.style.display = 'block';
                 }
-                
+
                 updateUserUI(data);
             } catch (err) {
                 console.error("Profile update error:", err);
@@ -582,13 +577,13 @@ function initEventListeners() {
             const errorEl = document.getElementById('profileError');
             const successEl = document.getElementById('profileSuccess');
             const submitBtn = document.getElementById('savePasswordBtn');
-            
+
             if (errorEl) errorEl.style.display = 'none';
             if (successEl) successEl.style.display = 'none';
-            
+
             const password = document.getElementById('profilePassword')?.value;
             const confirmPassword = document.getElementById('profileConfirmPassword')?.value;
-            
+
             if (password.length < 6) {
                 if (errorEl) {
                     errorEl.textContent = 'Password must be at least 6 characters long.';
@@ -596,7 +591,7 @@ function initEventListeners() {
                 }
                 return;
             }
-            
+
             if (password !== confirmPassword) {
                 if (errorEl) {
                     errorEl.textContent = 'Passwords do not match.';
@@ -604,12 +599,12 @@ function initEventListeners() {
                 }
                 return;
             }
-            
+
             if (submitBtn) {
                 submitBtn.disabled = true;
                 submitBtn.textContent = 'Updating Password...';
             }
-            
+
             try {
                 const token = localStorage.getItem('aether_token');
                 const res = await fetch('/api/auth/password', {
@@ -620,15 +615,15 @@ function initEventListeners() {
                     },
                     body: JSON.stringify({ password })
                 });
-                
+
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || 'Failed to update password');
-                
+
                 if (successEl) {
                     successEl.textContent = 'Password updated successfully!';
                     successEl.style.display = 'block';
                 }
-                
+
                 passwordForm.reset();
             } catch (err) {
                 console.error("Password update error:", err);
@@ -661,15 +656,119 @@ function initEventListeners() {
             startNewChat();
         });
     }
-    
+
     // Mermaid full-screen modal controls
     initMermaidModal();
+
+    // Global link click handler: make sure all user clicked links open in a new tab
+    document.addEventListener('click', (e) => {
+        const link = e.target.closest('a');
+        if (link && link.href) {
+            try {
+                const url = new URL(link.href);
+                const currentUrl = new URL(window.location.href);
+                if (url.origin === currentUrl.origin && url.pathname === currentUrl.pathname && url.hash) {
+                    // Same page hash link, do not intercept
+                    return;
+                }
+            } catch (err) {
+                // Ignore URL parse errors for relative or invalid hrefs
+            }
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+        }
+    });
+
+    // Global copy button handler
+    document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.btn-copy');
+        if (!btn) return;
+        
+        // Find copy target selector
+        const targetSelector = btn.getAttribute('data-copy-target');
+        if (!targetSelector) return;
+        
+        const messageEl = btn.closest('.message');
+        const targetEl = messageEl ? messageEl.querySelector(targetSelector) : null;
+        if (targetEl) {
+            const success = await copyTextToClipboard(targetEl.innerText || targetEl.textContent);
+            if (success) {
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('copied');
+                }, 2000);
+            }
+        }
+    });
 }
 
 // SIDEBAR
 
 function toggleSidebar() {
-    els.sidebar.classList.toggle('collapsed');
+    if (isMobileViewport()) {
+        // On mobile: toggle the overlay-based mobile sidebar
+        if (els.sidebar.classList.contains('mobile-open')) {
+            closeMobileSidebar();
+        } else {
+            openMobileSidebar();
+        }
+    } else {
+        // On desktop: standard collapse/expand
+        els.sidebar.classList.toggle('collapsed');
+    }
+}
+
+function isMobileViewport() {
+    return window.innerWidth <= 768;
+}
+
+function openMobileSidebar() {
+    // Always remove collapsed first — prevents CSS specificity conflict
+    els.sidebar.classList.remove('collapsed');
+    els.sidebar.classList.add('mobile-open');
+    document.body.classList.add('sidebar-mobile-open');
+    // Note: no overflow:hidden — that causes top-bar position shift on scroll removal
+}
+
+function closeMobileSidebar() {
+    els.sidebar.classList.remove('mobile-open');
+    document.body.classList.remove('sidebar-mobile-open');
+}
+
+function initMobileSidebar() {
+    // On mobile screens, start with sidebar hidden (no .collapsed needed — CSS handles it)
+    if (isMobileViewport()) {
+        els.sidebar.classList.remove('collapsed'); // clear desktop state if any
+    }
+
+    // Close mobile sidebar on window resize to desktop
+    window.addEventListener('resize', () => {
+        if (!isMobileViewport()) {
+            closeMobileSidebar();
+        }
+    });
+
+    // Close mobile sidebar when a history item is clicked
+    document.addEventListener('click', (e) => {
+        if (!isMobileViewport()) return;
+        const historyItem = e.target.closest('.history-item');
+        if (historyItem && els.sidebar.classList.contains('mobile-open')) {
+            closeMobileSidebar();
+        }
+    });
+
+    // Close sources panel when tapping outside it on mobile
+    if (els.sourcesPanel) {
+        document.addEventListener('touchstart', (e) => {
+            if (!isMobileViewport()) return;
+            if (state.sourcesOpen && !els.sourcesPanel.contains(e.target) && e.target !== els.sourcePanelToggle) {
+                setSourcesPanelOpen(false);
+            }
+        }, { passive: true });
+    }
 }
 
 // SOURCES PANEL
@@ -1209,32 +1308,32 @@ function updateSourcesPanel(data) {
                     <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
                         <span style="font-size: 11px; color: var(--text-tertiary);">Datasets:</span>
                         ${p.datasets.map(ds => {
-                            const url = ds.wikipedia_url || ds.url || '#';
-                            const isWiki = !!ds.wikipedia_url;
-                            const badgeBg = isWiki ? 'rgba(99, 102, 241, 0.1)' : 'rgba(34, 211, 238, 0.05)';
-                            const badgeBorder = isWiki ? 'rgba(99, 102, 241, 0.3)' : 'rgba(34, 211, 238, 0.2)';
-                            const badgeColor = isWiki ? 'var(--primary-light)' : 'var(--accent-cyan)';
-                            const iconSvg = isWiki 
-                                ? `<span style="font-size: 10px; margin-right: 2px;">🌐</span>`
-                                : `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 2px;"><path d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z"/><path d="M2 7c0 2.76 4.477 5 10 5s10-2.24 10-5"/><path d="M2 12c0 2.76 4.477 5 10 5s10-2.24 10-5"/></svg>`;
-                            
-                            let html = `
+                    const url = ds.wikipedia_url || ds.url || '#';
+                    const isWiki = !!ds.wikipedia_url;
+                    const badgeBg = isWiki ? 'rgba(99, 102, 241, 0.1)' : 'rgba(34, 211, 238, 0.05)';
+                    const badgeBorder = isWiki ? 'rgba(99, 102, 241, 0.3)' : 'rgba(34, 211, 238, 0.2)';
+                    const badgeColor = isWiki ? 'var(--primary-light)' : 'var(--accent-cyan)';
+                    const iconSvg = isWiki
+                        ? `<span style="font-size: 10px; margin-right: 2px;">🌐</span>`
+                        : `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 2px;"><path d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z"/><path d="M2 7c0 2.76 4.477 5 10 5s10-2.24 10-5"/><path d="M2 12c0 2.76 4.477 5 10 5s10-2.24 10-5"/></svg>`;
+
+                    let html = `
                             <a href="${url}" target="_blank" title="${escapeHtml(ds.description || '')}" style="background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; padding: 2px 6px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="dataset-badge">
                                 ${iconSvg}
                                 ${escapeHtml(ds.name)}
                             </a>
                             `;
 
-                            if (ds.kaggle_url) {
-                                html += `
+                    if (ds.kaggle_url) {
+                        html += `
                                 <a href="${ds.kaggle_url}" target="_blank" title="Find '${escapeHtml(ds.name)}' on Kaggle: ${escapeHtml(ds.kaggle_title || '')} (${ds.kaggle_votes || 0} votes)" style="background: rgba(32, 190, 255, 0.15); border: 1px solid rgba(32, 190, 255, 0.35); color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" class="kaggle-badge">
                                     <span style="font-size: 10px; font-weight: 800; font-family: sans-serif; color: #00b0ff; margin-right: 1px;">K</span>
                                     Kaggle
                                 </a>
                                 `;
-                            }
-                            return html;
-                        }).join('')}
+                    }
+                    return html;
+                }).join('')}
                     </div>
                 ` : '';
 
@@ -1478,11 +1577,11 @@ function setSourcesLoading() {
     // Switch to status indicators
     const tabs = document.querySelectorAll('.sources-tab');
     tabs.forEach(t => t.classList.remove('active'));
-    tabs[0].classList.add('active');
+    tabs[1].classList.add('active');
 
     const contents = document.querySelectorAll('.sources-tab-content');
     contents.forEach(c => c.classList.remove('active'));
-    contents[0].classList.add('active');
+    contents[1].classList.add('active');
 }
 
 // -------------------------------------------------------------------------
@@ -1554,7 +1653,7 @@ async function sendQuery() {
 
     addMessage('user', query, { attachments: msgAttachments });
     state.messages.push({ role: 'user', content: fullQuery });
-    
+
     state.pendingAttachments = [];
     state.wikipediaMode = false;
     renderAttachmentTray();
@@ -1625,6 +1724,11 @@ async function sendQuery() {
         state.lastResponse = data;
         updateSourcesPanel(data);
 
+        // Update credit pill with live remaining credits
+        if (data.credits) {
+            updateCreditPill(data.credits);
+        }
+
         // Auto-open sources if there are papers/chunks
         if ((data.papers && data.papers.length > 0) || (data.chunks && data.chunks.length > 0)) {
             if (!state.sourcesOpen) {
@@ -1639,7 +1743,47 @@ async function sendQuery() {
         clearInterval(stepInterval);
         updatePipelineStep(null);
         removeMessage(loadingId);
-        addMessage('assistant', `(!) Error: ${err.message}`, { isError: true });
+
+        // ── Credit exhausted — show styled inline banner ──
+        if (err.isCreditError && err.creditDetail) {
+            const d = err.creditDetail;
+            const resetAt = d.reset_at ? new Date(d.reset_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : 'midnight';
+            addMessage('assistant',
+                `<div style="display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);">
+                  <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:#ef4444;font-size:14px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    Daily Credit Limit Reached
+                  </div>
+                  <div style="color:var(--text-secondary);font-size:13px;line-height:1.5;">
+                    You've used all <strong>${d.credits_limit || 20} daily credits</strong>. Credits reset at <strong>${resetAt}</strong>.
+                  </div>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <a href="/upgrade" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;background:linear-gradient(135deg,#6366f1,#a78bfa);color:white;font-size:12px;font-weight:600;text-decoration:none;">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                      Upgrade to Pro
+                    </a>
+                    <span style="display:inline-flex;align-items:center;padding:7px 14px;border-radius:8px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.2);color:var(--primary-light);font-size:12px;">Resets ${resetAt} UTC</span>
+                  </div>
+                </div>`,
+                { isError: false }
+            );
+            // Update pill to show 0
+            updateCreditPill({ plan: 'free', credits_remaining: 0, credits_limit: d.credits_limit || 20, is_unlimited: false });
+        } else if (err.isProError) {
+            addMessage('assistant',
+                `<div style="display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:12px;background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.3);">
+                  <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:#a78bfa;font-size:14px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    Pro Feature
+                  </div>
+                  <div style="color:var(--text-secondary);font-size:13px;line-height:1.5;">${err.message}</div>
+                  <a href="/upgrade" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;width:fit-content;border-radius:8px;background:linear-gradient(135deg,#6366f1,#a78bfa);color:white;font-size:12px;font-weight:600;text-decoration:none;">Upgrade to Pro →</a>
+                </div>`,
+                { isError: false }
+            );
+        } else {
+            addMessage('assistant', `(!) Error: ${err.message}`, { isError: true });
+        }
     }
 
     state.isLoading = false;
@@ -1656,11 +1800,11 @@ function getAuthHeader() {
 }
 
 async function apiCall(endpoint, body, method = 'POST') {
-    const headers = { 
+    const headers = {
         'Content-Type': 'application/json',
         ...getAuthHeader()
     };
-    
+
     const res = await fetch(`${API_BASE}${endpoint}`, {
         method: method,
         headers: headers,
@@ -1669,10 +1813,86 @@ async function apiCall(endpoint, body, method = 'POST') {
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || `HTTP ${res.status}`);
+        // 402 = credits exhausted — attach structured info
+        if (res.status === 402 && err.detail && err.detail.error === 'credit_exhausted') {
+            const e = new Error(err.detail.message || 'Credit limit reached');
+            e.isCreditError = true;
+            e.creditDetail = err.detail;
+            throw e;
+        }
+        // 403 = pro required
+        if (res.status === 403 && err.detail && err.detail.error === 'pro_required') {
+            const e = new Error(err.detail.message || 'Pro plan required');
+            e.isProError = true;
+            e.creditDetail = err.detail;
+            throw e;
+        }
+        throw new Error(
+            typeof err.detail === 'string' ? err.detail :
+            (err.detail?.message || `HTTP ${res.status}`)
+        );
     }
 
     return res.json();
+}
+
+// -------------------------------------------------------------------------
+// CREDIT PILL
+// -------------------------------------------------------------------------
+
+function updateCreditPill(credits) {
+    const pill = document.getElementById('creditPill');
+    const text = document.getElementById('creditText');
+    const badge = document.getElementById('planBadge');
+    const icon = document.getElementById('creditIcon');
+    if (!pill || !text) return;
+
+    pill.style.display = 'flex';
+
+    if (!credits) return;
+
+    if (credits.is_unlimited || credits.plan === 'pro') {
+        // Pro: show infinity + PRO badge
+        text.textContent = '\u221e';
+        pill.style.borderColor = 'rgba(167,139,250,0.4)';
+        pill.style.background = 'rgba(167,139,250,0.1)';
+        pill.style.color = '#a78bfa';
+        if (badge) badge.style.display = 'inline';
+        if (icon) icon.setAttribute('stroke', '#a78bfa');
+    } else {
+        const remaining = credits.credits_remaining ?? 0;
+        const limit = credits.credits_limit ?? 20;
+        const pct = remaining / limit;
+
+        text.textContent = `${remaining} / ${limit}`;
+        if (badge) badge.style.display = 'none';
+
+        // Colour the pill by remaining ratio
+        if (pct > 0.5) {
+            pill.style.borderColor = 'rgba(99,102,241,0.3)';
+            pill.style.background = 'rgba(99,102,241,0.1)';
+            pill.style.color = 'var(--primary-light)';
+            if (icon) icon.setAttribute('stroke', 'var(--primary-light)');
+        } else if (pct > 0.2) {
+            pill.style.borderColor = 'rgba(245,158,11,0.4)';
+            pill.style.background = 'rgba(245,158,11,0.08)';
+            pill.style.color = '#f59e0b';
+            if (icon) icon.setAttribute('stroke', '#f59e0b');
+        } else {
+            // Critical — low credits
+            pill.style.borderColor = 'rgba(239,68,68,0.4)';
+            pill.style.background = 'rgba(239,68,68,0.08)';
+            pill.style.color = '#ef4444';
+            if (icon) icon.setAttribute('stroke', '#ef4444');
+        }
+
+        // Pulse animation when very low
+        if (remaining <= 3 && remaining > 0) {
+            pill.style.animation = 'pulse 1.5s ease-in-out infinite';
+        } else {
+            pill.style.animation = 'none';
+        }
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -1700,6 +1920,17 @@ function addMessage(role, content, opts = {}) {
         `
         : '';
 
+    const copyBtnHtml = role === 'user' ? `
+        <div class="message-footer" style="margin-top: 8px;">
+            <div class="message-actions-group">
+                <span class="message-stat btn-copy" data-copy-target=".message-content">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                    Copy
+                </span>
+            </div>
+        </div>
+    ` : '';
+
     div.innerHTML = `
         <div class="message-avatar">${avatar}</div>
         <div class="message-body">
@@ -1709,6 +1940,7 @@ function addMessage(role, content, opts = {}) {
             </div>
             <div class="message-content">${opts.isError ? content : formatMarkdown(content)}</div>
             ${attachmentsHtml}
+            ${copyBtnHtml}
         </div>
     `;
 
@@ -1809,13 +2041,7 @@ function addAssistantMessage(data, stream = true) {
         ${data.chunks.length} Knowledge Chunks
     </span>`);
 
-    const copyBtnHtml = `<span class="message-stat btn-copy" onclick="
-        var t = this.closest('.message-body') ? this.closest('.message-body').querySelector('.message-content') : null;
-        if (t) navigator.clipboard.writeText(t.innerText);
-        const o = this.innerHTML;
-        this.innerHTML = '<svg width=\'11\' height=\'11\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2.5\'><polyline points=\'20 6 9 17 4 12\'/></svg> Copied';
-        setTimeout(() => this.innerHTML = o, 2000);
-    ">
+    const copyBtnHtml = `<span class="message-stat btn-copy" data-copy-target=".message-content">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
         Copy
     </span>`;
@@ -1906,7 +2132,7 @@ function addLoadingMessage() {
     div.id = id;
 
     div.innerHTML = `
-        <div class="message-avatar" style="font-size:24px; color: var(--primary-light);">âœ¨</div>
+        <div class="message-avatar" style="font-size:24px; color: var(--primary-light);">\u2728</div>
         <div class="message-body">
             <div class="message-loading">
                 <div class="typing-dots">
@@ -2073,23 +2299,23 @@ function escapeHtml(str) {
 // Automatic Mermaid flowchart syntax sanitizer/healer
 function sanitizeMermaidCode(code) {
     if (!code) return '';
-    
+
     // Pre-process double quoted strings to convert newlines and literal \\n to <br>
     code = code.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/gs, (match, p1) => {
         return '"' + p1.replace(/\r?\n/g, '<br>').replace(/\\n/g, '<br>').replace(/<br>\s+/g, '<br>') + '"';
     });
-    
+
     let lines = code.split('\n');
     let processedLines = [];
 
-    
+
     // Improved connection regex to handle spaces around pipe labels and -- text -->, etc.
     const connectionRegex = /(\s*(?:-->|==>|-\.->)\s*\|[^|]+\|\s*|\s*--\s*[^-]+?\s*-->\s*|\s*==\s*[^=]+?\s*==>\s*|\s*--\.\s*[^\.]+\s*\.-\s*>\s*|-->|---|==>|-\.-|-.->|->)/;
-    
+
     // Set up tracking for defined nodes to auto-generate labels for raw DB identifiers
     const declaredNodes = new Set();
     const allNodes = new Set();
-    
+
     const registerNode = (id, hasLabel) => {
         let cleanId = id.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
         if (cleanId) {
@@ -2100,7 +2326,7 @@ function sanitizeMermaidCode(code) {
         }
         return cleanId;
     };
-    
+
     const getPrettyLabel = (id) => {
         let label = id.trim();
         // 1. Remove leading/trailing underscores
@@ -2128,46 +2354,46 @@ function sanitizeMermaidCode(code) {
         clean = clean.replace(/\\"/g, '"').replace(/"/g, '\\"');
         return `"${clean}"`;
     };
-    
+
     const sanitizeNodePart = (part) => {
         let p = part.trim();
         if (!p) return '';
-        
+
         // Stadium: id([label])
         let stadiumMatch = p.match(/^([^\[\(\{\>"]+)\(\[(.+)\]\)$/);
         if (stadiumMatch) {
             let id = registerNode(stadiumMatch[1], true);
             return `${id}([${wrapLabel(stadiumMatch[2])}])`;
         }
-        
+
         // Database: id[(label)]
         let dbMatch = p.match(/^([^\[\(\{\>"]+)\[\((.+)\)\]$/);
         if (dbMatch) {
             let id = registerNode(dbMatch[1], true);
             return `${id}[(${wrapLabel(dbMatch[2])})]`;
         }
-        
+
         // Circle: id((label))
         let circleMatch = p.match(/^([^\[\(\{\>"]+)\(\((.+)\)\)$/);
         if (circleMatch) {
             let id = registerNode(circleMatch[1], true);
             return `${id}((${wrapLabel(circleMatch[2])}))`;
         }
-        
+
         // Hexagon: id{{label}}
         let hexMatch = p.match(/^([^\[\(\{\>"]+)\{\{(.+)\}\}$/);
         if (hexMatch) {
             let id = registerNode(hexMatch[1], true);
             return `${id}{{${wrapLabel(hexMatch[2])}}}`;
         }
-        
+
         // Subroutine: id[[label]]
         let subMatch = p.match(/^([^\[\(\{\>"]+)\[\[(.+)\]\]$/);
         if (subMatch) {
             let id = registerNode(subMatch[1], true);
             return `${id}[[${wrapLabel(subMatch[2])}]]`;
         }
-        
+
         // Parallelogram: id[/label/] or id[\label\]
         let paraMatch1 = p.match(/^([^\[\(\{\>"]+)\[\/(.+)\/\]$/);
         if (paraMatch1) {
@@ -2179,40 +2405,40 @@ function sanitizeMermaidCode(code) {
             let id = registerNode(paraMatch2[1], true);
             return `${id}[\\${wrapLabel(paraMatch2[2])}\\]`;
         }
-        
+
         // Rounded edges: id(label)
         let singleRoundMatch = p.match(/^([^\[\(\{\>"]+)\((.+)\)$/);
         if (singleRoundMatch) {
             let id = registerNode(singleRoundMatch[1], true);
             return `${id}(${wrapLabel(singleRoundMatch[2])})`;
         }
-        
+
         // Rectangle: id[label]
         let rectMatch = p.match(/^([^\[\(\{\>"]+)\[(.+)\]$/);
         if (rectMatch) {
             let id = registerNode(rectMatch[1], true);
             return `${id}[${wrapLabel(rectMatch[2])}]`;
         }
-        
+
         // Diamond: id{label}
         let diamondMatch = p.match(/^([^\[\(\{\>"]+)\{(.+)\}$/);
         if (diamondMatch) {
             let id = registerNode(diamondMatch[1], true);
             return `${id}{${wrapLabel(diamondMatch[2])}}`;
         }
-        
+
         // Asymmetric: id>label]
         let asymMatch = p.match(/^([^\[\(\{\>"]+)>(.+)\]$/);
         if (asymMatch) {
             let id = registerNode(asymMatch[1], true);
             return `${id}>${wrapLabel(asymMatch[2])}]`;
         }
-        
+
         // No shape found. It's just a raw node ID.
         let id = registerNode(p, false);
         return id;
     };
-    
+
     let isFlowchart = false;
     for (let line of lines) {
         let trimmed = line.trim();
@@ -2221,24 +2447,24 @@ function sanitizeMermaidCode(code) {
             break;
         }
     }
-    
+
     if (!isFlowchart) {
         return code;
     }
-    
+
     for (let line of lines) {
         let trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('%%')) {
             processedLines.push(line);
             continue;
         }
-        
+
         // Skip header definitions
         if (/^(graph|flowchart)/i.test(trimmed)) {
             processedLines.push(line);
             continue;
         }
-        
+
         // Subgraph start/end
         if (trimmed.toLowerCase().startsWith('subgraph ')) {
             let content = trimmed.substring(9).trim();
@@ -2256,7 +2482,7 @@ function sanitizeMermaidCode(code) {
             processedLines.push(line);
             continue;
         }
-        
+
         // Discard styling directives to keep diagrams clean and highly legible
         if (trimmed.toLowerCase().startsWith('style ') || trimmed.toLowerCase().startsWith('classdef ') || trimmed.toLowerCase().startsWith('class ')) {
             continue; // Skip styling line
@@ -2265,9 +2491,15 @@ function sanitizeMermaidCode(code) {
             processedLines.push(line);
             continue;
         }
-        
+
+        // Heal invalid connection symbols like ...> or ..> or ...-> to -.->
+        trimmed = trimmed.replace(/\.{2,}(?:->|>)?/g, ' -.-> ');
+
+        // Remove spaces around the pipe labels
+        trimmed = trimmed.replace(/(\s*(?:-->|==>|-\.->)\s*)\|([^|]+)\|\s*/g, (match, arrow, label) => arrow.trim() + '|' + label.trim() + '|');
+
         // Process standard line with potential connections
-        let parts = line.split(connectionRegex);
+        let parts = trimmed.split(connectionRegex);
         let processedParts = [];
         for (let i = 0; i < parts.length; i++) {
             if (i % 2 === 0) {
@@ -2275,13 +2507,24 @@ function sanitizeMermaidCode(code) {
                 processedParts.push(sanitizeNodePart(parts[i]));
             } else {
                 // Connection part
-                processedParts.push(parts[i]);
+                let conn = parts[i];
+                let labelMatch = conn.match(/^(\s*(?:-->|==>|-\.->)\s*)\|([^|]+)\|(\s*)$/);
+                if (labelMatch) {
+                    let arrow = labelMatch[1];
+                    let label = labelMatch[2].trim();
+                    let trailing = labelMatch[3];
+                    if (/[()\[\]{}"',;:@#$&*+=?\/\\~`]/.test(label) && !label.startsWith('"') && !label.endsWith('"')) {
+                        label = label.replace(/"/g, '\\"');
+                        conn = `${arrow.trim()}|"${label}"|${trailing}`;
+                    }
+                }
+                processedParts.push(conn);
             }
         }
-        
+
         processedLines.push(processedParts.join(' '));
     }
-    
+
     // Auto-generate pretty labels for raw node IDs that lack descriptions
     let autoDeclarations = [];
     for (let id of allNodes) {
@@ -2292,11 +2535,11 @@ function sanitizeMermaidCode(code) {
             }
         }
     }
-    
+
     if (autoDeclarations.length > 0) {
         return processedLines.join('\n') + '\n' + autoDeclarations.join('\n');
     }
-    
+
     return processedLines.join('\n');
 }
 
@@ -2311,26 +2554,26 @@ async function postProcessResponse(container) {
         if (html.includes('[!NOTE]') || html.includes('[!IMPORTANT]') || html.includes('[!WARNING]') || html.includes('[!TIP]') || html.includes('[!CAUTION]')) {
             let type = 'note';
             let title = 'Note';
-            
+
             if (html.includes('[!IMPORTANT]')) { type = 'important'; title = 'Important'; }
             else if (html.includes('[!WARNING]')) { type = 'warning'; title = 'Warning'; }
             else if (html.includes('[!TIP]')) { type = 'tip'; title = 'Tip'; }
             else if (html.includes('[!CAUTION]')) { type = 'caution'; title = 'Caution'; }
-            
+
             const cleanHtml = html
                 .replace(/\[!(NOTE|IMPORTANT|WARNING|TIP|CAUTION)\]/g, '')
                 .replace(/^<p>\s*<br>/, '<p>')
                 .replace(/^<p>\s*/, '<p>');
-                
+
             const div = document.createElement('div');
             div.className = `callout ${type}`;
-            
+
             let colorVar = 'var(--accent-cyan)';
             if (type === 'important') colorVar = 'var(--accent-purple)';
             else if (type === 'tip') colorVar = 'var(--accent-emerald)';
             else if (type === 'warning') colorVar = 'var(--accent-amber)';
             else if (type === 'caution') colorVar = 'var(--accent-red)';
-            
+
             div.innerHTML = `<div class="callout-title" style="font-weight: 700; margin-bottom: 4px; color: ${colorVar}">${title}</div>${cleanHtml}`;
             bq.replaceWith(div);
         }
@@ -2344,7 +2587,7 @@ async function postProcessResponse(container) {
                 const codeEl = mermaidCodes[i];
                 const preEl = codeEl.parentElement;
                 const codeText = codeEl.textContent.trim();
-                
+
                 const wrapper = document.createElement('div');
                 wrapper.className = 'mermaid-container';
                 wrapper.style.margin = '16px 0';
@@ -2356,33 +2599,33 @@ async function postProcessResponse(container) {
                 wrapper.style.display = 'flex';
                 wrapper.style.flexDirection = 'column';
                 wrapper.style.alignItems = 'center';
-                
+
                 let renderSuccess = false;
                 let svgContent = '';
                 const uniqueId = `mermaid-chart-${Date.now()}-${i}-${Math.floor(Math.random() * 1000)}`;
-                
+
                 // Try rendering original first
                 try {
                     // Pre-validate original syntax to prevent Mermaid rendering its default error box
                     await mermaid.parse(codeText);
-                    
+
                     const { svg } = await mermaid.render(uniqueId, codeText);
                     svgContent = svg;
                     renderSuccess = true;
                 } catch (err) {
                     console.warn('Mermaid rendering original failed, trying sanitized version...', err);
-                    
+
                     // Clean up bad elements created by mermaid error handler
                     const badEl = document.getElementById(uniqueId);
                     if (badEl) badEl.remove();
                     const badElBind = document.getElementById(`d${uniqueId}`);
                     if (badElBind) badElBind.remove();
-                    
+
                     try {
                         const sanitizedCode = sanitizeMermaidCode(codeText);
                         // Validate sanitized syntax
                         await mermaid.parse(sanitizedCode);
-                        
+
                         const { svg } = await mermaid.render(uniqueId, sanitizedCode);
                         svgContent = svg;
                         renderSuccess = true;
@@ -2394,18 +2637,18 @@ async function postProcessResponse(container) {
                         if (badEl2Bind) badEl2Bind.remove();
                     }
                 }
-                
+
                 if (renderSuccess) {
                     wrapper.innerHTML = svgContent;
                     wrapper.style.position = 'relative';
-                    
+
                     // Add zoom controls
                     const controls = document.createElement('div');
                     controls.className = 'mermaid-controls';
                     controls.style.position = 'absolute';
                     controls.style.top = '8px';
                     controls.style.right = '8px';
-                                        const btnZoom = document.createElement('button');
+                    const btnZoom = document.createElement('button');
                     btnZoom.className = 'mermaid-control-btn';
                     btnZoom.title = 'Actual Size (Scroll) / Fit Width';
                     btnZoom.innerHTML = `
@@ -2423,7 +2666,7 @@ async function postProcessResponse(container) {
                     btnZoom.style.alignItems = 'center';
                     btnZoom.style.justifyContent = 'center';
                     btnZoom.style.transition = 'all 0.2s';
-                    
+
                     btnZoom.addEventListener('mouseover', () => {
                         btnZoom.style.background = 'var(--primary)';
                         btnZoom.style.borderColor = 'rgba(99, 102, 241, 0.4)';
@@ -2438,7 +2681,7 @@ async function postProcessResponse(container) {
                     btnZoom.addEventListener('click', () => {
                         const svgEl = wrapper.querySelector('svg');
                         if (!svgEl) return;
-                        
+
                         if (zoomState === 'fit') {
                             zoomState = 'scroll';
                             svgEl.style.setProperty('max-width', 'none', 'important');
@@ -2481,7 +2724,7 @@ async function postProcessResponse(container) {
                     btnFullscreen.style.alignItems = 'center';
                     btnFullscreen.style.justifyContent = 'center';
                     btnFullscreen.style.transition = 'all 0.2s';
-                    
+
                     btnFullscreen.addEventListener('mouseover', () => {
                         btnFullscreen.style.background = 'var(--primary)';
                         btnFullscreen.style.borderColor = 'rgba(99, 102, 241, 0.4)';
@@ -2490,14 +2733,14 @@ async function postProcessResponse(container) {
                         btnFullscreen.style.background = 'rgba(30, 41, 59, 0.8)';
                         btnFullscreen.style.borderColor = 'rgba(255, 255, 255, 0.1)';
                     });
-                    
+
                     btnFullscreen.addEventListener('click', () => {
                         const svgEl = wrapper.querySelector('svg');
                         if (!svgEl) return;
                         // Open the fullscreen interactive modal with the inner HTML of the wrapper (which contains the SVG)
                         openMermaidModal(wrapper.innerHTML);
                     });
-                    
+
                     controls.appendChild(btnZoom);
                     controls.appendChild(btnFullscreen);
                     wrapper.appendChild(controls);
@@ -2522,7 +2765,7 @@ async function postProcessResponse(container) {
                         </div>
                     `;
                 }
-                
+
                 preEl.replaceWith(wrapper);
             }
         }
@@ -2705,7 +2948,7 @@ async function loadHistory() {
 function renderHistory() {
     const searchInput = document.getElementById('historySearchInput');
     const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
-    
+
     const filteredConversations = state.conversations.filter(conv => {
         const title = (conv.title || '').toLowerCase();
         return title.includes(query);
@@ -2727,7 +2970,7 @@ function renderHistory() {
     els.historyList.innerHTML = filteredConversations.map(conv => {
         const isActive = state.currentConversation === conv.id ? 'active' : '';
         const title = conv.title || 'New Chat';
-        
+
         return `
             <div class="history-item ${isActive}" data-id="${conv.id}">
                 <div class="history-title-container">
@@ -2756,7 +2999,7 @@ function renderHistory() {
     els.historyList.querySelectorAll('.history-item').forEach(item => {
         const id = item.dataset.id;
         const conv = state.conversations.find(c => c.id === id);
-        
+
         item.querySelector('.history-title-container').addEventListener('click', () => {
             loadSession(conv);
         });
@@ -2787,12 +3030,12 @@ function renderHistory() {
 function loadSession(session) {
     state.currentConversation = session.id;
     state.messages = session.messages || [];
-    
+
     els.chatMessages.innerHTML = '';
     if (els.welcomeScreen) {
         els.welcomeScreen.style.display = 'none';
     }
-    
+
     state.messages.forEach(msg => {
         if (msg.role === 'user') {
             addMessage('user', msg.content);
@@ -2807,7 +3050,7 @@ function loadSession(session) {
             }
         }
     });
-    
+
     $$('.history-item').forEach(item => {
         item.classList.toggle('active', item.dataset.id === session.id);
     });
@@ -2887,7 +3130,7 @@ async function initAuth() {
             window.location.href = '/';
             return;
         }
-        
+
         const res = await fetch('/api/auth/me', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -2896,10 +3139,22 @@ async function initAuth() {
             window.location.href = '/';
             return;
         }
-        
+
         const user = await res.json();
         updateUserUI(user);
         await loadHistory();
+
+        // Fetch initial credit status for the pill
+        try {
+            const token = localStorage.getItem('aether_token');
+            const cRes = await fetch(`${API_BASE}/api/credits`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (cRes.ok) {
+                const cData = await cRes.json();
+                updateCreditPill(cData);
+            }
+        } catch (_) { /* silent */ }
     } catch (e) {
         console.error("Failed to initialize Auth:", e);
         window.location.href = '/';
@@ -2914,9 +3169,9 @@ function loadSettingsFromLocalStorage() {
         const verify = localStorage.getItem('aether_settings_verify') !== 'false'; // defaults to true
         const studyMode = localStorage.getItem('aether_settings_studyMode') === 'true'; // defaults to false
         const model = localStorage.getItem('aether_settings_model') || 'light';
-        
+
         state.deepResearchMode = model === 'heavy';
-        
+
         if (els.topK) {
             els.topK.value = topK;
             els.topKValue.textContent = topK;
@@ -3037,14 +3292,14 @@ function openMermaidModal(svgHtml) {
     const modal = document.getElementById('mermaid-modal');
     const canvas = document.getElementById('mermaidModalCanvas');
     if (!modal || !canvas) return;
-    
+
     // Inject the SVG into the canvas
     canvas.innerHTML = svgHtml;
-    
+
     // Clean controls overlay from the modal version of diagram
     const controls = canvas.querySelector('.mermaid-controls');
     if (controls) controls.remove();
-    
+
     // Ensure the SVG within the modal behaves properly
     const svgEl = canvas.querySelector('svg');
     if (svgEl) {
@@ -3055,7 +3310,7 @@ function openMermaidModal(svgHtml) {
         svgEl.removeAttribute('width');
         svgEl.removeAttribute('height');
     }
-    
+
     // Reset state
     modalZoomState = {
         x: 0,
@@ -3066,14 +3321,14 @@ function openMermaidModal(svgHtml) {
         startY: 0
     };
     updateModalTransform();
-    
+
     // Display modal
     modal.style.display = 'flex';
     // Trigger transition
     setTimeout(() => {
         modal.classList.add('active');
     }, 10);
-    
+
     // Prevent background scrolling
     document.body.style.overflow = 'hidden';
 }
@@ -3082,14 +3337,14 @@ function openMermaidModal(svgHtml) {
 function closeMermaidModal() {
     const modal = document.getElementById('mermaid-modal');
     if (!modal) return;
-    
+
     modal.classList.remove('active');
     setTimeout(() => {
         modal.style.display = 'none';
         const canvas = document.getElementById('mermaidModalCanvas');
         if (canvas) canvas.innerHTML = '';
     }, 300);
-    
+
     // Re-enable background scrolling
     document.body.style.overflow = '';
 }
@@ -3102,9 +3357,9 @@ function initMermaidModal() {
     const btnIn = document.getElementById('btnMermaidZoomIn');
     const btnOut = document.getElementById('btnMermaidZoomOut');
     const btnReset = document.getElementById('btnMermaidReset');
-    
+
     if (!modal || !viewport) return;
-    
+
     // Close on click close button or backdrop
     closeBtn.addEventListener('click', closeMermaidModal);
     modal.addEventListener('click', (e) => {
@@ -3112,26 +3367,26 @@ function initMermaidModal() {
             closeMermaidModal();
         }
     });
-    
+
     // Key escape to close
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && modal.style.display === 'flex') {
             closeMermaidModal();
         }
     });
-    
+
     // Zoom In
     btnIn.addEventListener('click', () => {
         modalZoomState.scale = Math.min(modalZoomState.scale * 1.25, 8);
         updateModalTransform();
     });
-    
+
     // Zoom Out
     btnOut.addEventListener('click', () => {
         modalZoomState.scale = Math.max(modalZoomState.scale / 1.25, 0.25);
         updateModalTransform();
     });
-    
+
     // Reset
     btnReset.addEventListener('click', () => {
         modalZoomState.x = 0;
@@ -3139,7 +3394,7 @@ function initMermaidModal() {
         modalZoomState.scale = 1;
         updateModalTransform();
     });
-    
+
     // Double click viewport to reset
     viewport.addEventListener('dblclick', () => {
         modalZoomState.x = 0;
@@ -3147,7 +3402,7 @@ function initMermaidModal() {
         modalZoomState.scale = 1;
         updateModalTransform();
     });
-    
+
     // Mouse Drag to Pan
     viewport.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return; // Only left click
@@ -3157,38 +3412,72 @@ function initMermaidModal() {
         viewport.style.cursor = 'grabbing';
         e.preventDefault();
     });
-    
+
     window.addEventListener('mousemove', (e) => {
         if (!modalZoomState.isDragging) return;
         modalZoomState.x = e.clientX - modalZoomState.startX;
         modalZoomState.y = e.clientY - modalZoomState.startY;
         updateModalTransform();
     });
-    
+
     window.addEventListener('mouseup', () => {
         if (modalZoomState.isDragging) {
             modalZoomState.isDragging = false;
             viewport.style.cursor = 'grab';
         }
     });
-    
+
     // Mouse wheel to zoom (zoom relative to viewport center or cursor)
     viewport.addEventListener('wheel', (e) => {
         e.preventDefault();
-        
+
         const factor = e.deltaY < 0 ? 1.1 : 0.9;
         const newScale = Math.min(Math.max(modalZoomState.scale * factor, 0.2), 8);
-        
+
         const rect = viewport.getBoundingClientRect();
         const mouseX = e.clientX - rect.left - rect.width / 2;
         const mouseY = e.clientY - rect.top - rect.height / 2;
-        
+
         // Adjust translation offsets so the zoom is centered under mouse pointer
         modalZoomState.x = mouseX - (mouseX - modalZoomState.x) * (newScale / modalZoomState.scale);
         modalZoomState.y = mouseY - (mouseY - modalZoomState.y) * (newScale / modalZoomState.scale);
         modalZoomState.scale = newScale;
-        
+
         updateModalTransform();
     }, { passive: false });
 }
+
+
+// COPY TO CLIPBOARD ROBUST HELPERS
+
+function copyTextToClipboard(text) {
+    if (!text) return Promise.resolve(false);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text).then(() => true).catch(() => {
+            return fallbackCopyTextToClipboard(text);
+        });
+    }
+    return Promise.resolve(fallbackCopyTextToClipboard(text));
+}
+
+function fallbackCopyTextToClipboard(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        return successful;
+    } catch (err) {
+        document.body.removeChild(textArea);
+        return false;
+    }
+}
+
 

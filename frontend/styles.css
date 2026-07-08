@@ -800,6 +800,10 @@ body.sources-open .main {
     min-height: 52px;
 }
 
+.top-bar-actions {
+    margin-left: auto;
+}
+
 .mobile-menu-btn {
     display: none;
     background: none;
@@ -5189,57 +5193,174 @@ mjx-container:not([display="true"]) {
 }
 
 
-/* ── Mobile & Responsive Overrides ── */
+/* ── Pricing Section Styles ── */
+.pricing-section {
+    padding: 80px 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+    text-align: center;
+    position: relative;
+    z-index: 10;
+}
+
+.pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 450px));
+    gap: 30px;
+    margin-top: 50px;
+    justify-content: center;
+}
+
+.pricing-card {
+    background: rgba(17, 21, 28, 0.7);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: 40px 30px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+    transition: var(--transition-normal);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.pricing-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    border-color: rgba(99, 102, 241, 0.3);
+}
+
+.pricing-card.popular {
+    background: rgba(22, 21, 35, 0.85);
+    border: 2px solid var(--primary);
+    box-shadow: var(--shadow-glow);
+}
+
+.pricing-card.popular:hover {
+    border-color: var(--accent-purple);
+}
+
+.popular-badge {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: var(--gradient-primary);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.plan-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+
+.plan-price-box {
+    margin: 20px 0;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.plan-price {
+    font-family: 'Outfit', sans-serif;
+    font-size: 48px;
+    font-weight: 800;
+    color: var(--text-primary);
+}
+
+.pricing-card.popular .plan-price {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.pricing-card:not(.popular) .plan-price {
+    background: linear-gradient(135deg, #f8fafc, #94a3b8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.plan-duration {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.plan-desc {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 30px;
+    line-height: 1.5;
+}
+
+.plan-features {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 40px 0;
+    width: 100%;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.plan-features li {
+    font-size: 14px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    line-height: 1.4;
+}
+
+.plan-features li svg {
+    flex-shrink: 0;
+}
+
+.plan-features li.included svg {
+    color: var(--accent-emerald);
+}
+
+.plan-features li.locked {
+    color: var(--text-dim);
+}
+
+.plan-features li.locked svg {
+    color: var(--accent-red);
+}
+
+.pricing-card .btn {
+    width: 100%;
+    justify-content: center;
+    padding: 14px;
+    font-weight: 600;
+    margin-top: auto;
+}
+
+
+/* ── Comprehensive Mobile-First Responsive System ── */
+
+/* Base Styles imply Mobile-First */
+@media (min-width: 768px) {
+    /* Tablet & Desktop overrides */
+    .landing-nav { display: flex !important; }
+    .mobile-menu-toggle { display: none !important; }
+    .nav-actions { display: flex !important; position: static; background: transparent; }
+}
 
 @media (max-width: 900px) {
-    .landing-header {
-        padding: 20px 24px;
-        position: relative;
-    }
-
-    .mobile-menu-toggle {
-        display: block;
-    }
-
-    .landing-nav {
-        display: none;
-        flex-direction: column;
-        width: 100%;
-        position: absolute;
-        top: 100%;
-        left: 0;
-        background: rgba(6, 7, 10, 0.95);
-        backdrop-filter: blur(20px);
-        padding: 20px 24px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        box-sizing: border-box;
-        gap: 16px;
-        z-index: 99;
-    }
-
-    .nav-actions {
-        display: none;
-        width: 100%;
-        position: absolute;
-        top: calc(100% + 280px); /* Height of landing-nav dropdown */
-        left: 0;
-        background: rgba(6, 7, 10, 0.95);
-        backdrop-filter: blur(20px);
-        padding: 0 24px 24px 24px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        box-sizing: border-box;
-        flex-direction: column;
-        gap: 12px;
-        z-index: 99;
-    }
-
-    /* Toggle mobile dropdown styles */
-    .landing-header.mobile-open .landing-nav {
-        display: flex;
-    }
-
-    .landing-header.mobile-open .nav-actions {
-        display: flex;
+    .footer-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 32px;
     }
 
     .hero-title {
@@ -5265,7 +5386,7 @@ mjx-container:not([display="true"]) {
         grid-template-columns: 1fr;
     }
 
-    .sim-console, 
+    .sim-console,
     .sim-results {
         height: 320px;
     }
@@ -5279,10 +5400,55 @@ mjx-container:not([display="true"]) {
         grid-template-columns: repeat(2, 1fr);
         gap: 20px;
     }
+}
 
-    .footer-grid {
-        grid-template-columns: 1fr 1fr;
-        gap: 32px;
+@media (max-width: 767px) {
+    .landing-header { 
+        padding: 20px 24px; 
+        position: relative; 
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(6, 7, 10, 0.8) !important;
+        backdrop-filter: blur(12px);
+    }
+    
+    .landing-header.mobile-open {
+        background: rgba(6, 7, 10, 0.98) !important;
+        backdrop-filter: blur(20px);
+    }
+
+    .mobile-menu-toggle { display: block; }
+    
+    .landing-nav {
+        display: none;
+        flex-direction: column;
+        width: 100%;
+        gap: 16px;
+        padding: 20px 0 10px 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        margin-top: 15px;
+        order: 3;
+    }
+
+    .nav-actions {
+        display: none;
+        width: 100%;
+        flex-direction: column;
+        gap: 12px;
+        padding: 10px 0 20px 0;
+        border-top: none;
+        order: 4;
+    }
+
+    /* Toggle mobile dropdown styles */
+    .landing-header.mobile-open .landing-nav {
+        display: flex;
+    }
+
+    .landing-header.mobile-open .nav-actions {
+        display: flex;
     }
 }
 
@@ -5326,5 +5492,360 @@ mjx-container:not([display="true"]) {
     
     .footer-col h3 {
         margin-bottom: 12px;
+    }
+
+    /* Landing nav action buttons full-width */
+    .nav-actions .btn {
+        width: 100%;
+        text-align: center;
+        justify-content: center;
+    }
+}
+
+/* ═══════════════════════════════════════════════
+   APP PAGE — Mobile Responsive (Chat UI)
+   ═══════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+    /* ── Sidebar: fixed overlay, hidden by default on mobile ── */
+    .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        height: 100%;
+        z-index: 400;
+        margin-left: calc(-1 * var(--sidebar-width));
+        box-shadow: none;
+        transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                    box-shadow 0.3s ease;
+    }
+
+    /* Desktop collapsed class — hidden on mobile too */
+    .sidebar.collapsed {
+        margin-left: calc(-1 * var(--sidebar-width));
+    }
+
+    /* Sidebar slides in as overlay when mobile-open — must come AFTER .collapsed to win */
+    .sidebar.mobile-open {
+        margin-left: 0 !important;
+        box-shadow: 8px 0 40px rgba(0, 0, 0, 0.7);
+    }
+
+    /* ── Dim overlay behind sidebar ── */
+    .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+        z-index: 350;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        pointer-events: none;
+    }
+
+    body.sidebar-mobile-open .sidebar-overlay {
+        display: block;
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    /* ── Main area: always full-width on mobile ── */
+    .main {
+        width: 100%;
+        min-width: 0;
+        flex: 1;
+    }
+
+    /* Don't indent main for sources panel on mobile — use full overlay */
+    body.sources-open .main {
+        padding-right: 0;
+    }
+
+    /* ── Always show hamburger menu button ── */
+    .mobile-menu-btn {
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Override the old desktop-only collapsed-state rule */
+    .sidebar.collapsed ~ .main .mobile-menu-btn {
+        display: flex !important;
+    }
+
+    /* ── Top bar: compact + STABLE layout ── */
+    .top-bar {
+        padding: 8px 12px;
+        min-height: 48px;
+        gap: 0;
+        /* Use grid so left (hamburger) and right (actions) are always anchored */
+        display: grid;
+        grid-template-columns: 48px 1fr auto;
+        align-items: center;
+    }
+
+    /* Hamburger always occupies its grid cell — visible on mobile */
+    .mobile-menu-btn {
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        grid-column: 1;
+        flex-shrink: 0;
+    }
+
+    /* Center cell (empty — was connection status) */
+    .top-bar > *:nth-child(2):not(.top-bar-actions) {
+        grid-column: 2;
+    }
+
+    /* Actions always pinned to the right */
+    .top-bar-actions {
+        grid-column: 3;
+        flex-shrink: 0;
+    }
+
+    /* Hide email text beside avatar — initial only on mobile */
+    #userEmailText {
+        display: none;
+    }
+
+    /* Compact connection status badge */
+    .connection-status {
+        font-size: 10px;
+        padding: 4px 8px;
+        gap: 5px;
+        max-width: 130px;
+        overflow: hidden;
+    }
+
+    .connection-status .status-text {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 80px;
+    }
+
+    /* Pipeline step text: hide on mobile */
+    #pipelineStep {
+        display: none;
+    }
+
+    /* Top bar actions: reduce gap */
+    .top-bar-actions {
+        gap: 4px !important;
+    }
+
+    /* ── Sources panel: full-width overlay on mobile ── */
+    .sources-panel {
+        width: 100% !important;
+        left: 0;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        border-left: none;
+        border-top: 1px solid var(--surface-glass-border);
+        z-index: 300;
+    }
+
+    /* ── Chat messages: tighter padding ── */
+    .chat-messages {
+        padding: 16px 12px;
+        gap: 20px;
+    }
+
+    /* ── Welcome screen ── */
+    .welcome-screen {
+        padding: 24px 12px;
+    }
+
+    .welcome-glow {
+        width: 260px;
+        height: 260px;
+    }
+
+    .welcome-title {
+        font-size: 22px;
+        letter-spacing: -0.3px;
+    }
+
+    .welcome-desc {
+        font-size: 13px;
+        margin-bottom: 20px;
+    }
+
+    .welcome-study-banner {
+        padding: 12px 14px;
+    }
+
+    /* Welcome cards: single column */
+    .welcome-cards {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-top: 16px;
+    }
+
+    .welcome-card {
+        padding: 12px 14px;
+        font-size: 12.5px;
+    }
+
+    /* ── Study prompt chips ── */
+    .study-prompt-chip {
+        font-size: 11px;
+        padding: 7px 12px;
+    }
+
+    /* ── Input area: compact ── */
+    .input-area {
+        padding: 0 10px 12px;
+    }
+
+    .input-wrapper {
+        border-radius: 20px;
+        padding: 10px 12px;
+    }
+
+    .input-wrapper textarea {
+        font-size: 14px;
+    }
+
+    .input-hints {
+        font-size: 10px;
+    }
+
+    /* ── Message bubbles ── */
+    .message {
+        gap: 8px;
+    }
+
+    .message-avatar {
+        width: 30px;
+        height: 30px;
+        font-size: 16px;
+        border-radius: 8px;
+    }
+
+    .message-content {
+        font-size: 14px;
+    }
+
+    .message-content p {
+        font-size: 14px;
+    }
+
+    /* Code blocks: horizontally scrollable */
+    .message-content pre {
+        overflow-x: auto !important;
+        max-width: 100% !important;
+        font-size: 12px;
+    }
+
+    /* Message footer: wrap on mobile */
+    .message-footer {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .message-stat {
+        font-size: 10px;
+        padding: 2px 6px;
+    }
+
+    /* ── Sidebar toggle arrow: hide on mobile (hamburger replaces it) ── */
+    .sidebar-toggle {
+        display: none;
+    }
+
+    /* ── Modals: full-width on mobile ── */
+    .modal-overlay {
+        padding: 12px;
+        align-items: flex-end;
+    }
+
+    .modal {
+        width: 100%;
+        max-width: 100%;
+        max-height: 88vh;
+        border-radius: 20px 20px 0 0;
+    }
+
+    /* Mermaid diagram modal: full screen */
+    .mermaid-modal-content {
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+        max-height: 100%;
+        border-radius: 0;
+    }
+}
+
+/* ── Extra small phones (≤ 480px) ── */
+@media (max-width: 480px) {
+
+    /* Even more compact welcome */
+    .welcome-title {
+        font-size: 20px;
+    }
+
+    /* Landing hero: smaller font */
+    .hero-title {
+        font-size: 30px;
+        letter-spacing: -0.5px;
+    }
+
+    /* Hide message stat pills on tiny screens to save space */
+    .message-stats-group {
+        display: none;
+    }
+
+    .message-footer {
+        padding-top: 8px;
+    }
+
+    /* Char count: hide on tiny screens */
+    .char-count {
+        display: none;
+    }
+
+    /* Reduce icon button padding */
+    .btn-icon {
+        padding: 6px;
+    }
+
+}
+
+@media (max-width: 600px) {
+    /* Compact connection status as a round indicator dot */
+    .connection-status {
+        padding: 6px !important;
+        border-radius: 50% !important;
+        min-width: 24px;
+        height: 24px;
+        justify-content: center;
+        align-items: center;
+        gap: 0 !important;
+    }
+    .connection-status .status-text {
+        display: none !important;
+    }
+    
+    /* Compact credit pill on mobile */
+    #creditPill {
+        padding: 5px 8px !important;
+        font-size: 10px !important;
+    }
+    #creditPill svg {
+        display: none !important;
+    }
+}
+
+@media (max-width: 400px) {
+    /* Hide connection status indicator completely on extra small screens */
+    #connectionStatus {
+        display: none !important;
     }
 }

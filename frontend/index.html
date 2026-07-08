@@ -12,7 +12,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=2.0" />
+    <link rel="stylesheet" href="styles.css?v=2.1" />
     <!-- Libraries for enhanced functionality -->
     <script>
         window.MathJax = {
@@ -34,6 +34,9 @@
 </head>
 
 <body>
+    <!-- Mobile sidebar dim overlay -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
     <!-- ================= SIDEBAR ================= -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
@@ -129,12 +132,19 @@
                     <line x1="3" y1="18" x2="21" y2="18" />
                 </svg>
             </button>
-            <div class="connection-status" id="connectionStatus">
-                <span class="status-dot"></span>
-                <span class="status-text">Connecting...</span>
-                <span class="pipeline-step" id="pipelineStep"></span>
-            </div>
+
             <div class="top-bar-actions" style="display: flex; gap: 8px; align-items: center;">
+                <!-- Connection Status Pill -->
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Checking...</span>
+                </div>
+                <!-- Credit Pill -->
+                <div id="creditPill" style="display:none; align-items:center; gap:6px; padding:5px 11px; border-radius:20px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); font-size:12px; font-weight:600; color:var(--primary-light); cursor:default; transition:all 0.3s ease; white-space:nowrap;" title="Daily credits remaining">
+                    <svg id="creditIcon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                    <span id="creditText">-- / 20</span>
+                    <span id="planBadge" style="display:none; background:linear-gradient(135deg,#6366f1,#a78bfa); color:white; padding:2px 7px; border-radius:10px; font-size:10px; font-weight:700; letter-spacing:0.3px;">PRO</span>
+                </div>
                 <!-- User Profile Menu -->
                 <div class="user-profile-menu" id="userProfileMenu" style="position: relative; margin-right: 8px;">
                     <button class="user-avatar-btn" id="userProfileBtn">
@@ -164,13 +174,7 @@
                     </div>
                 </div>
 
-                <button class="btn-icon" id="themeToggle" title="Toggle theme">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        id="themeIcon">
-                        <!-- Default to moon/dark mode -->
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                    </svg>
-                </button>
+
                 <button class="btn-icon" id="settingsToggleBtn" title="Settings">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="3"></circle>
@@ -559,6 +563,8 @@
                 <div style="height: 1px; background: var(--glass-border); margin: 24px 0 16px 0;"></div>
 
                 <form id="passwordForm" style="display: flex; flex-direction: column; gap: 16px;">
+                    <!-- Hidden username field for accessibility -->
+                    <input type="text" id="passwordFormUsername" autocomplete="username" style="display: none;" readonly />
                     <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">Change
                         Password</h3>
 
@@ -604,30 +610,30 @@
             <!-- Overview will be injected here -->
         </div>
 
-        <div class="study-guardrails-card dismissible-card" id="studyGuardrailsCard">
+        <!-- <div class="study-guardrails-card dismissible-card" id="studyGuardrailsCard">
             <button class="card-dismiss-btn" onclick="this.parentElement.style.display='none'" title="Dismiss">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="18" y1="6" x2="6" y2="18" />
                     <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
             </button>
-            <!-- <h3>Grounded Study Guardrails</h3>
+             <h3>Grounded Study Guardrails</h3>
             <ul>
                 <li>Answers should stay tied to uploaded or retrieved evidence.</li>
                 <li>Claims without support should be marked as uncertain.</li>
                 <li>Tables, formulas, and visuals should be explained instead of only quoted.</li>
-            </ul> -->
-        </div>
+            </ul>
+        </div> -->
 
         <div class="sources-tabs">
-            <button class="sources-tab active" data-tab="chunks">Knowledge</button>
-            <button class="sources-tab" data-tab="papers">Network</button>
-            <button class="sources-tab" data-tab="graph">Graph View</button>
+            <button class="sources-tab" data-tab="chunks" style="display: none;">Knowledge</button>
+            <button class="sources-tab active" data-tab="papers">Network</button>
+            <button class="sources-tab" data-tab="graph" style="display: none;">Graph View</button>
             <button class="sources-tab" data-tab="datasets">Datasets</button>
         </div>
 
         <div class="sources-content" id="sourcesContent">
-            <div class="sources-tab-content active" id="tabChunks">
+            <div class="sources-tab-content" id="tabChunks">
                 <div class="sources-empty">
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
                         opacity="0.4">
@@ -637,7 +643,7 @@
                     <span>Send a query to see retrieved Supabase chunks</span>
                 </div>
             </div>
-            <div class="sources-tab-content" id="tabPapers">
+            <div class="sources-tab-content active" id="tabPapers">
                 <div class="sources-empty">
                     <span>Send a query to see research network</span>
                 </div>
@@ -657,7 +663,8 @@
                 <div class="sources-empty">
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
                         opacity="0.4">
-                        <path d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z" />
+                        <path
+                            d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z" />
                         <path d="M2 7c0 2.76 4.477 5 10 5s10-2.24 10-5" />
                         <path d="M2 12c0 2.76 4.477 5 10 5s10-2.24 10-5" />
                     </svg>
@@ -684,7 +691,7 @@
             <form id="signin-form" class="auth-form">
                 <div class="form-group">
                     <label for="signin-email">Email Address</label>
-                    <input type="email" id="signin-email" required placeholder="name@university.edu">
+                    <input type="email" id="signin-email" autocomplete="username" required placeholder="name@university.edu">
                 </div>
                 <div class="form-group">
                     <label for="signin-password">Password</label>
@@ -699,7 +706,7 @@
             <form id="signup-form" class="auth-form" style="display: none;">
                 <div class="form-group">
                     <label for="signup-email">Email Address</label>
-                    <input type="email" id="signup-email" required placeholder="name@university.edu">
+                    <input type="email" id="signup-email" autocomplete="username" required placeholder="name@university.edu">
                 </div>
                 <div class="form-group">
                     <label for="signup-password">Password</label>

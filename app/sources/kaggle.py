@@ -134,3 +134,55 @@ async def enrich_datasets_with_kaggle(datasets: List[Dict[str, Any]]) -> List[Di
     # Concurrently enrich all datasets
     tasks = [enrich_single(ds) for ds in datasets]
     return list(await asyncio.gather(*tasks))
+
+
+async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """
+    Search Kaggle for public datasets matching a query and return up to `limit` results.
+    """
+    username = os.getenv("KAGGLE_USERNAME")
+    key = os.getenv("KAGGLE_KEY")
+
+    if not username or not key:
+        log.warning("Kaggle credentials not configured in environment variables.")
+        return []
+
+    clean_query = query.strip()
+    if not clean_query:
+        return []
+
+    url = "https://www.kaggle.com/api/v1/datasets/list"
+    params = {"search": clean_query}
+
+    headers = {
+        "User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"
+    }
+
+    try:
+        async with httpx.AsyncClient(headers=headers, timeout=8.0) as client:
+            resp = await client.get(url, params=params, auth=(username, key))
+            if resp.status_code != 200:
+                return []
+
+            data = resp.json()
+            if not isinstance(data, list) or not data:
+                return []
+
+            results = []
+            for item in data[:limit]:
+                ref = item.get("ref", "")
+                results.append({
+                    "name": item.get("title", ref.split("/")[-1]),
+                    "full_name": ref,
+                    "url": item.get("url", f"https://www.kaggle.com/datasets/{ref}"),
+                    "description": item.get("subtitle", ""),
+                    "kaggle_url": item.get("url", f"https://www.kaggle.com/datasets/{ref}"),
+                    "kaggle_votes": item.get("voteCount", 0),
+                    "source": "kaggle_search"
+                })
+            return results
+
+    except Exception as e:
+        log.error(f"Error querying Kaggle API for bulk query '{clean_query}': {e}")
+        return []
+

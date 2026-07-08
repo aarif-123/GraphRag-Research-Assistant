@@ -48,6 +48,7 @@
             <a href="#tech-stack" class="nav-link" onclick="closeMobileMenu()">Tech Stack</a>
             <a href="#playground" class="nav-link" onclick="closeMobileMenu()">Playground</a>
             <a href="#comparison" class="nav-link" onclick="closeMobileMenu()">Comparison</a>
+            <a href="#pricing" class="nav-link" onclick="closeMobileMenu()">Pricing</a>
             <a href="#testimonials" class="nav-link" onclick="closeMobileMenu()">Testimonials</a>
             <a href="/docs" class="nav-link" target="_blank">API Docs</a>
         </nav>
@@ -286,6 +287,110 @@
             </div>
         </section>
 
+        <!-- Pricing Section -->
+        <section id="pricing" class="pricing-section">
+            <h2 class="section-title">Flexible Plans for Every Researcher</h2>
+            <p class="section-subtitle" style="color: var(--text-secondary); max-width: 600px; margin: 10px auto 40px auto; font-size: 16px;">
+                Choose the plan that fits your research needs. Unlock advanced GraphRAG intelligence and anti-hallucination tools.
+            </p>
+            <div class="pricing-grid">
+                <!-- Free Tier -->
+                <div class="pricing-card">
+                    <h3 class="plan-name">Credit-Free</h3>
+                    <p class="plan-desc">Essential academic exploration tools</p>
+                    <div class="plan-price-box">
+                        <span class="plan-price">$0</span>
+                        <span class="plan-duration">/ forever</span>
+                    </div>
+                    <ul class="plan-features">
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>20 daily research credits</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>GraphRAG multi-hop retrieval</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>Anti-hallucination verification</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>arXiv & Semantic Scholar search</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>PRISMA & Taxonomy visuals</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>Context limit (top_k = 8)</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>1 PDF upload / week</span>
+                        </li>
+                        <li class="locked">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                            <span>Literature surveys & bulk search</span>
+                        </li>
+                    </ul>
+                    <button class="btn btn-secondary" onclick="openAuthModal('signup')">Start Researching Free</button>
+                </div>
+
+                <!-- Pro Tier -->
+                <div class="pricing-card popular">
+                    <span class="popular-badge">Recommended</span>
+                    <h3 class="plan-name">Pro Researcher</h3>
+                    <p class="plan-desc">For advanced analysis and publication-grade output</p>
+                    <div class="plan-price-box">
+                        <span class="plan-price">$14</span>
+                        <span class="plan-duration">/ month</span>
+                    </div>
+                    <ul class="plan-features">
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <strong>Everything in Free</strong>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span><strong>Unlimited</strong> queries & chat</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span><strong>Unlimited</strong> literature surveys</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span><strong>Unlimited</strong> timelines & comparison</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>Bulk search (up to 10 queries/batch)</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>Full citation networks (50 nodes)</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>10 PDF uploads / month</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>Heavy model access (Llama-3.3-70B)</span>
+                        </li>
+                        <li class="included">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>OpenAI-compatible API access (/v1/)</span>
+                        </li>
+                    </ul>
+                    <button class="btn btn-primary" onclick="openAuthModal('signup')">Upgrade to Pro</button>
+                </div>
+            </div>
+        </section>
+
         <!-- Testimonials Section -->
         <section id="testimonials" class="testimonials-section">
             <h2 class="section-title">Grounded in Research Excellence</h2>
@@ -379,7 +484,7 @@
                     <li><a href="#features">Features</a></li>
                     <li><a href="#tech-stack">Tech Stack</a></li>
                     <li><a href="#playground">Interactive Sandbox</a></li>
-                    <li><a href="#pricing" onclick="event.preventDefault(); alert('Aether is currently free for academic researchers.')">Pricing (Free)</a></li>
+                    <li><a href="#pricing">Pricing Plans</a></li>
                 </ul>
             </div>
             <div class="footer-col">
@@ -730,7 +835,7 @@
             statusText.className = 'newsletter-status-text status-info';
             
             setTimeout(() => {
-                statusText.textContent = '✓ Subscribed successfully!';
+                statusText.textContent = '\u2713 Subscribed successfully!';
                 statusText.className = 'newsletter-status-text status-success';
                 emailInput.value = '';
                 btn.disabled = false;

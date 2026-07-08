@@ -106,6 +106,9 @@ async def search_papers_s2(query: str, limit: int = 8) -> List[Dict]:
     Search Semantic Scholar for papers matching a query string.
     Returns list of normalized paper dicts. Returns [] on error.
     """
+    if not _S2_API_KEY:
+        log.debug("S2_API_KEY not configured. Skipping Semantic Scholar search.")
+        return []
     if not query.strip():
         return []
 
@@ -157,6 +160,8 @@ async def get_paper_by_arxiv_id_s2(arxiv_id: str) -> Optional[Dict]:
     Fetch a single paper from Semantic Scholar by its arXiv ID.
     Returns normalized paper dict or None.
     """
+    if not _S2_API_KEY:
+        return None
     if not arxiv_id:
         return None
 
@@ -209,6 +214,8 @@ async def get_paper_references_s2(
     Get the top references (papers cited by) a given S2 paper.
     Returns list of lightweight paper dicts.
     """
+    if not _S2_API_KEY:
+        return []
     if not s2_paper_id:
         return []
 
@@ -262,6 +269,8 @@ async def enrich_arxiv_papers_with_s2(
     Returns a NEW list with merged data. Falls back gracefully per paper.
     Strategy: lookup each paper by arXiv ID concurrently.
     """
+    if not _S2_API_KEY:
+        return arxiv_papers
     if not arxiv_papers:
         return []
 
