@@ -386,7 +386,7 @@
                             <span>OpenAI-compatible API access (/v1/)</span>
                         </li>
                     </ul>
-                    <button class="btn btn-primary" onclick="openAuthModal('signup')">Upgrade to Pro</button>
+                    <button class="btn btn-primary" onclick="localStorage.setItem('trigger_upgrade', 'true'); openAuthModal('signup')">Upgrade to Pro</button>
                 </div>
             </div>
         </section>

@@ -3241,6 +3241,16 @@ async function initAuth() {
             if (cRes.ok) {
                 const cData = await cRes.json();
                 updateCreditPill(cData);
+
+                // If user came from 'Upgrade to Pro' click on landing page
+                if (localStorage.getItem('trigger_upgrade') === 'true') {
+                    localStorage.removeItem('trigger_upgrade');
+                    if (cData.plan !== 'pro') {
+                        if (els.paymentModal) {
+                            els.paymentModal.classList.add('visible');
+                        }
+                    }
+                }
             }
         } catch (_) { /* silent */ }
     } catch (e) {
