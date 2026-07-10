@@ -2354,6 +2354,19 @@ def is_simple_link_paste(text: str, urls: List[str]) -> bool:
 
 
 async def parse_pdf_from_url(url: str) -> Tuple[str, List[str]]:
+    # Local uploaded PDF bypass
+    if "/api/pdf/" in url:
+        try:
+            pdf_id = url.split("/api/pdf/")[-1].replace(".pdf", "")
+            doc = await asyncio.to_thread(db.uploaded_pdfs.find_one, {"_id": pdf_id})
+            if doc:
+                return doc["text"], []
+            else:
+                raise Exception("Uploaded PDF document not found.")
+        except Exception as e:
+            log.error(f"Error fetching local PDF from DB: {e}")
+            raise Exception(f"Local PDF error: {str(e)}")
+
     # Convert arXiv abstract URL to PDF URL
     pdf_url = url
     if "arxiv.org/abs/" in url:
@@ -5798,6 +5811,68 @@ def root():
 def read_styles():
     from fastapi.responses import FileResponse
     return FileResponse("frontend/styles.css")
+
+
+@app.post("/api/upload/pdf")
+async def upload_pdf(request: Request, file: UploadFile = File(...)):
+    await set_user_context(request)
+    
+    filename = file.filename or "document.pdf"
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+        
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Empty PDF file.")
+            
+        def _extract():
+            doc = fitz.open(stream=content, filetype="pdf")
+            text_content = []
+            for page in doc:
+                text_content.append(page.get_text())
+            return "\n".join(text_content).strip()
+            
+        extracted_text = await asyncio.to_thread(_extract)
+        if not extracted_text:
+            raise HTTPException(status_code=400, detail="The PDF contains no readable text.")
+            
+        pdf_id = f"pdf-{uuid.uuid4()}"
+        
+        # Save to MongoDB
+        await asyncio.to_thread(
+            db.uploaded_pdfs.insert_one,
+            {
+                "_id": pdf_id,
+                "name": filename,
+                "text": extracted_text,
+                "created_at": datetime.now(timezone.utc)
+            }
+        )
+        
+        pdf_url = f"/api/pdf/{pdf_id}.pdf"
+        
+        return {
+            "file_id": pdf_id,
+            "url": pdf_url,
+            "name": filename,
+            "text_length": len(extracted_text)
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        log.error(f"Error parsing PDF file upload: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
+
+
+@app.get("/api/pdf/{pdf_id}")
+async def get_pdf_text(pdf_id: str, request: Request):
+    await set_user_context(request)
+    pdf_id = pdf_id.replace(".pdf", "")
+    doc = await asyncio.to_thread(db.uploaded_pdfs.find_one, {"_id": pdf_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="PDF not found.")
+    return {"text": doc["text"], "name": doc.get("name", "Document")}
 
 
 @app.post("/api/audio/transcribe")

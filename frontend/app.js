@@ -957,6 +957,62 @@ function handleAttachAction(action) {
     setAttachMenuOpen(false);
 }
 
+async function stagePdfFiles(pdfFiles) {
+    const files = Array.from(pdfFiles || []);
+    if (!files.length) return;
+
+    for (const file of files) {
+        const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        state.pendingAttachments.push({
+            id: id,
+            name: file.name,
+            size: file.size,
+            mime: 'application/pdf',
+            isLoading: true
+        });
+        renderAttachmentTray();
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const token = localStorage.getItem('aether_token');
+            const headers = {};
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            const res = await fetch('/api/upload/pdf', {
+                method: 'POST',
+                headers: headers,
+                body: formData
+            });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.detail || 'Upload failed');
+            }
+
+            const data = await res.json();
+
+            // Update state
+            const idx = state.pendingAttachments.findIndex(item => item.id === id);
+            if (idx !== -1) {
+                state.pendingAttachments[idx].isLoading = false;
+                state.pendingAttachments[idx].url = window.location.origin + data.url;
+                state.pendingAttachments[idx].mime = 'text/url'; // Treat as URL to compile into fullQuery
+            }
+            renderAttachmentTray();
+        } catch (e) {
+            console.error('Failed to upload PDF:', e);
+            alert(`Failed to upload ${file.name}: ${e.message}`);
+            state.pendingAttachments = state.pendingAttachments.filter(item => item.id !== id);
+            renderAttachmentTray();
+        }
+    }
+}
+
+
 function processSelectedFiles(fileList, opts = {}) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
@@ -1044,7 +1100,15 @@ function renderAttachmentTray() {
         `;
         let iconBg = '';
 
-        if (file.mime === 'text/url') {
+        if (file.isLoading) {
+            kind = 'Uploading...';
+            iconBg = 'background: rgba(167, 139, 250, 0.15); color: var(--accent-purple);';
+            iconSvg = `
+                <svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="width: 18px; height: 18px; animation: spin 0.8s linear infinite;">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-dasharray="31.4" stroke-dashoffset="10"></circle>
+                </svg>
+            `;
+        } else if (file.mime === 'text/url') {
             kind = 'Link';
             iconBg = 'background: rgba(34, 211, 238, 0.15); color: var(--accent-cyan); border: 1px solid rgba(34, 211, 238, 0.3);';
             iconSvg = `
@@ -1056,7 +1120,19 @@ function renderAttachmentTray() {
         } else {
             if (file.mime.startsWith('image/')) kind = 'image';
             if (file.mime.startsWith('video/')) kind = 'video';
-            if (file.mime === 'application/pdf') kind = 'PDF document';
+            if (file.mime === 'application/pdf' || file.name.endsWith('.pdf')) {
+                kind = 'PDF document';
+                iconBg = 'background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);';
+                iconSvg = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                `;
+            }
             if (file.name.endsWith('.docx') || file.name.endsWith('.doc')) kind = 'Word document';
         }
 
@@ -1095,6 +1171,8 @@ function renderAttachmentTray() {
             }
         });
     });
+
+    updateSendButtonState();
 }
 
 
@@ -1702,15 +1780,20 @@ function setSourcesLoading() {
 // INPUT HANDLING
 // -------------------------------------------------------------------------
 
+function updateSendButtonState() {
+    if (!els.sendBtn || !els.queryInput) return;
+    const val = els.queryInput.value;
+    const hasUploading = state.pendingAttachments.some(att => att.isLoading);
+    els.sendBtn.disabled = val.trim().length === 0 || state.isLoading || hasUploading;
+}
+
 function handleInputChange() {
     if (!els.queryInput) return;
     const val = els.queryInput.value;
     if (els.charCount) {
         els.charCount.textContent = `${val.length}/2000`;
     }
-    if (els.sendBtn) {
-        els.sendBtn.disabled = val.trim().length === 0 || state.isLoading;
-    }
+    updateSendButtonState();
 
     // Auto resize
     els.queryInput.style.height = 'auto';
@@ -1901,7 +1984,7 @@ async function sendQuery() {
     }
 
     state.isLoading = false;
-    els.sendBtn.disabled = els.queryInput.value.trim().length === 0;
+    updateSendButtonState();
 }
 
 // -------------------------------------------------------------------------
