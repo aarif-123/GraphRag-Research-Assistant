@@ -78,6 +78,10 @@ const els = {
     profileModal: $('#profileModal'),
     profileModalClose: $('#profileModalClose'),
     profileSettingsBtn: $('#profileSettingsBtn'),
+    upgradeDropdownBtn: $('#upgradeDropdownBtn'),
+    paymentModal: $('#paymentModal'),
+    paymentModalClose: $('#paymentModalClose'),
+    checkoutPayBtn: $('#checkoutPayBtn'),
 };
 
 // INIT
@@ -489,6 +493,40 @@ function initEventListeners() {
                 if (institutionInput) institutionInput.value = meta.institution || '';
                 if (roleSelect) roleSelect.value = meta.role || '';
 
+                // Fetch and display payment history
+                try {
+                    const payHistoryRes = await fetch('/api/auth/payments/history', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (payHistoryRes.ok) {
+                        const history = await payHistoryRes.json();
+                        const historyList = document.getElementById('billingHistoryList');
+                        if (historyList) {
+                            if (history.length === 0) {
+                                historyList.innerHTML = '<div style="font-size: 13px; color: var(--text-secondary); text-align: center; padding: 12px 0;">No subscription or payment records found.</div>';
+                            } else {
+                                historyList.innerHTML = history.map(item => {
+                                    const dateStr = item.created_at ? new Date(item.created_at).toLocaleString() : 'N/A';
+                                    return `
+                                        <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--surface-glass-border); border-radius: var(--radius-md); padding: 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12px;">
+                                            <div style="display: flex; justify-content: space-between; font-weight: 600;">
+                                                <span style="color: var(--text-primary); text-transform: uppercase;">${item.plan} Plan Upgrade</span>
+                                                <span style="color: var(--accent-emerald);">₹${item.amount.toFixed(2)}</span>
+                                            </div>
+                                            <div style="display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 11px;">
+                                                <span>Ref: ${item.razorpay_payment_id}</span>
+                                                <span>${dateStr}</span>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('');
+                            }
+                        }
+                    }
+                } catch (payErr) {
+                    console.error("Failed to load payment history:", payErr);
+                }
+
                 els.profileModal.classList.add('visible');
             } catch (err) {
                 console.error("Failed to fetch profile details:", err);
@@ -703,6 +741,53 @@ function initEventListeners() {
             }
         }
     });
+
+    // Razorpay Upgrade Listeners
+    if (els.upgradeDropdownBtn) {
+        els.upgradeDropdownBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (dropdown) dropdown.style.display = 'none';
+            if (els.paymentModal) els.paymentModal.classList.add('visible');
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        const upgradeLink = e.target.closest('a[href="/upgrade"]');
+        if (upgradeLink) {
+            e.preventDefault();
+            if (els.paymentModal) els.paymentModal.classList.add('visible');
+        }
+    });
+
+    if (els.paymentModalClose) {
+        els.paymentModalClose.addEventListener('click', () => {
+            if (els.paymentModal) els.paymentModal.classList.remove('visible');
+        });
+    }
+
+    if (els.paymentModal) {
+        els.paymentModal.addEventListener('click', (e) => {
+            if (e.target === els.paymentModal) {
+                els.paymentModal.classList.remove('visible');
+            }
+        });
+    }
+
+    if (els.checkoutPayBtn) {
+        els.checkoutPayBtn.addEventListener('click', async () => {
+            const btn = els.checkoutPayBtn;
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<span>Initiating Checkout...</span><div class="loading-spinner" style="width:14px; height:14px; border-width:2px; margin:0; display:inline-block; border-color: rgba(255,255,255,0.3) rgba(255,255,255,0.3) transparent white; border-radius:50%; animation: spin 0.8s linear infinite;"></div>`;
+            
+            try {
+                await startRazorpayCheckout();
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
+        });
+    }
 }
 
 // SIDEBAR
@@ -1859,6 +1944,7 @@ function updateCreditPill(credits) {
         pill.style.color = '#a78bfa';
         if (badge) badge.style.display = 'inline';
         if (icon) icon.setAttribute('stroke', '#a78bfa');
+        if (els.upgradeDropdownBtn) els.upgradeDropdownBtn.style.display = 'none';
     } else {
         const remaining = credits.credits_remaining ?? 0;
         const limit = credits.credits_limit ?? 20;
@@ -1866,6 +1952,7 @@ function updateCreditPill(credits) {
 
         text.textContent = `${remaining} / ${limit}`;
         if (badge) badge.style.display = 'none';
+        if (els.upgradeDropdownBtn) els.upgradeDropdownBtn.style.display = 'flex';
 
         // Colour the pill by remaining ratio
         if (pct > 0.5) {
@@ -3112,6 +3199,7 @@ function startNewChat() {
 function updateUserUI(user) {
     if (!user) return;
     const email = user.email || 'user@university.edu';
+    state.userEmail = email;
     const metadata = user.user_metadata || {};
     const displayName = metadata.full_name || email;
     const emailText = document.getElementById('userEmailText');
@@ -3479,5 +3567,95 @@ function fallbackCopyTextToClipboard(text) {
         return false;
     }
 }
+
+
+async function startRazorpayCheckout() {
+    const token = localStorage.getItem('aether_token');
+    if (!token) {
+        alert("Please log in to upgrade your plan.");
+        window.location.href = '/';
+        return;
+    }
+
+    try {
+        // Fetch order details from backend
+        const res = await fetch('/api/auth/razorpay/create-order', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.detail || "Failed to initiate checkout");
+        }
+
+        const data = await res.json();
+
+        // Verify Razorpay Checkout library is loaded
+        if (typeof Razorpay === 'undefined') {
+            throw new Error("Razorpay Checkout SDK not loaded. Please check your internet connection.");
+        }
+
+        const options = {
+            "key": data.key_id,
+            "amount": data.amount,
+            "currency": data.currency,
+            "name": "Aether GraphRAG",
+            "description": "Pro Plan Upgrade",
+            "order_id": data.order_id,
+            "handler": async function (response) {
+                try {
+                    // Verify payment on the server
+                    const verifyRes = await fetch('/api/auth/razorpay/verify-payment', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            razorpay_order_id: response.razorpay_order_id,
+                            razorpay_payment_id: response.razorpay_payment_id,
+                            razorpay_signature: response.razorpay_signature
+                        })
+                    });
+
+                    if (verifyRes.ok) {
+                        if (els.paymentModal) els.paymentModal.classList.remove('visible');
+                        alert("Upgrade successful! Welcome to Aether Pro.");
+                        window.location.reload();
+                    } else {
+                        const verifyErr = await verifyRes.json();
+                        alert("Payment verification failed: " + (verifyErr.detail || "Invalid transaction signature"));
+                    }
+                } catch (err) {
+                    console.error("Signature verification failed:", err);
+                    alert("Error verifying payment signature. Please contact support.");
+                }
+            },
+            "prefill": {
+                "email": "",
+                "contact": ""
+            },
+            "theme": {
+                "color": "#6366f1"
+            }
+        };
+
+        const rzp = new Razorpay(options);
+        
+        rzp.on('payment.failed', function (response){
+            alert("Payment failed: " + (response.error.description || "Checkout cancelled"));
+        });
+
+        rzp.open();
+
+    } catch (err) {
+        console.error("Razorpay initiation error:", err);
+        alert("Could not start Razorpay checkout: " + err.message);
+    }
+}
+
 
 

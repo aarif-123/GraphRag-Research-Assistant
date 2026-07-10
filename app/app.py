@@ -149,6 +149,10 @@ load_dotenv(".env", override=False)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
+
+
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "aether_research_assistant")
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-aether-key-change-in-prod")
@@ -492,7 +496,9 @@ class Pool:
             db = mongo_client[MONGODB_DB_NAME]
             # Create a unique index on email
             db.users.create_index("email", unique=True)
-            log.info("MongoDB connected and unique index on email verified")
+            db.payments.create_index("user_id")
+            db.payments.create_index("razorpay_payment_id", unique=True)
+            log.info("MongoDB connected and unique indexes on email and payments verified")
         except Exception as e:
             errors.append(f"MongoDB: {e}")
             log.error(f"MongoDB connection failed: {e}")
@@ -5249,6 +5255,153 @@ async def stripe_webhook(request: Request):
             log.info(f"[Stripe] Downgraded customer {customer_id} to Free")
 
     return {"received": True, "event": event_type}
+
+
+class RazorpayVerifyRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+@app.post("/api/auth/razorpay/create-order")
+async def razorpay_create_order(request: Request):
+    token = get_token_from_request(request)
+    user = await get_authenticated_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
+        raise HTTPException(status_code=500, detail="Razorpay is not configured on the server")
+
+    amount = 49900  # Rs 499 in paise
+    receipt_id = f"rcpt_{user['id'][:8]}_{int(time.time())}"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.razorpay.com/v1/orders",
+                auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
+                json={
+                    "amount": amount,
+                    "currency": "INR",
+                    "receipt": receipt_id
+                },
+                timeout=10.0
+            )
+            
+            if response.status_code != 200:
+                log.error(f"Razorpay order creation failed: {response.text}")
+                raise HTTPException(status_code=response.status_code, detail="Failed to create order with Razorpay")
+                
+            order_data = response.json()
+            return {
+                "order_id": order_data["id"],
+                "amount": order_data["amount"],
+                "currency": order_data["currency"],
+                "key_id": RAZORPAY_KEY_ID
+            }
+    except httpx.RequestError as e:
+        log.error(f"HTTP request to Razorpay failed: {e}")
+        raise HTTPException(status_code=500, detail="Could not connect to Razorpay")
+    except Exception as e:
+        log.error(f"Error creating Razorpay order: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/auth/razorpay/verify-payment")
+async def razorpay_verify_payment(req: RazorpayVerifyRequest, request: Request):
+    token = get_token_from_request(request)
+    user = await get_authenticated_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if not RAZORPAY_KEY_SECRET:
+        raise HTTPException(status_code=500, detail="Razorpay secret is not configured on the server")
+
+    import hmac
+    import hashlib
+
+    msg = f"{req.razorpay_order_id}|{req.razorpay_payment_id}"
+    expected = hmac.new(
+        RAZORPAY_KEY_SECRET.encode(),
+        msg.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(expected, req.razorpay_signature):
+        log.warning(f"Razorpay signature mismatch for user {user['email']}")
+        raise HTTPException(status_code=400, detail="Payment signature verification failed")
+
+    # Upgrade the user's plan to pro in MongoDB and record the payment
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        
+        await asyncio.to_thread(
+            db.users.update_one,
+            {"_id": user["id"]},
+            {"$set": {
+                "plan": "pro",
+                "razorpay_order_id": req.razorpay_order_id,
+                "razorpay_payment_id": req.razorpay_payment_id,
+                "updated_at": now,
+            }}
+        )
+        
+        # Save detailed payment record in payments collection
+        payment_record = {
+            "user_id": user["id"],
+            "email": user["email"],
+            "razorpay_order_id": req.razorpay_order_id,
+            "razorpay_payment_id": req.razorpay_payment_id,
+            "razorpay_signature": req.razorpay_signature,
+            "amount": 49900,  # Rs 499 in paise
+            "currency": "INR",
+            "plan": "pro",
+            "status": "completed",
+            "created_at": now
+        }
+        await asyncio.to_thread(
+            db.payments.insert_one,
+            payment_record
+        )
+        
+        log.info(f"[Razorpay] Successfully upgraded user {user['email']} to Pro and saved payment record.")
+        return {"status": "success", "message": "Successfully upgraded to Pro"}
+    except Exception as e:
+        log.error(f"Error upgrading user plan/saving payment in MongoDB: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update plan or save payment record")
+
+
+@app.get("/api/auth/payments/history")
+async def get_payment_history(request: Request):
+    token = get_token_from_request(request)
+    user = await get_authenticated_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    try:
+        # Find all payments for this user, sorted by created_at descending
+        cursor = db.payments.find({"user_id": user["id"]}).sort("created_at", -1)
+        payments = await asyncio.to_thread(list, cursor)
+        
+        formatted_payments = []
+        for p in payments:
+            formatted_payments.append({
+                "id": str(p.get("_id")),
+                "razorpay_order_id": p.get("razorpay_order_id"),
+                "razorpay_payment_id": p.get("razorpay_payment_id"),
+                "amount": p.get("amount", 0) / 100.0,  # Convert paise to Rs
+                "currency": p.get("currency", "INR"),
+                "plan": p.get("plan", "pro"),
+                "status": p.get("status", "completed"),
+                "created_at": p.get("created_at").isoformat() if isinstance(p.get("created_at"), datetime) else None
+            })
+            
+        return formatted_payments
+    except Exception as e:
+        log.error(f"Error fetching payment history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch payment history")
 
 
 # ================================================================
