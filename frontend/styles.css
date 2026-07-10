@@ -3387,7 +3387,7 @@ textarea {
 .input-wrapper {
     flex-direction: column;
     padding: 0;
-    overflow: hidden;
+    overflow: visible;
     transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
 }
 
