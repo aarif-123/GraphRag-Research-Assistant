@@ -1,15 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Aether GraphRAG Research Assistant - AI-powered academic research with graph-augmented retrieval and anti-hallucination verification.">
+    <meta name="description"
+        content="Aether GraphRAG Research Assistant - AI-powered academic research with graph-augmented retrieval and anti-hallucination verification.">
     <title>Aether — GraphRAG Research Assistant</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="styles.css?v=2.0">
 </head>
+
 <body class="landing-body">
     <!-- Animated Network Graph Canvas -->
     <canvas id="network-canvas" class="network-canvas"></canvas>
@@ -56,7 +61,8 @@
             <button class="btn btn-secondary" onclick="openAuthModal('signin'); closeMobileMenu()">Sign In</button>
             <button class="btn btn-primary" onclick="openAuthModal('signup'); closeMobileMenu()">Get Started</button>
         </div>
-        <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Toggle menu" onclick="toggleMobileMenu()">
+        <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Toggle menu"
+            onclick="toggleMobileMenu()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 6h16M4 12h16M4 18h16" class="hamburger-icon" id="hamburger-icon"></path>
                 <path d="M18 6L6 18M6 6l12 12" class="close-icon" id="close-icon" style="display:none;"></path>
@@ -71,7 +77,8 @@
             <div class="hero-badge">Next-Gen Academic Intelligence</div>
             <h1 class="hero-title">Decipher the <span class="gradient-text">Academic Universe</span></h1>
             <p class="hero-subtitle">
-                Aether combines advanced GraphRAG, citation traversal networks, and real-time anti-hallucination verification to transform how you analyze and synthesize scientific literature.
+                Aether combines advanced GraphRAG, citation traversal networks, and real-time anti-hallucination
+                verification to transform how you analyze and synthesize scientific literature.
             </p>
             <div class="hero-actions">
                 <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start Researching Free</button>
@@ -102,30 +109,35 @@
                 <div class="feature-card">
                     <div class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                         </svg>
                     </div>
                     <h3 class="feature-name">GraphRAG Augmentation</h3>
-                    <p class="feature-description">Retrieves multi-hop facts and relationships directly from Neo4j citation and author graphs, mapping connections standard search engines miss.</p>
+                    <p class="feature-description">Retrieves multi-hop facts and relationships directly from Neo4j
+                        citation and author graphs, mapping connections standard search engines miss.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                            <path
+                                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                         </svg>
                     </div>
                     <h3 class="feature-name">Anti-Hallucination Guard</h3>
-                    <p class="feature-description">Every generated claim is verified against source papers. Visual confidence scores guarantee all outputs are scientifically grounded.</p>
+                    <p class="feature-description">Every generated claim is verified against source papers. Visual
+                        confidence scores guarantee all outputs are scientifically grounded.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/>
-                            <path d="M13 6h3a2 2 0 012 2v7M11 18H8a2 2 0 01-2-2V9"/>
+                            <circle cx="18" cy="18" r="3" />
+                            <circle cx="6" cy="6" r="3" />
+                            <path d="M13 6h3a2 2 0 012 2v7M11 18H8a2 2 0 01-2-2V9" />
                         </svg>
                     </div>
                     <h3 class="feature-name">Citation Traversal</h3>
-                    <p class="feature-description">Explore bibliography coupling, prolific author networks, and citation velocities to build chronological evolution tracks of fields.</p>
+                    <p class="feature-description">Explore bibliography coupling, prolific author networks, and citation
+                        velocities to build chronological evolution tracks of fields.</p>
                 </div>
             </div>
         </section>
@@ -137,9 +149,12 @@
                 <div class="tech-card">
                     <div class="tech-icon-container">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/>
-                            <line x1="8.5" y1="7.5" x2="6.5" y2="16.5"/><line x1="15.5" y1="7.5" x2="17.5" y2="16.5"/>
-                            <line x1="8" y1="19" x2="16" y2="19"/>
+                            <circle cx="12" cy="5" r="3" />
+                            <circle cx="5" cy="19" r="3" />
+                            <circle cx="19" cy="19" r="3" />
+                            <line x1="8.5" y1="7.5" x2="6.5" y2="16.5" />
+                            <line x1="15.5" y1="7.5" x2="17.5" y2="16.5" />
+                            <line x1="8" y1="19" x2="16" y2="19" />
                         </svg>
                     </div>
                     <h4>Neo4j Graph</h4>
@@ -148,10 +163,10 @@
                 <div class="tech-card">
                     <div class="tech-icon-container">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
-                            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
-                            <line x1="6" y1="6" x2="6.01" y2="6"/>
-                            <line x1="6" y1="18" x2="6.01" y2="18"/>
+                            <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+                            <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                            <line x1="6" y1="6" x2="6.01" y2="6" />
+                            <line x1="6" y1="18" x2="6.01" y2="18" />
                         </svg>
                     </div>
                     <h4>Supabase Vector</h4>
@@ -160,9 +175,10 @@
                 <div class="tech-card">
                     <div class="tech-icon-container">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
-                            <line x1="12" y1="22.08" x2="12" y2="12"/>
+                            <path
+                                d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                            <line x1="12" y1="22.08" x2="12" y2="12" />
                         </svg>
                     </div>
                     <h4>Groq LLM</h4>
@@ -171,9 +187,9 @@
                 <div class="tech-card">
                     <div class="tech-icon-container">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polygon points="12 2 2 7 12 12 22 7 12 2"/>
-                            <polyline points="2 17 12 22 22 17"/>
-                            <polyline points="2 12 12 17 22 12"/>
+                            <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                            <polyline points="2 17 12 22 22 17" />
+                            <polyline points="2 12 12 17 22 12" />
                         </svg>
                     </div>
                     <h4>FastAPI Core</h4>
@@ -187,24 +203,34 @@
             <div class="playground-header">
                 <span class="playground-badge">Interactive Sandbox</span>
                 <h2 class="section-title">Experience GraphRAG Live</h2>
-                <p class="section-subtitle">Select a research question or type your own to simulate multi-hop graph retrieval and anti-hallucination verification.</p>
+                <p class="section-subtitle">Select a research question or type your own to simulate multi-hop graph
+                    retrieval and anti-hallucination verification.</p>
             </div>
-            
+
             <div class="simulator-card">
                 <div class="simulator-search-bar">
                     <div class="search-input-wrapper">
                         <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                         </svg>
-                        <input type="text" id="sim-search-input" placeholder="Type a research question... e.g. What methods reduce transformer hallucination?" value="What are the latest advances in transformer architectures?">
+                        <input type="text" id="sim-search-input"
+                            placeholder="Type a research question... e.g. What methods reduce transformer hallucination?"
+                            value="What are the latest advances in transformer architectures?">
                     </div>
                     <button class="btn btn-primary" id="sim-run-btn" onclick="runSimulation()">Run Query</button>
                 </div>
-                
+
                 <div class="sim-suggestions">
-                    <button class="sim-chip" onclick="setSimQuery('What are the latest advances in transformer architectures?')">Transformer Advances</button>
-                    <button class="sim-chip" onclick="setSimQuery('Explain graph neural networks and their applications')">Graph Networks</button>
-                    <button class="sim-chip" onclick="setSimQuery('What methods reduce hallucination in large language models?')">Hallucination Mitigation</button>
+                    <button class="sim-chip"
+                        onclick="setSimQuery('What are the latest advances in transformer architectures?')">Transformer
+                        Advances</button>
+                    <button class="sim-chip"
+                        onclick="setSimQuery('Explain graph neural networks and their applications')">Graph
+                        Networks</button>
+                    <button class="sim-chip"
+                        onclick="setSimQuery('What methods reduce hallucination in large language models?')">Hallucination
+                        Mitigation</button>
                 </div>
 
                 <div class="simulator-workspace" id="sim-workspace" style="display: none;">
@@ -217,16 +243,18 @@
                             <!-- Logs will be populated dynamically -->
                         </div>
                     </div>
-                    
+
                     <div class="sim-results">
                         <div class="results-header">
                             <span class="results-title">Verified Synthesis Output</span>
-                            <span class="confidence-pill" id="sim-confidence" style="display: none;">Confidence: 98%</span>
+                            <span class="confidence-pill" id="sim-confidence" style="display: none;">Confidence:
+                                98%</span>
                         </div>
                         <div class="results-body" id="sim-results-text">
-                            <div class="sim-placeholder-text">Run a query to see the fact-checked retrieval synthesis...</div>
+                            <div class="sim-placeholder-text">Run a query to see the fact-checked retrieval synthesis...
+                            </div>
                         </div>
-                        
+
                         <div class="sim-citation-graph" id="sim-citation-graph" style="display: none;">
                             <h5>Visual Citation Graph</h5>
                             <div class="graph-nodes-container" id="sim-graph-nodes">
@@ -290,8 +318,10 @@
         <!-- Pricing Section -->
         <section id="pricing" class="pricing-section">
             <h2 class="section-title">Flexible Plans for Every Researcher</h2>
-            <p class="section-subtitle" style="color: var(--text-secondary); max-width: 600px; margin: 10px auto 40px auto; font-size: 16px;">
-                Choose the plan that fits your research needs. Unlock advanced GraphRAG intelligence and anti-hallucination tools.
+            <p class="section-subtitle"
+                style="color: var(--text-secondary); max-width: 600px; margin: 10px auto 40px auto; font-size: 16px;">
+                Choose the plan that fits your research needs. Unlock advanced GraphRAG intelligence and
+                anti-hallucination tools.
             </p>
             <div class="pricing-grid">
                 <!-- Free Tier -->
@@ -304,35 +334,60 @@
                     </div>
                     <ul class="plan-features">
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>20 daily research credits</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>GraphRAG multi-hop retrieval</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>Anti-hallucination verification</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>arXiv & Semantic Scholar search</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>PRISMA & Taxonomy visuals</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>Context limit (top_k = 8)</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>1 PDF upload / week</span>
                         </li>
                         <li class="locked">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                            </svg>
                             <span>Literature surveys & bulk search</span>
                         </li>
                     </ul>
@@ -350,43 +405,72 @@
                     </div>
                     <ul class="plan-features">
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <strong>Everything in Free</strong>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span><strong>Unlimited</strong> queries & chat</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span><strong>Unlimited</strong> literature surveys</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span><strong>Unlimited</strong> timelines & comparison</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>Bulk search (up to 10 queries/batch)</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>Full citation networks (50 nodes)</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>10 PDF uploads / month</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>Heavy model access (Llama-3.3-70B)</span>
                         </li>
                         <li class="included">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                             <span>OpenAI-compatible API access (/v1/)</span>
                         </li>
                     </ul>
-                    <button class="btn btn-primary" onclick="localStorage.setItem('trigger_upgrade', 'true'); openAuthModal('signup')">Upgrade to Pro</button>
+                    <button class="btn btn-primary"
+                        onclick="localStorage.setItem('trigger_upgrade', 'true'); openAuthModal('signup')">Upgrade to
+                        Pro</button>
                 </div>
             </div>
         </section>
@@ -397,7 +481,9 @@
             <div class="testimonials-grid">
                 <div class="testimonial-card">
                     <div class="testimonial-rating">★★★★★</div>
-                    <p class="testimonial-quote">"Aether transformed how our lab processes literature surveys. Traversing co-citation paths and detecting author clusters automatically saves us weeks of reading."</p>
+                    <p class="testimonial-quote">"Aether transformed how our lab processes literature surveys.
+                        Traversing co-citation paths and detecting author clusters automatically saves us weeks of
+                        reading."</p>
                     <div class="testimonial-user">
                         <div class="user-avatar-initials initials-purple">EL</div>
                         <div class="user-details">
@@ -406,10 +492,12 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="testimonial-card">
                     <div class="testimonial-rating">★★★★★</div>
-                    <p class="testimonial-quote">"The anti-hallucination guard is a game-changer. I can verify every single fact and citation dynamically. Aether guarantees scientific rigor that OpenAI's ChatGPT cannot match."</p>
+                    <p class="testimonial-quote">"The anti-hallucination guard is a game-changer. I can verify every
+                        single fact and citation dynamically. Aether guarantees scientific rigor that OpenAI's ChatGPT
+                        cannot match."</p>
                     <div class="testimonial-user">
                         <div class="user-avatar-initials initials-cyan">MK</div>
                         <div class="user-details">
@@ -418,10 +506,12 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="testimonial-card">
                     <div class="testimonial-rating">★★★★★</div>
-                    <p class="testimonial-quote">"Combining Neo4j relationships with Supabase's vector search creates a three-dimensional view of research. It's the most advanced search engine for papers available."</p>
+                    <p class="testimonial-quote">"Combining Neo4j relationships with Supabase's vector search creates a
+                        three-dimensional view of research. It's the most advanced search engine for papers available."
+                    </p>
                     <div class="testimonial-user">
                         <div class="user-avatar-initials initials-indigo">SL</div>
                         <div class="user-details">
@@ -465,16 +555,29 @@
                         <span class="logo-subtitle">Knowledge Graph AI</span>
                     </div>
                 </div>
-                <p class="footer-tagline">Advanced GraphRAG intelligence for deep academic synthesis and anti-hallucination research.</p>
+                <p class="footer-tagline">Advanced GraphRAG intelligence for deep academic synthesis and
+                    anti-hallucination research.</p>
                 <div class="footer-socials">
-                    <a href="https://github.com/aarif-123/GraphRag-Research-Assistant" target="_blank" aria-label="GitHub" class="social-icon social-github">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+                    <a href="https://github.com/aarif-123/GraphRag-Research-Assistant" target="_blank"
+                        aria-label="GitHub" class="social-icon social-github">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path
+                                d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+                        </svg>
                     </a>
-                    <a href="https://scholar.google.com" target="_blank" aria-label="Scholar" class="social-icon social-scholar">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5"/></svg>
+                    <a href="https://scholar.google.com" target="_blank" aria-label="Scholar"
+                        class="social-icon social-scholar">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+                            <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5" />
+                        </svg>
                     </a>
-                    <a href="https://discord.com" target="_blank" aria-label="Discord" class="social-icon social-discord">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 0 0-9.93 9h0a2 2 0 0 0 .8 1.48l1.3 1.04A10 10 0 0 0 12 22a10 10 0 0 0 7.83-8.48l1.3-1.04a2 2 0 0 0 .8-1.48h0A10 10 0 0 0 12 2z"/></svg>
+                    <a href="https://discord.com" target="_blank" aria-label="Discord"
+                        class="social-icon social-discord">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path
+                                d="M12 2a10 10 0 0 0-9.93 9h0a2 2 0 0 0 .8 1.48l1.3 1.04A10 10 0 0 0 12 22a10 10 0 0 0 7.83-8.48l1.3-1.04a2 2 0 0 0 .8-1.48h0A10 10 0 0 0 12 2z" />
+                        </svg>
                     </a>
                 </div>
             </div>
@@ -491,7 +594,8 @@
                 <h3>Resources</h3>
                 <ul>
                     <li><a href="/docs" target="_blank">API Reference</a></li>
-                    <li><a href="https://github.com/aarif-123/GraphRag-Research-Assistant" target="_blank">Documentation</a></li>
+                    <li><a href="https://github.com/aarif-123/GraphRag-Research-Assistant"
+                            target="_blank">Documentation</a></li>
                     <li><a href="https://arxiv.org" target="_blank">arXiv Scholar</a></li>
                     <li><a href="https://supabase.com" target="_blank">Vector Search</a></li>
                 </ul>
@@ -524,16 +628,19 @@
                         <span id="status-embed" class="micro-dot status-unknown"></span>
                     </div>
                 </div>
-                <p class="status-col-desc">Real-time health of database, graph engine, LLM inference, and embedding models.</p>
+                <p class="status-col-desc">Real-time health of database, graph engine, LLM inference, and embedding
+                    models.</p>
             </div>
             <div class="footer-col newsletter-col">
                 <h3>Research Updates</h3>
-                <p class="newsletter-desc">Subscribe for updates on GraphRAG architecture and academic synthesis tools.</p>
+                <p class="newsletter-desc">Subscribe for updates on GraphRAG architecture and academic synthesis tools.
+                </p>
                 <form id="newsletter-form" class="newsletter-form" onsubmit="handleNewsletter(event)">
                     <div class="newsletter-input-group">
                         <input type="email" id="newsletter-email" placeholder="researcher@institution.edu" required />
                         <button type="submit" class="btn-newsletter" aria-label="Subscribe">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
                                 <line x1="5" y1="12" x2="19" y2="12"></line>
                                 <polyline points="12 5 19 12 12 19"></polyline>
                             </svg>
@@ -554,14 +661,14 @@
         <div class="auth-modal-content">
             <button class="auth-close-btn" onclick="closeAuthModal()">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M18 6L6 18M6 6l12 12"/>
+                    <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
             </button>
-            <div class="auth-tabs">
+            <div class="auth-tabs" id="auth-tabs">
                 <button id="tab-signin" class="auth-tab active" onclick="switchTab('signin')">Sign In</button>
                 <button id="tab-signup" class="auth-tab" onclick="switchTab('signup')">Sign Up</button>
             </div>
-            
+
             <!-- Sign In Form -->
             <form id="signin-form" class="auth-form" onsubmit="handleAuth(event, 'signin')">
                 <div class="form-group">
@@ -570,10 +677,15 @@
                 </div>
                 <div class="form-group">
                     <label for="signin-password">Password</label>
-                    <input type="password" id="signin-password" autocomplete="current-password" required placeholder="••••••••">
+                    <input type="password" id="signin-password" autocomplete="current-password" required
+                        placeholder="••••••••">
+                    <div style="text-align: right; margin-top: 0px;">
+                        <a href="#" class="forgot-link" onclick="switchTab('forgot')">Forgot password?</a>
+                    </div>
                 </div>
                 <button type="submit" class="btn btn-primary btn-block">Sign In</button>
                 <div id="signin-error" class="auth-error-msg"></div>
+                <div id="signin-success" class="auth-success-msg"></div>
             </form>
 
             <!-- Sign Up Form -->
@@ -584,11 +696,65 @@
                 </div>
                 <div class="form-group">
                     <label for="signup-password">Password</label>
-                    <input type="password" id="signup-password" autocomplete="new-password" required minlength="6" placeholder="At least 6 characters">
+                    <input type="password" id="signup-password" autocomplete="new-password" required minlength="6"
+                        placeholder="At least 6 characters">
                 </div>
                 <button type="submit" class="btn btn-primary btn-block">Create Account</button>
                 <div id="signup-error" class="auth-error-msg"></div>
                 <div id="signup-success" class="auth-success-msg"></div>
+            </form>
+
+            <!-- Forgot Password Form -->
+            <form id="forgot-form" class="auth-form" style="display: none;" onsubmit="handleAuth(event, 'forgot')">
+                <div class="form-group">
+                    <label for="forgot-email">Email Address</label>
+                    <input type="email" id="forgot-email" required placeholder="name@university.edu">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Send Reset Code</button>
+                <div style="text-align: center; margin-top: 15px;">
+                    <a href="#" class="forgot-link" onclick="switchTab('signin')">Back to Sign In</a>
+                </div>
+                <div id="forgot-error" class="auth-error-msg"></div>
+                <div id="forgot-success" class="auth-success-msg"></div>
+            </form>
+
+            <!-- Reset Password Form -->
+            <form id="reset-form" class="auth-form" style="display: none;" onsubmit="handleAuth(event, 'reset')">
+                <div class="form-group">
+                    <label for="reset-email">Email Address</label>
+                    <input type="email" id="reset-email" required placeholder="name@university.edu" readonly>
+                </div>
+                <div class="form-group">
+                    <label for="reset-code">6-Digit Reset Code</label>
+                    <input type="text" id="reset-code" required maxlength="6" placeholder="123456">
+                </div>
+                <div class="form-group">
+                    <label for="reset-password">New Password</label>
+                    <input type="password" id="reset-password" required minlength="6" placeholder="New Password">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Reset Password</button>
+                <div style="text-align: center; margin-top: 15px;">
+                    <a href="#" class="forgot-link" onclick="switchTab('signin')">Back to Sign In</a>
+                </div>
+                <div id="reset-error" class="auth-error-msg"></div>
+                <div id="reset-success" class="auth-success-msg"></div>
+            </form>
+
+            <!-- Verify Email Form -->
+            <form id="verify-form" class="auth-form" style="display: none;" onsubmit="event.preventDefault();">
+                <div class="form-group" style="text-align: center; margin-bottom: 15px;">
+                    <div style="font-size: 48px; margin-bottom: 15px;">✉️</div>
+                    <h3 style="margin-bottom: 10px; color: var(--text-primary);">Verify Your Email</h3>
+                    <span class="auth-verification-subtitle" style="display: block; font-size: 14px; color: var(--text-secondary); line-height: 1.5;">
+                        We sent a verification link to <strong id="verification-email-target">your email</strong>.<br>Please click the link in the email to activate your account.
+                    </span>
+                </div>
+                <button type="button" id="resend-link-btn" class="btn btn-primary btn-block" onclick="resendVerificationCode(event)">Resend Verification Link</button>
+                <div style="text-align: center;">
+                    <a href="#" class="forgot-link" onclick="switchTab('signin')">Back to Sign In</a>
+                </div>
+                <div id="verify-error" class="auth-error-msg"></div>
+                <div id="verify-success" class="auth-success-msg"></div>
             </form>
         </div>
     </div>
@@ -598,18 +764,18 @@
         // ── Canvas Particle Animation ──
         const canvas = document.getElementById('network-canvas');
         const ctx = canvas.getContext('2d');
-        
+
         let particles = [];
         const maxParticles = 90;
-        
+
         function resizeCanvas() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
         }
-        
+
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
-        
+
         class Particle {
             constructor() {
                 this.x = Math.random() * canvas.width;
@@ -618,15 +784,15 @@
                 this.vy = (Math.random() - 0.5) * 0.4;
                 this.radius = Math.random() * 2 + 1;
             }
-            
+
             update() {
                 this.x += this.vx;
                 this.y += this.vy;
-                
+
                 if (this.x < 0 || this.x > canvas.width) this.vx = -this.vx;
                 if (this.y < 0 || this.y > canvas.height) this.vy = -this.vy;
             }
-            
+
             draw() {
                 ctx.beginPath();
                 ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
@@ -634,14 +800,14 @@
                 ctx.fill();
             }
         }
-        
+
         for (let i = 0; i < maxParticles; i++) {
             particles.push(new Particle());
         }
-        
+
         function animate() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
+
             // Draw connections
             ctx.strokeStyle = 'rgba(99, 102, 241, 0.05)';
             ctx.lineWidth = 1;
@@ -650,7 +816,7 @@
                     const dx = particles[i].x - particles[j].x;
                     const dy = particles[i].y - particles[j].y;
                     const dist = Math.sqrt(dx * dx + dy * dy);
-                    
+
                     if (dist < 120) {
                         ctx.beginPath();
                         ctx.moveTo(particles[i].x, particles[i].y);
@@ -659,27 +825,42 @@
                     }
                 }
             }
-            
+
             // Update and draw particles
             particles.forEach(p => {
                 p.update();
                 p.draw();
             });
-            
+
             requestAnimationFrame(animate);
         }
-        
+
         animate();
 
         // ── Auth Modal Logic ──
         const modal = document.getElementById('auth-modal');
         const signInForm = document.getElementById('signin-form');
         const signUpForm = document.getElementById('signup-form');
+        const forgotForm = document.getElementById('forgot-form');
+        const resetForm = document.getElementById('reset-form');
+        const verifyForm = document.getElementById('verify-form');
+
         const tabSignIn = document.getElementById('tab-signin');
         const tabSignUp = document.getElementById('tab-signup');
+        const tabsContainer = document.getElementById('auth-tabs');
+
         const signInError = document.getElementById('signin-error');
+        const signInSuccess = document.getElementById('signin-success');
         const signUpError = document.getElementById('signup-error');
         const signUpSuccess = document.getElementById('signup-success');
+        const forgotError = document.getElementById('forgot-error');
+        const forgotSuccess = document.getElementById('forgot-success');
+        const resetError = document.getElementById('reset-error');
+        const resetSuccess = document.getElementById('reset-success');
+        const verifyError = document.getElementById('verify-error');
+        const verifySuccess = document.getElementById('verify-success');
+
+        let pendingVerificationEmail = '';
 
         function openAuthModal(mode) {
             modal.style.display = 'flex';
@@ -689,27 +870,47 @@
         function closeAuthModal() {
             modal.style.display = 'none';
             // Clear inputs and errors
-            signInError.textContent = '';
-            signUpError.textContent = '';
-            signUpSuccess.textContent = '';
+            const errorEls = document.querySelectorAll('.auth-error-msg, .auth-success-msg');
+            errorEls.forEach(el => el.textContent = '');
+
             signInForm.reset();
             signUpForm.reset();
+            forgotForm.reset();
+            resetForm.reset();
+            verifyForm.reset();
         }
 
         function switchTab(mode) {
-            signInError.textContent = '';
-            signUpError.textContent = '';
-            signUpSuccess.textContent = '';
+            const errorEls = document.querySelectorAll('.auth-error-msg, .auth-success-msg');
+            errorEls.forEach(el => el.textContent = '');
+
+            // Hide all forms
+            signInForm.style.display = 'none';
+            signUpForm.style.display = 'none';
+            forgotForm.style.display = 'none';
+            resetForm.style.display = 'none';
+            verifyForm.style.display = 'none';
+
             if (mode === 'signin') {
                 signInForm.style.display = 'block';
-                signUpForm.style.display = 'none';
+                tabsContainer.style.display = 'flex';
                 tabSignIn.classList.add('active');
                 tabSignUp.classList.remove('active');
-            } else {
-                signInForm.style.display = 'none';
+            } else if (mode === 'signup') {
                 signUpForm.style.display = 'block';
+                tabsContainer.style.display = 'flex';
                 tabSignIn.classList.remove('active');
                 tabSignUp.classList.add('active');
+            } else if (mode === 'forgot') {
+                forgotForm.style.display = 'block';
+                tabsContainer.style.display = 'none';
+            } else if (mode === 'reset') {
+                resetForm.style.display = 'block';
+                tabsContainer.style.display = 'none';
+            } else if (mode === 'verify') {
+                verifyForm.style.display = 'block';
+                tabsContainer.style.display = 'none';
+                document.getElementById('verification-email-target').textContent = pendingVerificationEmail;
             }
         }
 
@@ -760,14 +961,14 @@
                     if (data.status === 'ok') {
                         indicator.className = 'status-dot status-operational';
                         statusText.textContent = 'All Systems Operational';
-                        
+
                         // Set local indicators to operational fast
                         if (statusDb) statusDb.className = 'micro-dot status-operational';
                         if (statusMongo) statusMongo.className = 'micro-dot status-operational';
                         if (statusGraph) statusGraph.className = data.neo4j ? 'micro-dot status-operational' : 'micro-dot status-offline';
                         if (statusLlm) statusLlm.className = 'micro-dot status-operational';
                         if (statusEmbed) statusEmbed.className = 'micro-dot status-operational';
-                        
+
                         // Now trigger the full health diagnostic in the background
                         fetchFullHealth(statusDb, statusMongo, statusGraph, statusLlm, statusEmbed);
                         return;
@@ -798,7 +999,7 @@
                 if (res.ok) {
                     const data = await res.json();
                     const checks = data.checks || {};
-                    
+
                     if (statusDb) statusDb.className = checks.supabase === 'ok' ? 'micro-dot status-operational' : 'micro-dot status-offline';
                     if (statusMongo) statusMongo.className = checks.mongodb === 'ok' ? 'micro-dot status-operational' : 'micro-dot status-offline';
                     if (statusGraph) statusGraph.className = checks.neo4j === 'ok' ? 'micro-dot status-operational' : 'micro-dot status-offline';
@@ -827,13 +1028,13 @@
             const emailInput = document.getElementById('newsletter-email');
             const statusText = document.getElementById('newsletter-status');
             const btn = event.target.querySelector('button[type="submit"]');
-            
+
             if (!emailInput || !statusText) return;
-            
+
             btn.disabled = true;
             statusText.textContent = 'Subscribing...';
             statusText.className = 'newsletter-status-text status-info';
-            
+
             setTimeout(() => {
                 statusText.textContent = '\u2713 Subscribed successfully!';
                 statusText.className = 'newsletter-status-text status-success';
@@ -848,7 +1049,7 @@
             const header = document.querySelector('.landing-header');
             const hamburger = document.getElementById('hamburger-icon');
             const closeIcon = document.getElementById('close-icon');
-            
+
             header.classList.toggle('mobile-open');
             if (header.classList.contains('mobile-open')) {
                 hamburger.style.display = 'none';
@@ -863,7 +1064,7 @@
             const header = document.querySelector('.landing-header');
             const hamburger = document.getElementById('hamburger-icon');
             const closeIcon = document.getElementById('close-icon');
-            
+
             header.classList.remove('mobile-open');
             hamburger.style.display = 'block';
             closeIcon.style.display = 'none';
@@ -940,7 +1141,7 @@
 
         function runSimulation() {
             if (simInterval) clearInterval(simInterval);
-            
+
             const queryInput = document.getElementById('sim-search-input').value.trim();
             const consoleLog = document.getElementById('console-log');
             const workspace = document.getElementById('sim-workspace');
@@ -949,7 +1150,7 @@
             const confidencePill = document.getElementById('sim-confidence');
             const citationGraph = document.getElementById('sim-citation-graph');
             const graphNodes = document.getElementById('sim-graph-nodes');
-            
+
             workspace.style.display = 'grid';
             consoleLog.innerHTML = '';
             statusText.textContent = 'Processing...';
@@ -958,7 +1159,7 @@
             confidencePill.style.display = 'none';
             citationGraph.style.display = 'none';
             graphNodes.innerHTML = '';
-            
+
             // Fallback for custom queries
             const matchedData = simData[queryInput] || {
                 logs: [
@@ -977,9 +1178,9 @@
                     { name: "Linked Document B", type: "peer" }
                 ]
             };
-            
+
             let logIndex = 0;
-            
+
             simInterval = setInterval(() => {
                 if (logIndex < matchedData.logs.length) {
                     const log = matchedData.logs[logIndex];
@@ -996,7 +1197,7 @@
                     resultsText.innerHTML = matchedData.answer;
                     confidencePill.style.display = 'inline-block';
                     confidencePill.textContent = matchedData.confidence;
-                    
+
                     // Render Graph Nodes
                     if (matchedData.graph && matchedData.graph.length > 0) {
                         citationGraph.style.display = 'block';
@@ -1019,6 +1220,17 @@
             updateSystemStatus();
             // Poll every 60 seconds
             setInterval(updateSystemStatus, 60000);
+
+            // Check if verified query parameter is present
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('verified') === 'true') {
+                openAuthModal('signin');
+                if (signInSuccess) {
+                    signInSuccess.textContent = 'Email verified successfully! You can now sign in.';
+                }
+                // Clean up query param from URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
         });
 
         async function handleAuth(event, type) {
@@ -1042,6 +1254,9 @@
                     const data = await res.json();
                     if (!res.ok) {
                         signInError.textContent = data.detail || 'Invalid email or password';
+                    } else if (data.status === 'verification_pending') {
+                        pendingVerificationEmail = email;
+                        switchTab('verify');
                     } else if (data.access_token) {
                         localStorage.setItem('aether_token', data.access_token);
                         window.location.href = '/app';
@@ -1052,7 +1267,7 @@
                     submitBtn.disabled = false;
                     submitBtn.textContent = 'Sign In';
                 }
-            } else {
+            } else if (type === 'signup') {
                 signUpError.textContent = '';
                 signUpSuccess.textContent = '';
                 const email = document.getElementById('signup-email').value;
@@ -1071,6 +1286,9 @@
                     const data = await res.json();
                     if (!res.ok) {
                         signUpError.textContent = data.detail || 'Failed to sign up';
+                    } else if (data.status === 'verification_pending') {
+                        pendingVerificationEmail = email;
+                        switchTab('verify');
                     } else if (data.access_token) {
                         localStorage.setItem('aether_token', data.access_token);
                         window.location.href = '/app';
@@ -1081,8 +1299,94 @@
                     submitBtn.disabled = false;
                     submitBtn.textContent = 'Create Account';
                 }
+            } else if (type === 'forgot') {
+                forgotError.textContent = '';
+                forgotSuccess.textContent = '';
+                const email = document.getElementById('forgot-email').value;
+
+                const submitBtn = forgotForm.querySelector('button[type="submit"]');
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Sending...';
+
+                try {
+                    const res = await fetch('/api/auth/forgot-password', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        forgotError.textContent = data.detail || 'Failed to send reset code';
+                    } else {
+                        forgotSuccess.textContent = data.msg || 'Reset code sent!';
+                        document.getElementById('reset-email').value = email;
+                        setTimeout(() => {
+                            switchTab('reset');
+                        }, 1200);
+                    }
+                } catch (err) {
+                    forgotError.textContent = 'An unexpected error occurred. Please try again.';
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Send Reset Code';
+                }
+            } else if (type === 'reset') {
+                resetError.textContent = '';
+                resetSuccess.textContent = '';
+                const email = document.getElementById('reset-email').value;
+                const token = document.getElementById('reset-code').value;
+                const new_password = document.getElementById('reset-password').value;
+
+                const submitBtn = resetForm.querySelector('button[type="submit"]');
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Resetting...';
+
+                try {
+                    const res = await fetch('/api/auth/reset-password', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, token, new_password })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        resetError.textContent = data.detail || 'Failed to reset password';
+                    } else {
+                        resetSuccess.textContent = 'Password reset successfully!';
+                        setTimeout(() => {
+                            switchTab('signin');
+                        }, 1500);
+                    }
+                } catch (err) {
+                    resetError.textContent = 'An unexpected error occurred. Please try again.';
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Reset Password';
+                }
+            }
+        }
+
+        async function resendVerificationCode(event) {
+            event.preventDefault();
+            verifyError.textContent = '';
+            verifySuccess.textContent = '';
+
+            try {
+                const res = await fetch('/api/auth/resend-verification', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: pendingVerificationEmail })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    verifyError.textContent = data.detail || 'Failed to resend link';
+                } else {
+                    verifySuccess.textContent = 'A new verification link has been sent!';
+                }
+            } catch (err) {
+                verifyError.textContent = 'An unexpected error occurred. Please try again.';
             }
         }
     </script>
 </body>
+
 </html>

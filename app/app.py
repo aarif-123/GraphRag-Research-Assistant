@@ -73,9 +73,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -4827,6 +4827,169 @@ async def get_authenticated_user(token: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+SMTP_HOST = os.getenv("SMTP_HOST")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_FROM = os.getenv("SMTP_FROM", "Aether Intelligence <no-reply@aether.com>")
+REQUIRE_EMAIL_VERIFICATION = os.getenv("REQUIRE_EMAIL_VERIFICATION", "true").lower() == "true"
+
+
+async def send_auth_email(to_email: str, subject: str, text_content: str, html_content: str) -> bool:
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASSWORD:
+        # Development / local mock mode
+        log.info(
+            f"\n=================== [MOCK EMAIL] ==================="
+            f"\nTO: {to_email}"
+            f"\nFROM: {SMTP_FROM}"
+            f"\nSUBJECT: {subject}"
+            f"\nCONTENT: {text_content}"
+            f"\n====================================================\n"
+        )
+        return True
+
+    try:
+        def send_sync():
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = SMTP_FROM
+            msg["To"] = to_email
+
+            part1 = MIMEText(text_content, "plain")
+            part2 = MIMEText(html_content, "html")
+            msg.attach(part1)
+            msg.attach(part2)
+
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.sendmail(SMTP_FROM, to_email, msg.as_string())
+
+        await asyncio.to_thread(send_sync)
+        log.info(f"Email sent successfully to {to_email}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to send email to {to_email} via SMTP: {e}")
+        return False
+
+
+async def validate_email_mailboxlayer(email: str) -> Tuple[bool, Optional[str]]:
+    api_key = os.getenv("MAILBOXLAYER_API_KEY")
+    if not api_key:
+        return True, None
+        
+    try:
+        url = "http://apilayer.net/api/check"
+        params = {"access_key": api_key, "email": email}
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get(url, params=params)
+            if res.status_code != 200:
+                log.warning(f"Mailboxlayer API returned status code {res.status_code}")
+                return True, None
+                
+            data = res.json()
+            if "error" in data:
+                log.warning(f"Mailboxlayer API error: {data['error']}")
+                return True, None
+                
+            if not data.get("format_valid", True):
+                return False, "Invalid email address format."
+            if not data.get("mx_found", True):
+                return False, "This email domain does not exist or cannot receive emails."
+            if data.get("disposable", False):
+                return False, "Disposable or temporary email addresses are not allowed."
+                
+            return True, None
+    except Exception as e:
+        log.error(f"Error calling Mailboxlayer API: {e}")
+        return True, None
+
+
+async def send_verification_email(email: str, user_id: str, request: Request = None) -> None:
+    import random
+    code = f"{random.randint(100000, 999999)}"
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    expires_at_naive = expires_at.replace(tzinfo=None)
+    
+    # Save verification code to MongoDB
+    await asyncio.to_thread(
+        db.users.update_one,
+        {"_id": user_id},
+        {"$set": {
+            "verification_code": code,
+            "verification_expires_at": expires_at_naive
+        }}
+    )
+    
+    base_url = "http://localhost:8000/"
+    if request:
+        base_url = str(request.base_url)
+        
+    verify_link = f"{base_url}api/auth/verify-link?email={email}&code={code}"
+    
+    subject = "Verify your Aether account"
+    text_content = f"Welcome to Aether! Please verify your email by clicking the following link:\n{verify_link}\nThis link is valid for 24 hours."
+    
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f8fafc; padding: 40px; text-align: center;">
+        <div style="max-width: 500px; margin: 0 auto; background-color: #111118; border: 1px solid rgba(255, 255, 255, 0.08); padding: 30px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+            <h2 style="color: #6366f1; margin-bottom: 20px;">Welcome to Aether</h2>
+            <p style="color: #94a3b8; font-size: 16px; line-height: 1.5;">Thank you for registering. Please click the button below to verify your email address and activate your account:</p>
+            <div style="margin: 30px 0;">
+                <a href="{verify_link}" style="background-color: #6366f1; color: white; padding: 12px 28px; border-radius: 8px; font-weight: bold; text-decoration: none; display: inline-block; font-size: 16px; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);">
+                    Verify Email Address
+                </a>
+            </div>
+            <p style="color: #64748b; font-size: 12px; margin-top: 20px;">Or copy and paste this link in your browser:<br><a href="{verify_link}" style="color: #818cf8; word-break: break-all;">{verify_link}</a></p>
+            <p style="color: #64748b; font-size: 12px;">This link is valid for 24 hours. If you did not sign up for Aether, please ignore this email.</p>
+        </div>
+    </body>
+    </html>
+    """
+    await send_auth_email(email, subject, text_content, html_content)
+
+
+async def send_reset_email(email: str, user_id: str) -> None:
+    import random
+    token = f"{random.randint(100000, 999999)}"
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    expires_at_naive = expires_at.replace(tzinfo=None)
+    
+    # Save reset token to MongoDB
+    await asyncio.to_thread(
+        db.users.update_one,
+        {"_id": user_id},
+        {"$set": {
+            "password_reset_token": token,
+            "password_reset_expires_at": expires_at_naive
+        }}
+    )
+    
+    subject = "Reset your Aether password"
+    text_content = f"We received a request to reset your Aether password.\nYour reset code is: {token}\nThis code is valid for 1 hour."
+    
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f8fafc; padding: 40px; text-align: center;">
+        <div style="max-width: 500px; margin: 0 auto; background-color: #111118; border: 1px solid rgba(255, 255, 255, 0.08); padding: 30px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+            <h2 style="color: #ef4444; margin-bottom: 20px;">Reset Password Request</h2>
+            <p style="color: #94a3b8; font-size: 16px; line-height: 1.5;">We received a request to reset your Aether account password. Please enter the following 6-digit code on the reset password screen to proceed:</p>
+            <div style="background-color: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); padding: 15px; border-radius: 8px; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #f87171; margin: 30px 0;">
+                {token}
+            </div>
+            <p style="color: #64748b; font-size: 12px;">This code is valid for 1 hour. If you did not request a password reset, please ignore this email or contact support if you have concerns.</p>
+        </div>
+    </body>
+    </html>
+    """
+    await send_auth_email(email, subject, text_content, html_content)
+
+
 class SignUpRequest(BaseModel):
     email: str
     password: str
@@ -4847,11 +5010,35 @@ class PasswordUpdateRequest(BaseModel):
     password: str
 
 
+class VerifyEmailRequest(BaseModel):
+    email: str
+    code: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    token: str
+    new_password: str
+
+
 @app.post("/api/auth/signup")
-async def auth_signup(req: SignUpRequest):
+async def auth_signup(req: SignUpRequest, request: Request):
     email = req.email.strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="Invalid email address")
+        
+    # Validate email via Mailboxlayer API
+    is_valid, err_msg = await validate_email_mailboxlayer(email)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=err_msg)
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
     
@@ -4865,6 +5052,8 @@ async def auth_signup(req: SignUpRequest):
     password_hash = hash_password(req.password)
     now = datetime.now(timezone.utc)
     credits_reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    is_verified_init = not REQUIRE_EMAIL_VERIFICATION
     user_doc = {
         "_id": uid,
         "email": email,
@@ -4881,12 +5070,20 @@ async def auth_signup(req: SignUpRequest):
         "stripe_customer_id": None,  # set on first Stripe checkout
         "stripe_subscription_id": None,
         # ----------------------------
+        "is_verified": is_verified_init,
         "created_at": now,
         "updated_at": now,
     }
     await asyncio.to_thread(db.users.insert_one, user_doc)
     
-    # Issue token
+    if REQUIRE_EMAIL_VERIFICATION:
+        await send_verification_email(email, uid, request)
+        return {
+            "status": "verification_pending",
+            "email": email,
+            "msg": "Please verify your email address via the link sent to you."
+        }
+    
     token = create_access_token(uid, email)
     return {
         "access_token": token,
@@ -4900,12 +5097,20 @@ async def auth_signup(req: SignUpRequest):
 
 
 @app.post("/api/auth/login")
-async def auth_login(req: LoginRequest):
+async def auth_login(req: LoginRequest, request: Request):
     email = req.email.strip().lower()
     user = await asyncio.to_thread(db.users.find_one, {"email": email})
     if not user or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=400, detail="Invalid email or password")
     
+    if REQUIRE_EMAIL_VERIFICATION and not user.get("is_verified", False):
+        await send_verification_email(email, user["_id"], request)
+        return {
+            "status": "verification_pending",
+            "email": email,
+            "msg": "Please verify your email address to log in."
+        }
+        
     token = create_access_token(user["_id"], user["email"])
     return {
         "access_token": token,
@@ -4916,6 +5121,154 @@ async def auth_login(req: LoginRequest):
             "user_metadata": user.get("user_metadata", {})
         }
     }
+
+
+@app.post("/api/auth/verify-email")
+async def verify_email(req: VerifyEmailRequest):
+    email = req.email.strip().lower()
+    user = await asyncio.to_thread(db.users.find_one, {"email": email})
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+        
+    stored_code = user.get("verification_code")
+    expires_at = user.get("verification_expires_at")
+    
+    if not stored_code or stored_code != req.code.strip():
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+        
+    if expires_at and datetime.utcnow() > expires_at:
+        raise HTTPException(status_code=400, detail="Verification code has expired")
+        
+    # Mark verified
+    await asyncio.to_thread(
+        db.users.update_one,
+        {"_id": user["_id"]},
+        {"$set": {"is_verified": True}, "$unset": {"verification_code": "", "verification_expires_at": ""}}
+    )
+    
+    # Return access token
+    token = create_access_token(user["_id"], user["email"])
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["_id"],
+            "email": user["email"],
+            "user_metadata": user.get("user_metadata", {})
+        }
+    }
+
+
+@app.get("/api/auth/verify-link")
+async def verify_email_link(email: str, code: str):
+    email = email.strip().lower()
+    user = await asyncio.to_thread(db.users.find_one, {"email": email})
+    if not user:
+        return HTMLResponse(
+            status_code=400,
+            content="""
+            <html>
+            <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f8fafc; padding: 40px; text-align: center;">
+                <h2 style="color: #ef4444;">User Not Found</h2>
+                <p style="color: #94a3b8;">The requested user account was not found.</p>
+                <p><a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Landing Page</a></p>
+            </body>
+            </html>
+            """
+        )
+        
+    stored_code = user.get("verification_code")
+    expires_at = user.get("verification_expires_at")
+    
+    if not stored_code or stored_code != code.strip():
+        return HTMLResponse(
+            status_code=400,
+            content="""
+            <html>
+            <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f8fafc; padding: 40px; text-align: center;">
+                <h2 style="color: #ef4444;">Invalid Verification Link</h2>
+                <p style="color: #94a3b8;">This verification link is invalid or has already been used.</p>
+                <p><a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Landing Page</a></p>
+            </body>
+            </html>
+            """
+        )
+        
+    if expires_at and datetime.utcnow() > expires_at:
+        return HTMLResponse(
+            status_code=400,
+            content="""
+            <html>
+            <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f8fafc; padding: 40px; text-align: center;">
+                <h2 style="color: #ef4444;">Verification Link Expired</h2>
+                <p style="color: #94a3b8;">This verification link has expired. Please log in to request a new link.</p>
+                <p><a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Landing Page</a></p>
+            </body>
+            </html>
+            """
+        )
+        
+    # Mark verified
+    await asyncio.to_thread(
+        db.users.update_one,
+        {"_id": user["_id"]},
+        {"$set": {"is_verified": True}, "$unset": {"verification_code": "", "verification_expires_at": ""}}
+    )
+    
+    # Redirect to landing page with verification success query param
+    return RedirectResponse(url="/?verified=true")
+
+
+@app.post("/api/auth/resend-verification")
+async def resend_verification(req: ResendVerificationRequest, request: Request):
+    email = req.email.strip().lower()
+    user = await asyncio.to_thread(db.users.find_one, {"email": email})
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+        
+    await send_verification_email(email, user["_id"], request)
+    return {"msg": "Verification link resent successfully"}
+
+
+@app.post("/api/auth/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest):
+    email = req.email.strip().lower()
+    user = await asyncio.to_thread(db.users.find_one, {"email": email})
+    if not user:
+        return {"msg": "If this email exists, a reset code has been sent."}
+        
+    await send_reset_email(email, user["_id"])
+    return {"msg": "Password reset code sent successfully"}
+
+
+@app.post("/api/auth/reset-password")
+async def reset_password(req: ResetPasswordRequest):
+    email = req.email.strip().lower()
+    user = await asyncio.to_thread(db.users.find_one, {"email": email})
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+        
+    stored_token = user.get("password_reset_token")
+    expires_at = user.get("password_reset_expires_at")
+    
+    if not stored_token or stored_token != req.token.strip():
+        raise HTTPException(status_code=400, detail="Invalid or missing reset token")
+        
+    if expires_at and datetime.utcnow() > expires_at:
+        raise HTTPException(status_code=400, detail="Reset token has expired")
+        
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+        
+    password_hash = hash_password(req.new_password)
+    
+    await asyncio.to_thread(
+        db.users.update_one,
+        {"_id": user["_id"]},
+        {"$set": {"password_hash": password_hash}, "$unset": {"password_reset_token": "", "password_reset_expires_at": ""}}
+    )
+    
+    return {"msg": "Password reset successful"}
 
 
 @app.put("/api/auth/profile")
@@ -5445,6 +5798,74 @@ def root():
 def read_styles():
     from fastapi.responses import FileResponse
     return FileResponse("frontend/styles.css")
+
+
+@app.post("/api/audio/transcribe")
+async def transcribe_audio(request: Request, file: UploadFile = File(...)):
+    await set_user_context(request)
+    
+    if not GROQ_API_KEY and not GROQ_API_KEYS:
+        raise HTTPException(
+            status_code=503,
+            detail="Groq API key not configured on the server."
+        )
+        
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=400,
+            detail="Empty audio file."
+        )
+        
+    max_attempts = len(GROQ_API_KEYS) if GROQ_API_KEYS else 1
+    last_err = None
+    
+    for attempt in range(max_attempts):
+        current_key = GROQ_API_KEY or ""
+        if GROQ_API_KEYS:
+            key_idx = (groq_key_index + attempt) % len(GROQ_API_KEYS)
+            current_key = GROQ_API_KEYS[key_idx]
+            
+        headers = {
+            "Authorization": f"Bearer {current_key}"
+        }
+        
+        files = {
+            "file": (file.filename or "speech.webm", content, file.content_type or "audio/webm")
+        }
+        data = {
+            "model": "whisper-large-v3"
+        }
+        
+        try:
+            r = await pool.groq_http.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers=headers,
+                files=files,
+                data=data,
+                timeout=60.0
+            )
+            
+            if r.status_code == 200:
+                resp_json = r.json()
+                return {"text": resp_json.get("text", "")}
+            elif r.status_code == 429:
+                rotate_groq_key()
+                last_err = f"Groq HTTP 429: {r.text[:200]}"
+                continue
+            else:
+                last_err = f"Groq HTTP {r.status_code}: {r.text[:200]}"
+                rotate_groq_key()
+                continue
+        except Exception as e:
+            last_err = str(e)
+            rotate_groq_key()
+            continue
+            
+    raise HTTPException(
+        status_code=500,
+        detail=f"Failed to transcribe audio. Error: {last_err}"
+    )
 
 
 @app.get("/api/config")

@@ -360,6 +360,36 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- Voice Recording Overlay -->
+                <div id="voiceRecordingOverlay" class="voice-recording-overlay" style="display: none;">
+                    <div class="voice-wave-dotted-line"></div>
+                    <div class="voice-wave-container" id="voiceWaveContainer">
+                        <div class="voice-wave-bar" style="--i:0"></div>
+                        <div class="voice-wave-bar" style="--i:1"></div>
+                        <div class="voice-wave-bar" style="--i:2"></div>
+                        <div class="voice-wave-bar" style="--i:3"></div>
+                        <div class="voice-wave-bar" style="--i:4"></div>
+                        <div class="voice-wave-bar" style="--i:5"></div>
+                        <div class="voice-wave-bar" style="--i:6"></div>
+                        <div class="voice-wave-bar" style="--i:7"></div>
+                        <div class="voice-wave-bar" style="--i:8"></div>
+                        <div class="voice-wave-bar" style="--i:9"></div>
+                        <div class="voice-wave-bar" style="--i:10"></div>
+                        <div class="voice-wave-bar" style="--i:11"></div>
+                    </div>
+                    <button class="btn-voice-cancel" id="voiceCancelBtn" title="Cancel recording">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                    <button class="btn-voice-confirm" id="voiceConfirmBtn" title="Transcribe and send">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </button>
+                </div>
             </div>
 
             <div class="input-hints">

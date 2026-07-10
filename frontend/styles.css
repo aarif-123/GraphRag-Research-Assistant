@@ -3387,6 +3387,8 @@ textarea {
 .input-wrapper {
     flex-direction: column;
     padding: 0;
+    overflow: hidden;
+    transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .composer-main {
@@ -3395,6 +3397,119 @@ textarea {
     gap: 12px;
     padding: 12px 16px;
     width: 100%;
+}
+
+/* Voice Recording Overlay */
+.voice-recording-overlay {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    width: 100%;
+    min-height: 56px;
+    box-sizing: border-box;
+    animation: voice-overlay-fade-in 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes voice-overlay-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.voice-wave-dotted-line {
+    flex: 1;
+    border-bottom: 2px dotted rgba(255, 255, 255, 0.15);
+    height: 1px;
+    margin-right: 12px;
+    margin-bottom: 2px;
+}
+
+.voice-wave-container {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 32px;
+}
+
+.voice-wave-bar {
+    width: 3px;
+    height: 6px;
+    background-color: var(--text-secondary);
+    border-radius: 2px;
+    transition: height 0.05s ease, background-color 0.2s ease;
+}
+
+/* Fallback CSS animation when Web Audio API is not active */
+.voice-wave-container.fallback-animated .voice-wave-bar {
+    animation: fallback-wave 1.2s infinite ease-in-out;
+    animation-delay: calc(var(--i) * 0.08s);
+}
+
+@keyframes fallback-wave {
+    0%, 100% {
+        height: 6px;
+        background-color: rgba(255, 255, 255, 0.3);
+    }
+    50% {
+        height: 24px;
+        background-color: var(--text-primary);
+    }
+}
+
+/* Scanning animation when transcribing */
+.voice-recording-overlay.transcribing .voice-wave-bar {
+    animation: transcribing-pulse 1s infinite ease-in-out !important;
+    animation-delay: calc(var(--i) * 0.06s) !important;
+    background-color: var(--primary) !important;
+    pointer-events: none;
+}
+
+@keyframes transcribing-pulse {
+    0%, 100% {
+        height: 6px;
+        opacity: 0.4;
+    }
+    50% {
+        height: 20px;
+        opacity: 1;
+    }
+}
+
+.btn-voice-cancel,
+.btn-voice-confirm {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-voice-cancel:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+}
+
+.btn-voice-confirm:hover {
+    background: rgba(52, 211, 153, 0.15);
+    color: var(--accent-emerald);
+}
+
+.voice-recording-overlay.transcribing .btn-voice-cancel,
+.voice-recording-overlay.transcribing .btn-voice-confirm {
+    pointer-events: none;
+    opacity: 0.3;
 }
 
 .input-wrapper:focus-within {
@@ -4033,6 +4148,33 @@ mjx-container:not([display="true"]) {
     margin-top: 10px;
     line-height: 1.4;
     text-align: left;
+}
+
+.forgot-link {
+    font-size: 13px;
+    color: var(--primary-light);
+    text-decoration: none;
+    transition: var(--transition-fast);
+    cursor: pointer;
+}
+
+.forgot-link:hover {
+    color: var(--text-primary);
+    text-decoration: underline;
+}
+
+.auth-verification-subtitle {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.auth-form input[maxlength="6"] {
+    font-size: 20px;
+    font-weight: bold;
+    letter-spacing: 6px;
+    text-align: center;
+    background: rgba(0, 0, 0, 0.4) !important;
 }
 
 /* ── Topbar User Profile Elements ── */

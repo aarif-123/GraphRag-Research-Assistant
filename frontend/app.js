@@ -19,6 +19,14 @@ const state = {
     pendingAttachments: [],
     wikipediaMode: false,
     deepResearchMode: false,
+    audioRecording: false,
+    mediaRecorder: null,
+    audioChunks: [],
+    audioContext: null,
+    audioAnalyser: null,
+    audioStream: null,
+    animationFrameId: null,
+    discardRecording: false,
 };
 
 // DOM REFS
@@ -82,6 +90,12 @@ const els = {
     paymentModal: $('#paymentModal'),
     paymentModalClose: $('#paymentModalClose'),
     checkoutPayBtn: $('#checkoutPayBtn'),
+    micBtn: $('#micBtn'),
+    composerMain: $('.composer-main'),
+    voiceRecordingOverlay: $('#voiceRecordingOverlay'),
+    voiceCancelBtn: $('#voiceCancelBtn'),
+    voiceConfirmBtn: $('#voiceConfirmBtn'),
+    voiceWaveContainer: $('#voiceWaveContainer'),
 };
 
 // INIT
@@ -289,6 +303,21 @@ function initEventListeners() {
                 els.linkModal.classList.add('visible');
                 setTimeout(() => els.paperUrlInput?.focus(), 100);
             }
+        });
+    }
+
+    // Mic and voice recording overlay buttons
+    if (els.micBtn) {
+        els.micBtn.addEventListener('click', toggleSpeechToText);
+    }
+    if (els.voiceCancelBtn) {
+        els.voiceCancelBtn.addEventListener('click', () => {
+            stopSpeechToText(true);
+        });
+    }
+    if (els.voiceConfirmBtn) {
+        els.voiceConfirmBtn.addEventListener('click', () => {
+            stopSpeechToText(false);
         });
     }
 
@@ -3664,6 +3693,248 @@ async function startRazorpayCheckout() {
     } catch (err) {
         console.error("Razorpay initiation error:", err);
         alert("Could not start Razorpay checkout: " + err.message);
+    }
+}
+
+// ================================================================
+// SPEECH TO TEXT & AUDIO VISUALIZER
+// ================================================================
+
+async function toggleSpeechToText() {
+    if (state.audioRecording) {
+        stopSpeechToText(false);
+    } else {
+        await startSpeechToText();
+    }
+}
+
+async function startSpeechToText() {
+    if (state.audioRecording) return;
+    state.discardRecording = false;
+    state.audioChunks = [];
+    
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        state.audioStream = stream;
+        
+        // Try initializing AudioContext and AnalyserNode
+        try {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            state.audioContext = new AudioContextClass();
+            state.audioAnalyser = state.audioContext.createAnalyser();
+            const source = state.audioContext.createMediaStreamSource(stream);
+            source.connect(state.audioAnalyser);
+            
+            state.audioAnalyser.fftSize = 64;
+            const bufferLength = state.audioAnalyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            const timeData = new Uint8Array(bufferLength);
+            
+            const bars = els.voiceWaveContainer.querySelectorAll('.voice-wave-bar');
+            els.voiceWaveContainer.classList.remove('fallback-animated');
+            
+            function animateWave() {
+                if (!state.audioRecording || state.discardRecording) return;
+                state.animationFrameId = requestAnimationFrame(animateWave);
+                
+                state.audioAnalyser.getByteTimeDomainData(timeData);
+                state.audioAnalyser.getByteFrequencyData(dataArray);
+                
+                // Calculate average volume from time domain
+                let sum = 0;
+                for (let i = 0; i < timeData.length; i++) {
+                    sum += Math.abs(timeData[i] - 128);
+                }
+                const volume = sum / timeData.length; // 0 to ~128
+                
+                // Boost factor based on volume to make it dense and responsive
+                const boost = 0.5 + (volume / 6);
+                
+                for (let i = 0; i < bars.length; i++) {
+                    const binIndex = 1 + (i % 6);
+                    const val = dataArray[binIndex] || 0;
+                    
+                    let targetHeight = (val / 255) * 35 * boost;
+                    targetHeight += volume * 0.5;
+                    targetHeight += (Math.random() - 0.5) * 3; // tiny organic jitter
+                    
+                    const height = Math.max(4, Math.min(32, targetHeight));
+                    bars[i].style.height = `${height}px`;
+                    
+                    // Transition color based on volume (from slate #94a3b8 to primary indigo #6366f1)
+                    const ratio = Math.min(1, volume / 25);
+                    const r = Math.round(148 + (99 - 148) * ratio);
+                    const g = Math.round(163 + (102 - 163) * ratio);
+                    const b = Math.round(184 + (241 - 184) * ratio);
+                    bars[i].style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
+                }
+            }
+            
+            state.animationFrameId = requestAnimationFrame(animateWave);
+        } catch (audioErr) {
+            console.warn("Failed to initialize Web Audio visualizer, falling back to CSS animation:", audioErr);
+            els.voiceWaveContainer.classList.add('fallback-animated');
+        }
+        
+        // Initialize MediaRecorder
+        try {
+            state.mediaRecorder = new MediaRecorder(stream);
+        } catch (recorderErr) {
+            let options = { mimeType: 'audio/webm' };
+            try {
+                state.mediaRecorder = new MediaRecorder(stream, options);
+            } catch (e) {
+                options = { mimeType: 'audio/mp4' };
+                try {
+                    state.mediaRecorder = new MediaRecorder(stream, options);
+                } catch (e2) {
+                    state.mediaRecorder = new MediaRecorder(stream);
+                }
+            }
+        }
+        
+        state.mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+                state.audioChunks.push(event.data);
+            }
+        };
+        
+        state.mediaRecorder.onstop = async () => {
+            if (state.audioStream) {
+                state.audioStream.getTracks().forEach(track => track.stop());
+            }
+            
+            if (state.animationFrameId) {
+                cancelAnimationFrame(state.animationFrameId);
+                state.animationFrameId = null;
+            }
+            if (state.audioContext && state.audioContext.state !== 'closed') {
+                await state.audioContext.close().catch(err => console.error(err));
+            }
+            
+            if (state.discardRecording) {
+                resetSpeechToTextUI();
+                return;
+            }
+            
+            if (state.audioChunks.length === 0) {
+                alert("No audio data recorded.");
+                resetSpeechToTextUI();
+                return;
+            }
+            
+            setSpeechToTextTranscribing(true);
+            
+            try {
+                const mimeType = state.mediaRecorder.mimeType || 'audio/webm';
+                const audioBlob = new Blob(state.audioChunks, { type: mimeType });
+                
+                const formData = new FormData();
+                let extension = 'webm';
+                if (mimeType.includes('mp4')) extension = 'mp4';
+                else if (mimeType.includes('wav')) extension = 'wav';
+                else if (mimeType.includes('mpeg')) extension = 'mp3';
+                
+                formData.append('file', audioBlob, `speech.${extension}`);
+                
+                const token = localStorage.getItem('aether_token');
+                const headers = {};
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+                
+                const res = await fetch('/api/audio/transcribe', {
+                    method: 'POST',
+                    headers: headers,
+                    body: formData
+                });
+                
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.detail || `Server returned status code ${res.status}`);
+                }
+                
+                const data = await res.json();
+                
+                // Hide recording UI first so the input elements become display: flex
+                // and the textarea scrollHeight evaluates correctly.
+                setSpeechToTextTranscribing(false);
+                resetSpeechToTextUI();
+                
+                if (data.text && data.text.trim()) {
+                    const currentText = els.queryInput.value;
+                    els.queryInput.value = currentText ? `${currentText} ${data.text.trim()}` : data.text.trim();
+                    handleInputChange();
+                    els.queryInput.focus();
+                } else {
+                    alert("No speech detected. Please speak clearly into the microphone.");
+                }
+            } catch (err) {
+                console.error("Transcription failed:", err);
+                alert(`Speech recognition error: ${err.message || "Failed to communicate with Groq transcription service"}`);
+                setSpeechToTextTranscribing(false);
+                resetSpeechToTextUI();
+            }
+        };
+        
+        state.mediaRecorder.start();
+        state.audioRecording = true;
+        
+        if (els.composerMain) els.composerMain.style.display = 'none';
+        if (els.voiceRecordingOverlay) els.voiceRecordingOverlay.style.display = 'flex';
+        
+    } catch (err) {
+        console.error("Failed to access microphone:", err);
+        alert(`Cannot access microphone: ${err.message || err.name || "Access denied"}. Please verify browser microphone permissions.`);
+    }
+}
+
+function stopSpeechToText(discard = false) {
+    state.discardRecording = discard;
+    
+    if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+        state.mediaRecorder.stop();
+    } else {
+        if (state.audioStream) {
+            state.audioStream.getTracks().forEach(track => track.stop());
+        }
+        resetSpeechToTextUI();
+    }
+}
+
+function resetSpeechToTextUI() {
+    state.audioRecording = false;
+    state.mediaRecorder = null;
+    state.audioChunks = [];
+    state.audioStream = null;
+    state.audioContext = null;
+    state.audioAnalyser = null;
+    state.discardRecording = false;
+    
+    if (els.voiceRecordingOverlay) {
+        els.voiceRecordingOverlay.style.display = 'none';
+        els.voiceRecordingOverlay.classList.remove('transcribing');
+    }
+    if (els.composerMain) {
+        els.composerMain.style.display = 'flex';
+    }
+    
+    if (els.voiceCancelBtn) els.voiceCancelBtn.disabled = false;
+    if (els.voiceConfirmBtn) els.voiceConfirmBtn.disabled = false;
+    
+    const bars = els.voiceWaveContainer ? els.voiceWaveContainer.querySelectorAll('.voice-wave-bar') : [];
+    bars.forEach(bar => bar.style.height = '6px');
+}
+
+function setSpeechToTextTranscribing(isTranscribing) {
+    if (isTranscribing) {
+        if (els.voiceRecordingOverlay) els.voiceRecordingOverlay.classList.add('transcribing');
+        if (els.voiceCancelBtn) els.voiceCancelBtn.disabled = true;
+        if (els.voiceConfirmBtn) els.voiceConfirmBtn.disabled = true;
+    } else {
+        if (els.voiceRecordingOverlay) els.voiceRecordingOverlay.classList.remove('transcribing');
+        if (els.voiceCancelBtn) els.voiceCancelBtn.disabled = false;
+        if (els.voiceConfirmBtn) els.voiceConfirmBtn.disabled = false;
     }
 }
 
