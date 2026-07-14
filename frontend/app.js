@@ -750,11 +750,11 @@ function initEventListeners() {
     document.addEventListener('click', async (e) => {
         const btn = e.target.closest('.btn-copy');
         if (!btn) return;
-        
+
         // Find copy target selector
         const targetSelector = btn.getAttribute('data-copy-target');
         if (!targetSelector) return;
-        
+
         const messageEl = btn.closest('.message');
         const targetEl = messageEl ? messageEl.querySelector(targetSelector) : null;
         if (targetEl) {
@@ -808,7 +808,7 @@ function initEventListeners() {
             const originalHtml = btn.innerHTML;
             btn.disabled = true;
             btn.innerHTML = `<span>Initiating Checkout...</span><div class="loading-spinner" style="width:14px; height:14px; border-width:2px; margin:0; display:inline-block; border-color: rgba(255,255,255,0.3) rgba(255,255,255,0.3) transparent white; border-radius:50%; animation: spin 0.8s linear infinite;"></div>`;
-            
+
             try {
                 await startRazorpayCheckout();
             } finally {
@@ -1561,7 +1561,7 @@ function updateSourcesPanel(data) {
                         <div class="card-meta">
                             <span>${escapeHtml(Array.isArray(p.authors) ? p.authors.join(', ') : (p.author || p.authors || 'Unknown'))}</span>
                             <span>${p.year}</span>
-                            <span class="domain-tag" style="background: rgba(239, 68, 68, 0.15); color: #f87171;">arXiv</span>
+                            <span class="domain-tag" style="background: ${p.source === 'CORE' ? 'rgba(139, 92, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)'}; color: ${p.source === 'CORE' ? '#a78bfa' : '#f87171'};">${escapeHtml(p.source || 'arXiv')}</span>
                             ${upvotesHtml}
                         </div>
                         <div class="card-abstract">${escapeHtml((p.abstract || '').substring(0, 150))}...</div>
@@ -1944,7 +1944,7 @@ async function sendQuery() {
         // ── Credit exhausted — show styled inline banner ──
         if (err.isCreditError && err.creditDetail) {
             const d = err.creditDetail;
-            const resetAt = d.reset_at ? new Date(d.reset_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : 'midnight';
+            const resetAt = d.reset_at ? new Date(d.reset_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'midnight';
             addMessage('assistant',
                 `<div style="display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);">
                   <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:#ef4444;font-size:14px;">
@@ -2026,7 +2026,7 @@ async function apiCall(endpoint, body, method = 'POST') {
         }
         throw new Error(
             typeof err.detail === 'string' ? err.detail :
-            (err.detail?.message || `HTTP ${res.status}`)
+                (err.detail?.message || `HTTP ${res.status}`)
         );
     }
 
@@ -2213,6 +2213,7 @@ function addAssistantMessage(data, stream = true) {
 
     // Footer stats
     const stats = [];
+    /*
     if (data.latency_ms) stats.push(`<span class="message-stat">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         ${data.latency_ms}ms
@@ -2221,24 +2222,29 @@ function addAssistantMessage(data, stream = true) {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
         ${data.model_used}
     </span>`);
+    */
     if (data.intent) stats.push(`<span class="message-stat">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
         Aether Optimized
     </span>`);
+    /*
     if (data.papers) stats.push(`<span class="message-stat clickable" onclick="openSourcesPanel(); switchSourceTab('papers')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         ${data.papers.length} Papers Found
     </span>`);
+    */
     if (data.datasets && data.datasets.length > 0) {
         stats.push(`<span class="message-stat clickable" style="border-color: rgba(34, 211, 238, 0.25); color: var(--accent-cyan);" onclick="openSourcesPanel(); switchSourceTab('datasets')">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle; margin-right:2px;"><path d="M12 22c5.523 0 10-2.239 10-5V7c0-2.761-4.477-5-10-5S2 4.239 2 7v10c0 2.761 4.477 5 10 5z"/><path d="M2 7c0 2.76 4.477 5 10 5s10-2.24 10-5"/><path d="M2 12c0 2.76 4.477 5 10 5s10-2.24 10-5"/></svg>
             ${data.datasets.length} Datasets
         </span>`);
     }
+    /*
     if (data.chunks) stats.push(`<span class="message-stat clickable" onclick="openSourcesPanel(); switchSourceTab('chunks')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="13 2 13 9 20 9"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
         ${data.chunks.length} Knowledge Chunks
     </span>`);
+    */
 
     const copyBtnHtml = `<span class="message-stat btn-copy" data-copy-target=".message-content">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
@@ -2299,7 +2305,7 @@ function addAssistantMessage(data, stream = true) {
     } else {
         let currIdx = 0;
         const streamInterval = setInterval(() => {
-            currIdx += Math.floor(Math.random() * 5) + 3;
+            currIdx += Math.floor(Math.random() * 35) + 25;
             const finished = currIdx >= textRaw.length;
             if (finished) {
                 currIdx = textRaw.length;
@@ -3766,8 +3772,8 @@ async function startRazorpayCheckout() {
         };
 
         const rzp = new Razorpay(options);
-        
-        rzp.on('payment.failed', function (response){
+
+        rzp.on('payment.failed', function (response) {
             alert("Payment failed: " + (response.error.description || "Checkout cancelled"));
         });
 
@@ -3795,11 +3801,11 @@ async function startSpeechToText() {
     if (state.audioRecording) return;
     state.discardRecording = false;
     state.audioChunks = [];
-    
+
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         state.audioStream = stream;
-        
+
         // Try initializing AudioContext and AnalyserNode
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -3807,43 +3813,43 @@ async function startSpeechToText() {
             state.audioAnalyser = state.audioContext.createAnalyser();
             const source = state.audioContext.createMediaStreamSource(stream);
             source.connect(state.audioAnalyser);
-            
+
             state.audioAnalyser.fftSize = 64;
             const bufferLength = state.audioAnalyser.frequencyBinCount;
             const dataArray = new Uint8Array(bufferLength);
             const timeData = new Uint8Array(bufferLength);
-            
+
             const bars = els.voiceWaveContainer.querySelectorAll('.voice-wave-bar');
             els.voiceWaveContainer.classList.remove('fallback-animated');
-            
+
             function animateWave() {
                 if (!state.audioRecording || state.discardRecording) return;
                 state.animationFrameId = requestAnimationFrame(animateWave);
-                
+
                 state.audioAnalyser.getByteTimeDomainData(timeData);
                 state.audioAnalyser.getByteFrequencyData(dataArray);
-                
+
                 // Calculate average volume from time domain
                 let sum = 0;
                 for (let i = 0; i < timeData.length; i++) {
                     sum += Math.abs(timeData[i] - 128);
                 }
                 const volume = sum / timeData.length; // 0 to ~128
-                
+
                 // Boost factor based on volume to make it dense and responsive
                 const boost = 0.5 + (volume / 6);
-                
+
                 for (let i = 0; i < bars.length; i++) {
                     const binIndex = 1 + (i % 6);
                     const val = dataArray[binIndex] || 0;
-                    
+
                     let targetHeight = (val / 255) * 35 * boost;
                     targetHeight += volume * 0.5;
                     targetHeight += (Math.random() - 0.5) * 3; // tiny organic jitter
-                    
+
                     const height = Math.max(4, Math.min(32, targetHeight));
                     bars[i].style.height = `${height}px`;
-                    
+
                     // Transition color based on volume (from slate #94a3b8 to primary indigo #6366f1)
                     const ratio = Math.min(1, volume / 25);
                     const r = Math.round(148 + (99 - 148) * ratio);
@@ -3852,13 +3858,13 @@ async function startSpeechToText() {
                     bars[i].style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
                 }
             }
-            
+
             state.animationFrameId = requestAnimationFrame(animateWave);
         } catch (audioErr) {
             console.warn("Failed to initialize Web Audio visualizer, falling back to CSS animation:", audioErr);
             els.voiceWaveContainer.classList.add('fallback-animated');
         }
-        
+
         // Initialize MediaRecorder
         try {
             state.mediaRecorder = new MediaRecorder(stream);
@@ -3875,18 +3881,18 @@ async function startSpeechToText() {
                 }
             }
         }
-        
+
         state.mediaRecorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
                 state.audioChunks.push(event.data);
             }
         };
-        
+
         state.mediaRecorder.onstop = async () => {
             if (state.audioStream) {
                 state.audioStream.getTracks().forEach(track => track.stop());
             }
-            
+
             if (state.animationFrameId) {
                 cancelAnimationFrame(state.animationFrameId);
                 state.animationFrameId = null;
@@ -3894,56 +3900,56 @@ async function startSpeechToText() {
             if (state.audioContext && state.audioContext.state !== 'closed') {
                 await state.audioContext.close().catch(err => console.error(err));
             }
-            
+
             if (state.discardRecording) {
                 resetSpeechToTextUI();
                 return;
             }
-            
+
             if (state.audioChunks.length === 0) {
                 alert("No audio data recorded.");
                 resetSpeechToTextUI();
                 return;
             }
-            
+
             setSpeechToTextTranscribing(true);
-            
+
             try {
                 const mimeType = state.mediaRecorder.mimeType || 'audio/webm';
                 const audioBlob = new Blob(state.audioChunks, { type: mimeType });
-                
+
                 const formData = new FormData();
                 let extension = 'webm';
                 if (mimeType.includes('mp4')) extension = 'mp4';
                 else if (mimeType.includes('wav')) extension = 'wav';
                 else if (mimeType.includes('mpeg')) extension = 'mp3';
-                
+
                 formData.append('file', audioBlob, `speech.${extension}`);
-                
+
                 const token = localStorage.getItem('aether_token');
                 const headers = {};
                 if (token) {
                     headers['Authorization'] = `Bearer ${token}`;
                 }
-                
+
                 const res = await fetch('/api/audio/transcribe', {
                     method: 'POST',
                     headers: headers,
                     body: formData
                 });
-                
+
                 if (!res.ok) {
                     const errData = await res.json().catch(() => ({}));
                     throw new Error(errData.detail || `Server returned status code ${res.status}`);
                 }
-                
+
                 const data = await res.json();
-                
+
                 // Hide recording UI first so the input elements become display: flex
                 // and the textarea scrollHeight evaluates correctly.
                 setSpeechToTextTranscribing(false);
                 resetSpeechToTextUI();
-                
+
                 if (data.text && data.text.trim()) {
                     const currentText = els.queryInput.value;
                     els.queryInput.value = currentText ? `${currentText} ${data.text.trim()}` : data.text.trim();
@@ -3959,13 +3965,13 @@ async function startSpeechToText() {
                 resetSpeechToTextUI();
             }
         };
-        
+
         state.mediaRecorder.start();
         state.audioRecording = true;
-        
+
         if (els.composerMain) els.composerMain.style.display = 'none';
         if (els.voiceRecordingOverlay) els.voiceRecordingOverlay.style.display = 'flex';
-        
+
     } catch (err) {
         console.error("Failed to access microphone:", err);
         alert(`Cannot access microphone: ${err.message || err.name || "Access denied"}. Please verify browser microphone permissions.`);
@@ -3974,7 +3980,7 @@ async function startSpeechToText() {
 
 function stopSpeechToText(discard = false) {
     state.discardRecording = discard;
-    
+
     if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
         state.mediaRecorder.stop();
     } else {
@@ -3993,7 +3999,7 @@ function resetSpeechToTextUI() {
     state.audioContext = null;
     state.audioAnalyser = null;
     state.discardRecording = false;
-    
+
     if (els.voiceRecordingOverlay) {
         els.voiceRecordingOverlay.style.display = 'none';
         els.voiceRecordingOverlay.classList.remove('transcribing');
@@ -4001,10 +4007,10 @@ function resetSpeechToTextUI() {
     if (els.composerMain) {
         els.composerMain.style.display = 'flex';
     }
-    
+
     if (els.voiceCancelBtn) els.voiceCancelBtn.disabled = false;
     if (els.voiceConfirmBtn) els.voiceConfirmBtn.disabled = false;
-    
+
     const bars = els.voiceWaveContainer ? els.voiceWaveContainer.querySelectorAll('.voice-wave-bar') : [];
     bars.forEach(bar => bar.style.height = '6px');
 }

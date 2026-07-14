@@ -15,6 +15,13 @@ log = logging.getLogger("graphrag.kaggle")
 # In-memory TTL cache to minimize API calls
 _KAGGLE_CACHE: Dict[str, Any] = {}
 
+COMMON_STOP_WORDS = {
+    "explain", "what", "is", "how", "does", "why", "show", "me", "find", "on", 
+    "of", "and", "their", "applications", "the", "a", "an", "to", "in", "for", 
+    "with", "about", "recent", "advances", "overview", "survey", "paper", 
+    "papers", "literature", "dataset", "datasets"
+}
+
 def _get_kaggle_cache(key: str) -> Optional[Dict[str, Any]]:
     # Simple cache logic (no expiration for run lifecycle, or simple check)
     return _KAGGLE_CACHE.get(key)
@@ -50,7 +57,7 @@ async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
     }
 
     try:
-        async with httpx.AsyncClient(headers=headers, timeout=8.0) as client:
+        async with httpx.AsyncClient(headers=headers, timeout=3.5) as client:
             resp = await client.get(url, params=params, auth=(username, key))
             if resp.status_code != 200:
                 log.warning(f"Kaggle search returned status code {resp.status_code} for query '{clean_query}'")
@@ -67,7 +74,10 @@ async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
             best_match = None
             best_score = -1.0
 
-            q_words = set(clean_query.lower().split())
+            import re
+            q_words = {w for w in re.findall(r"\b\w+\b", clean_query.lower()) if w not in COMMON_STOP_WORDS}
+            if not q_words:
+                q_words = set(clean_query.lower().split())
 
             for item in data[:10]: # Check top 10 results
                 title = item.get("title", "")
@@ -79,9 +89,15 @@ async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
                 ref_lower = ref.lower()
 
                 # Basic score based on word overlap and popularity
-                words_in_title = sum(1 for w in q_words if w in title_lower)
-                words_in_ref = sum(1 for w in q_words if w in ref_lower)
+                title_words = set(re.findall(r"\b\w+\b", title_lower))
+                ref_words = set(re.findall(r"\b\w+\b", ref_lower))
+                words_in_title = sum(1 for w in q_words if w in title_words)
+                words_in_ref = sum(1 for w in q_words if w in ref_words)
                 overlap = max(words_in_title, words_in_ref)
+
+                # If no core terms match, this is an unwanted/unrelated result
+                if overlap == 0:
+                    continue
 
                 # Perfect title match gets bonus
                 exact_bonus = 5.0 if clean_query.lower() == title_lower or clean_query.lower() == ref_lower.split('/')[-1] else 0.0
@@ -122,18 +138,30 @@ async def enrich_datasets_with_kaggle(datasets: List[Dict[str, Any]]) -> List[Di
         name = ds.get("name")
         if not name:
             return ds
-            
-        kaggle_res = await search_kaggle_dataset(name)
-        if kaggle_res:
-            ds["kaggle_url"] = kaggle_res["url"]
-            ds["kaggle_title"] = kaggle_res["title"]
-            ds["kaggle_votes"] = kaggle_res["vote_count"]
-            ds["kaggle_subtitle"] = kaggle_res["subtitle"]
+        
+        # If it's already a Kaggle dataset or already enriched, skip searching
+        if ds.get("source") == "kaggle_search" or "kaggle.com" in (ds.get("url") or "") or ds.get("kaggle_url"):
+            return ds
+
+        try:
+            # Add a strict timeout of 2.0 seconds for single dataset enrichment
+            kaggle_res = await asyncio.wait_for(search_kaggle_dataset(name), timeout=2.0)
+            if kaggle_res:
+                ds["kaggle_url"] = kaggle_res["url"]
+                ds["kaggle_title"] = kaggle_res["title"]
+                ds["kaggle_votes"] = kaggle_res["vote_count"]
+                ds["kaggle_subtitle"] = kaggle_res["subtitle"]
+        except Exception as e:
+            log.warning(f"Failed to enrich dataset '{name}' with Kaggle: {e}")
         return ds
 
-    # Concurrently enrich all datasets
-    tasks = [enrich_single(ds) for ds in datasets]
-    return list(await asyncio.gather(*tasks))
+    # Limit to top 3 datasets for enrichment to prevent rate limit issues
+    datasets_to_enrich = datasets[:3]
+    remaining_datasets = datasets[3:]
+    
+    tasks = [enrich_single(ds) for ds in datasets_to_enrich]
+    enriched = await asyncio.gather(*tasks)
+    return list(enriched) + remaining_datasets
 
 
 async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[str, Any]]:
@@ -151,6 +179,12 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
     if not clean_query:
         return []
 
+    cache_key = f"kaggle_bulk_{clean_query.lower()}_{limit}"
+    cached = _get_kaggle_cache(cache_key)
+    if cached is not None:
+        log.info(f"Cache HIT for Kaggle bulk datasets: {clean_query}")
+        return cached
+
     url = "https://www.kaggle.com/api/v1/datasets/list"
     params = {"search": clean_query}
 
@@ -159,7 +193,7 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
     }
 
     try:
-        async with httpx.AsyncClient(headers=headers, timeout=8.0) as client:
+        async with httpx.AsyncClient(headers=headers, timeout=3.5) as client:
             resp = await client.get(url, params=params, auth=(username, key))
             if resp.status_code != 200:
                 return []
@@ -168,11 +202,31 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
             if not isinstance(data, list) or not data:
                 return []
 
+            import re
+            q_words = {w for w in re.findall(r"\b\w+\b", clean_query.lower()) if w not in COMMON_STOP_WORDS}
+            if not q_words:
+                q_words = set(clean_query.lower().split())
+
             results = []
-            for item in data[:limit]:
+            for item in data[:10]: # Look through top 10 results to find matches
+                title = item.get("title", "")
                 ref = item.get("ref", "")
+                title_lower = title.lower()
+                ref_lower = ref.lower()
+
+                # Basic score based on word overlap
+                title_words = set(re.findall(r"\b\w+\b", title_lower))
+                ref_words = set(re.findall(r"\b\w+\b", ref_lower))
+                words_in_title = sum(1 for w in q_words if w in title_words)
+                words_in_ref = sum(1 for w in q_words if w in ref_words)
+                overlap = max(words_in_title, words_in_ref)
+
+                # Skip completely unrelated results
+                if overlap == 0:
+                    continue
+
                 results.append({
-                    "name": item.get("title", ref.split("/")[-1]),
+                    "name": title or ref.split("/")[-1],
                     "full_name": ref,
                     "url": item.get("url", f"https://www.kaggle.com/datasets/{ref}"),
                     "description": item.get("subtitle", ""),
@@ -180,6 +234,9 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
                     "kaggle_votes": item.get("voteCount", 0),
                     "source": "kaggle_search"
                 })
+                if len(results) >= limit:
+                    break
+            _set_kaggle_cache(cache_key, results)
             return results
 
     except Exception as e:

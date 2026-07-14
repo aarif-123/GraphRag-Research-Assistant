@@ -23,41 +23,70 @@ _GITHUB_RE = re.compile(
 
 # Common dataset name patterns found in paper abstracts/titles
 _DATASET_PATTERNS = [
-    r"\b(ImageNet(?:-\w+)?)\b",
-    r"\b(CIFAR-\d+)\b",
-    r"\b(COCO(?:\s\d{4})?)\b",
-    r"\b(MS-?COCO)\b",
-    r"\b(SQuAD\s*(?:2\.0|v\d)?)\b",
-    r"\b(GLUE|SuperGLUE)\b",
-    r"\b(WikiText-\d+)\b",
-    r"\b(Penn Treebank|PTB)\b",
-    r"\b(WMT\s*\d{2,4})\b",
-    r"\b(OpenWebText)\b",
-    r"\b(C4\s+dataset|C4)\b",
-    r"\b(The Pile)\b",
-    r"\b(LAION-[\w\d]+)\b",
-    r"\b(Common Crawl)\b",
-    r"\b(BooksCorpus)\b",
-    r"\b(MNIST|Fashion-MNIST)\b",
-    r"\b(LibriSpeech)\b",
-    r"\b(VoxCeleb\d?)\b",
-    r"\b(KITTI)\b",
-    r"\b(Waymo Open Dataset)\b",
-    r"\b(nuScenes)\b",
+    # NLP & Reasoning Benchmarks
+    r"\b(MMLU(?:-Pro)?)\b",
+    r"\b(GSM8K)\b",
+    r"\b(MATH)\b",
     r"\b(HumanEval)\b",
     r"\b(MBPP)\b",
-    r"\b(MMLU)\b",
-    r"\b(BIG-Bench)\b",
     r"\b(HellaSwag)\b",
-    r"\b(ARC-Easy|ARC-Challenge)\b",
+    r"\b(ARC-Easy|ARC-Challenge|ARC)\b",
     r"\b(TruthfulQA)\b",
-    r"\b(GSM8K)\b",
-    r"\b(HotpotQA)\b",
     r"\b(TriviaQA)\b",
-    r"\b(Natural Questions)\b",
+    r"\b(SQuAD(?:\s*(?:2\.0|v\d))?)\b",
+    r"\b(HotpotQA)\b",
+    r"\b(Natural\s+Questions)\b",
+    r"\b(GLUE|SuperGLUE)\b",
+    r"\b(BIG-bench(?:-hard)?)\b",
+    r"\b(DROP)\b",
+    r"\b(WinoGrande)\b",
+    r"\b(RULER)\b",
+    r"\b(L-Eval)\b",
+    # Agent & Code Benchmarks
+    r"\b(SWE-bench(?:-Lite|-multimodal)?)\b",
+    r"\b(Chatbot\s+Arena|LMSYS)\b",
+    r"\b(WebArena)\b",
+    r"\b(GAIA)\b",
+    r"\b(AlpacaEval)\b",
+    r"\b(MT-Bench)\b",
+    # Vision & Multimodal Benchmarks
+    r"\b(ImageNet(?:-1k|-21k|-\w+)?)\b",
+    r"\b(COCO(?:\s\d{4})?)\b",
+    r"\b(MS-?COCO)\b",
+    r"\b(CIFAR-\d+)\b",
+    r"\b(MNIST|Fashion-MNIST)\b",
+    r"\b(LAION-[\w\d]+)\b",
+    r"\b(nuScenes)\b",
+    r"\b(KITTI)\b",
+    r"\b(Waymo\s+Open\s+Dataset)\b",
+    r"\b(MMBench)\b",
+    r"\b(MMMU)\b",
+    r"\b(MathVista)\b",
+    # Text Corpora & Datasets
+    r"\b(WikiText-\d+)\b",
+    r"\b(Penn\s+Treebank|PTB)\b",
+    r"\b(WMT\s*\d{2,4})\b",
+    r"\b(OpenWebText)\b",
+    r"\b(C4(?:\s+dataset)?)\b",
+    r"\b(The\s+Pile)\b",
+    r"\b(Common\s+Crawl)\b",
+    r"\b(BooksCorpus)\b",
+    r"\b(LibriSpeech)\b",
+    r"\b(VoxCeleb\d?)\b",
 ]
 
 _DATASET_RE = [re.compile(p, re.IGNORECASE) for p in _DATASET_PATTERNS]
+
+_EXCLUDE_WORDS = {
+    "the", "gpu", "cpu", "llm", "rag", "usa", "nlp", "api", "url", "pdf", "ram", "vram", "sgd", "tpu", "tmd", "web",
+    "mlm", "clm", "clt", "cpe", "cot", "llms", "bert", "gpt", "lstm", "rnn", "cnn", "ann", "mlp", "sota", "loss", "optimizer",
+    "adam", "relu", "gelu", "attention", "transformer", "transformers", "encoder", "decoder", "tokens", "token", "model",
+    "models", "method", "methods", "approach", "framework", "architecture", "architectures", "paper", "papers", "author",
+    "authors", "dataset", "datasets", "benchmark", "benchmarks", "corpus", "eval", "evaluation", "task", "tasks",
+    "zero-shot", "few-shot", "fine-tuning", "pre-training", "training", "inference", "accuracy", "performance",
+    "results", "result", "metrics", "metric", "baseline", "baselines", "state-of-the-art", "system", "systems",
+    "our", "new", "method", "we", "this", "for", "and", "cites", "with", "from", "that", "than", "over", "under"
+}
 
 
 def _extract_github_links(text: str) -> List[Dict]:
@@ -68,7 +97,8 @@ def _extract_github_links(text: str) -> List[Dict]:
     seen: set = set()
     repos = []
     for match in matches:
-        url = f"https://github.com/{match.rstrip('.,;)>\"')}"
+        stripped = match.rstrip('.,;)>"')
+        url = f"https://github.com/{stripped}"
         if url not in seen:
             seen.add(url)
             repos.append({
@@ -83,10 +113,12 @@ def _extract_github_links(text: str) -> List[Dict]:
 
 
 def _extract_datasets(text: str) -> List[Dict]:
-    """Extract known dataset names from paper abstract/title text."""
+    """Extract known and heuristically identified dataset/benchmark names from paper text."""
     if not text:
         return []
     found: Dict[str, Dict] = {}
+    
+    # 1. Match specific common benchmark patterns
     for pattern in _DATASET_RE:
         for m in pattern.finditer(text):
             name = m.group(0).strip()
@@ -100,7 +132,106 @@ def _extract_datasets(text: str) -> List[Dict]:
                     "modalities": [],
                     "source": "abstract_extraction",
                 }
+
+    # 2. General dataset phrase matching (e.g., "MMLU benchmark", "LAION-5B dataset")
+    general_matches = re.finditer(
+        r"\b([A-Z][a-zA-Z0-9\-]{2,20}(?:\s+[A-Z][a-zA-Z0-9\-]{1,20})*)\s+(dataset|benchmark|corpus|eval|evaluation)\b",
+        text
+    )
+    for m in general_matches:
+        name = m.group(1).strip()
+        category = m.group(2).lower()
+        if name.lower() not in _EXCLUDE_WORDS and name not in found:
+            slug = name.lower().replace(" ", "-").replace("/", "-")
+            found[name] = {
+                "name": name,
+                "full_name": name,
+                "url": f"https://paperswithcode.com/dataset/{slug}",
+                "description": f"Extracted {category}",
+                "modalities": [],
+                "source": f"general_{category}_extraction",
+            }
+
+    # 3. Capitalized acronym benchmark matching (e.g. GSM8K, MMLU)
+    abbr_matches = re.finditer(r"\b([A-Z][A-Z0-9\-]{2,9})\b", text)
+    for m in abbr_matches:
+        name = m.group(1).strip().rstrip("-")
+        if name.lower() not in _EXCLUDE_WORDS and name not in found:
+            if len(name) >= 2 and (any(char.isdigit() for char in name) or len(name) >= 3):
+                slug = name.lower().replace(" ", "-").replace("/", "-")
+                found[name] = {
+                    "name": name,
+                    "full_name": name,
+                    "url": f"https://paperswithcode.com/dataset/{slug}",
+                    "description": "Extracted benchmark acronym",
+                    "modalities": [],
+                    "source": "abbr_benchmark_extraction",
+                }
+
     return list(found.values())
+
+
+def _extract_benchmarks_and_metrics(text: str) -> List[Dict]:
+    """Extract quantitative benchmark performance results (e.g. '85.3% on MMLU') from paper abstract/title text."""
+    if not text:
+        return []
+    import re
+    found = []
+    seen_benchmarks = set()
+
+    # Split into sentence-like clauses
+    sentences = re.split(r'\.(?!\d)|[!?;\n]\s*', text)
+    for sent in sentences:
+        if not sent.strip():
+            continue
+        
+        # 1. Find all benchmark candidates (specific patterns + acronyms)
+        benchmarks = []
+        for pattern in _DATASET_RE:
+            for m in pattern.finditer(sent):
+                benchmarks.append((m.group(0).strip(), m.start()))
+
+        abbr_matches = re.finditer(r"\b([A-Z][A-Z0-9\-]{2,9})\b", sent)
+        for m in abbr_matches:
+            name = m.group(1).strip().rstrip("-")
+            if len(name) >= 2 and name.lower() not in _EXCLUDE_WORDS:
+                if not any(name == b[0] for b in benchmarks):
+                    benchmarks.append((name, m.start()))
+
+        if not benchmarks:
+            continue
+
+        # 2. Find all numeric/percentage values
+        numbers = []
+        num_matches = re.finditer(r"\b\d+(?:\.\d+)?%?", sent)
+        for m in num_matches:
+            numbers.append((m.group(0).strip(), m.start()))
+
+        if not numbers:
+            continue
+
+        # 3. For each benchmark, find the closest number in the sentence
+        for bench_name, bench_pos in benchmarks:
+            slug = bench_name.lower()
+            if slug in seen_benchmarks:
+                continue
+            
+            closest_num, min_dist = None, float('inf')
+            for num_val, num_pos in numbers:
+                dist = abs(bench_pos - num_pos)
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_num = num_val
+
+            # Only link if they are relatively close (e.g. within 60 characters)
+            if closest_num and min_dist < 60:
+                seen_benchmarks.add(slug)
+                found.append({
+                    "benchmark": bench_name,
+                    "metric_string": f"{closest_num} on {bench_name}"
+                })
+
+    return found
 
 
 import time
@@ -139,7 +270,7 @@ async def fetch_hf_paper_metadata(arxiv_id: str) -> Optional[Dict[str, Any]]:
         headers["Authorization"] = f"Bearer {hf_token}"
         
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=1.5) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code == 200:
                 res = resp.json()
@@ -157,8 +288,12 @@ def enrich_paper_with_code_and_datasets(paper: Dict) -> Dict:
     Enrich a single arXiv paper dict with code repos and dataset names offline.
     This is kept for backward compatibility and synchronous contexts.
     """
-    comment_repos = _extract_github_links(paper.get("comment", ""))
-    abstract_repos = _extract_github_links(paper.get("abstract", ""))
+    comment_str = paper.get("comment") or ""
+    abstract_str = paper.get("abstract") or ""
+    title_str = paper.get("title") or ""
+
+    comment_repos = _extract_github_links(comment_str)
+    abstract_repos = _extract_github_links(abstract_str)
 
     seen_urls: set = set()
     code_repos = []
@@ -167,13 +302,15 @@ def enrich_paper_with_code_and_datasets(paper: Dict) -> Dict:
             seen_urls.add(r["url"])
             code_repos.append(r)
 
-    search_text = paper.get("abstract", "") + " " + paper.get("title", "")
+    search_text = abstract_str + " " + title_str
     datasets = _extract_datasets(search_text)
+    metrics = _extract_benchmarks_and_metrics(search_text)
 
     return {
         **paper,
         "code_repos": code_repos,
         "datasets": datasets,
+        "metrics": metrics,
         "has_code": len(code_repos) > 0,
     }
 
@@ -268,14 +405,18 @@ async def enrich_arxiv_papers_with_pwc(arxiv_papers: List[Dict]) -> List[Dict]:
             hf_keywords = hf_data.get("ai_keywords") or []
 
         # 2. Extract offline links (arXiv comments & abstract) to complement
-        local_repos = _extract_github_links(paper.get("comment", "")) + _extract_github_links(paper.get("abstract", ""))
+        comment_str = paper.get("comment") or ""
+        abstract_str = paper.get("abstract") or ""
+        title_str = paper.get("title") or ""
+
+        local_repos = _extract_github_links(comment_str) + _extract_github_links(abstract_str)
         for repo in local_repos:
             url_lower = repo["url"].lower()
             if url_lower not in seen_repos:
                 seen_repos.add(url_lower)
                 code_repos.append(repo)
 
-        search_text = paper.get("abstract", "") + " " + paper.get("title", "")
+        search_text = abstract_str + " " + title_str
         local_datasets = _extract_datasets(search_text)
         for ds in local_datasets:
             name_lower = ds["name"].lower()
@@ -284,8 +425,10 @@ async def enrich_arxiv_papers_with_pwc(arxiv_papers: List[Dict]) -> List[Dict]:
                 datasets.append(ds)
 
         # 3. Merge into the enriched paper dict
+        metrics = _extract_benchmarks_and_metrics(search_text)
         enriched["code_repos"] = code_repos
         enriched["datasets"] = datasets
+        enriched["metrics"] = metrics
         enriched["linked_models"] = linked_models
         enriched["linked_spaces"] = linked_spaces
         enriched["hf_upvotes"] = hf_upvotes

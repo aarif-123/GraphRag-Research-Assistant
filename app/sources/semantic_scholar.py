@@ -10,6 +10,7 @@ Docs: https://api.semanticscholar.org/api-docs/graph
 import asyncio
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -21,8 +22,25 @@ log = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────
 _S2_BASE = "https://api.semanticscholar.org/graph/v1"
 _S2_API_KEY = os.getenv("S2_API_KEY", "")
-_S2_TIMEOUT = 10.0  # seconds
+_S2_TIMEOUT = 5.0  # seconds
 _S2_SEMAPHORE = asyncio.Semaphore(2)  # max 2 concurrent requests
+
+class AsyncRateLimiter:
+    def __init__(self, requests_per_second: float):
+        self.delay = 1.0 / requests_per_second
+        self.last_request_time = time.time()
+        self.lock = asyncio.Lock()
+
+    async def wait(self):
+        async with self.lock:
+            now = time.time()
+            elapsed = now - self.last_request_time
+            sleep_time = self.delay - elapsed
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+            self.last_request_time = time.time()
+
+_S2_RATE_LIMITER = AsyncRateLimiter(requests_per_second=9.0 if _S2_API_KEY else 0.3)
 
 import time
 _S2_CACHE = {}
@@ -106,9 +124,6 @@ async def search_papers_s2(query: str, limit: int = 8) -> List[Dict]:
     Search Semantic Scholar for papers matching a query string.
     Returns list of normalized paper dicts. Returns [] on error.
     """
-    if not _S2_API_KEY:
-        log.debug("S2_API_KEY not configured. Skipping Semantic Scholar search.")
-        return []
     if not query.strip():
         return []
 
@@ -125,34 +140,29 @@ async def search_papers_s2(query: str, limit: int = 8) -> List[Dict]:
     }
 
     async with _S2_SEMAPHORE:
-        for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(
-                    headers=_headers(), timeout=_S2_TIMEOUT, follow_redirects=True
-                ) as client:
-                    resp = await client.get(f"{_S2_BASE}/paper/search", params=params)
+        try:
+            await _S2_RATE_LIMITER.wait()
+            async with httpx.AsyncClient(
+                headers=_headers(), timeout=_S2_TIMEOUT, follow_redirects=True
+            ) as client:
+                resp = await client.get(f"{_S2_BASE}/paper/search", params=params)
 
-                if resp.status_code == 429:
-                    wait_time = (2 ** attempt) + 1
-                    log.warning(f"Semantic Scholar rate limited (429) — retrying in {wait_time}s... (attempt {attempt+1}/3)")
-                    await asyncio.sleep(wait_time)
-                    continue
-                if resp.status_code != 200:
-                    log.warning(f"Semantic Scholar search returned {resp.status_code}")
-                    return []
+            if resp.status_code == 429:
+                log.warning("Semantic Scholar rate limited (429) — failing fast to prevent timeout.")
+                return []
+            if resp.status_code != 200:
+                log.warning(f"Semantic Scholar search returned {resp.status_code}")
+                return []
 
-                data = resp.json()
-                papers = data.get("data") or []
-                res = [_normalize_paper(p) for p in papers if p.get("title")]
-                _set_s2_cache(cache_key, res)
-                return res
+            data = resp.json()
+            papers = data.get("data") or []
+            res = [_normalize_paper(p) for p in papers if p.get("title")]
+            _set_s2_cache(cache_key, res)
+            return res
 
-            except Exception as e:
-                log.warning(f"Semantic Scholar search error: {e}")
-                if attempt == 2:
-                    return []
-                await asyncio.sleep(1)
-        return []
+        except Exception as e:
+            log.warning(f"Semantic Scholar search error: {e}")
+            return []
 
 
 async def get_paper_by_arxiv_id_s2(arxiv_id: str) -> Optional[Dict]:
@@ -160,51 +170,47 @@ async def get_paper_by_arxiv_id_s2(arxiv_id: str) -> Optional[Dict]:
     Fetch a single paper from Semantic Scholar by its arXiv ID.
     Returns normalized paper dict or None.
     """
-    if not _S2_API_KEY:
-        return None
     if not arxiv_id:
         return None
 
-    cache_key = f"paper_{arxiv_id}"
+    import re
+    clean_arxiv_id = re.sub(r'v\d+$', '', arxiv_id)
+
+    cache_key = f"paper_{clean_arxiv_id}"
     cached = _get_s2_cache(cache_key)
     if cached is not None:
-        log.debug(f"S2 paper cache hit for {arxiv_id}")
+        log.debug(f"S2 paper cache hit for {clean_arxiv_id}")
         return cached
 
-    paper_id = f"ArXiv:{arxiv_id}"
+    paper_id = f"ArXiv:{clean_arxiv_id}"
 
     async with _S2_SEMAPHORE:
-        for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(
-                    headers=_headers(), timeout=_S2_TIMEOUT, follow_redirects=True
-                ) as client:
-                    resp = await client.get(
-                        f"{_S2_BASE}/paper/{paper_id}",
-                        params={"fields": _PAPER_FIELDS},
-                    )
+        try:
+            await _S2_RATE_LIMITER.wait()
+            async with httpx.AsyncClient(
+                headers=_headers(), timeout=_S2_TIMEOUT, follow_redirects=True
+            ) as client:
+                resp = await client.get(
+                    f"{_S2_BASE}/paper/{paper_id}",
+                    params={"fields": _PAPER_FIELDS},
+                )
 
-                if resp.status_code == 404:
-                    return None
-                if resp.status_code == 429:
-                    wait_time = (2 ** attempt) + 1
-                    log.warning(f"Semantic Scholar rate limited (429) — retrying in {wait_time}s... (attempt {attempt+1}/3)")
-                    await asyncio.sleep(wait_time)
-                    continue
-                if resp.status_code != 200:
-                    log.warning(f"S2 paper lookup returned {resp.status_code}")
-                    return None
+            if resp.status_code == 404:
+                return None
+            if resp.status_code == 429:
+                log.warning("Semantic Scholar rate limited (429) — failing fast to prevent timeout.")
+                return None
+            if resp.status_code != 200:
+                log.warning(f"S2 paper lookup returned {resp.status_code}")
+                return None
 
-                res = _normalize_paper(resp.json())
-                _set_s2_cache(cache_key, res)
-                return res
+            res = _normalize_paper(resp.json())
+            _set_s2_cache(cache_key, res)
+            return res
 
-            except Exception as e:
-                log.warning(f"S2 paper lookup error: {e}")
-                if attempt == 2:
-                    return None
-                await asyncio.sleep(1)
-        return None
+        except Exception as e:
+            log.warning(f"S2 paper lookup error: {e}")
+            return None
 
 
 async def get_paper_references_s2(
@@ -214,13 +220,12 @@ async def get_paper_references_s2(
     Get the top references (papers cited by) a given S2 paper.
     Returns list of lightweight paper dicts.
     """
-    if not _S2_API_KEY:
-        return []
     if not s2_paper_id:
         return []
 
     async with _S2_SEMAPHORE:
         try:
+            await _S2_RATE_LIMITER.wait()
             async with httpx.AsyncClient(
                 headers=_headers(), timeout=_S2_TIMEOUT, follow_redirects=True
             ) as client:
@@ -269,8 +274,6 @@ async def enrich_arxiv_papers_with_s2(
     Returns a NEW list with merged data. Falls back gracefully per paper.
     Strategy: lookup each paper by arXiv ID concurrently.
     """
-    if not _S2_API_KEY:
-        return arxiv_papers
     if not arxiv_papers:
         return []
 
@@ -296,18 +299,24 @@ async def enrich_arxiv_papers_with_s2(
             "venue": s2.get("venue") or paper.get("venue", ""),
         }
 
-    # Run all lookups concurrently (semaphore guards rate limit)
-    tasks = [_enrich_one(p) for p in arxiv_papers]
-    enriched = await asyncio.gather(*tasks, return_exceptions=True)
+    async def _enrich_one_safe(paper: Dict) -> Dict:
+        try:
+            return await asyncio.wait_for(_enrich_one(paper), timeout=4.0)
+        except (asyncio.TimeoutError, Exception) as e:
+            log.warning(f"Semantic Scholar paper enrichment timed out or failed: {e}")
+            return paper
 
-    result = []
-    for original, r in zip(arxiv_papers, enriched):
-        if isinstance(r, Exception):
-            log.warning(f"S2 enrichment error: {r}")
-            result.append(original)
-        else:
-            result.append(r)
-    return result
+    # Run all lookups concurrently (semaphore guards rate limit)
+    tasks = [_enrich_one_safe(p) for p in arxiv_papers]
+    try:
+        enriched = await asyncio.wait_for(
+            asyncio.gather(*tasks),
+            timeout=8.0
+        )
+        return enriched
+    except asyncio.TimeoutError:
+        log.warning("Semantic Scholar batch enrichment timed out — returning original papers.")
+        return arxiv_papers
 
 
 async def fetch_s2_papers_for_query(query: str, limit: int = 5) -> List[Dict]:

@@ -113,11 +113,14 @@ try:
         search_kaggle_dataset,
         enrich_datasets_with_kaggle,
     )
+    from app.sources.core import (
+        search_core_papers,
+    )
     _SOURCES_AVAILABLE = True
 except ImportError as e:
     _SOURCES_AVAILABLE = False
     log = logging.getLogger("graphrag")
-    log.warning(f"External source connectors not found — S2/PwC/Wikipedia/Kaggle disabled (error: {e})")
+    log.warning(f"External source connectors not found — S2/PwC/Wikipedia/Kaggle/CORE disabled (error: {e})")
     async def enrich_arxiv_papers_with_s2(papers, **kw): return papers
     async def search_papers_s2(query, **kw): return []
     async def enrich_arxiv_papers_with_pwc(papers, **kw): return papers
@@ -125,6 +128,7 @@ except ImportError as e:
     async def enrich_datasets_with_wikipedia(datasets, **kw): return datasets
     async def search_kaggle_dataset(query, **kw): return None
     async def enrich_datasets_with_kaggle(datasets, **kw): return datasets
+    async def search_core_papers(query, **kw): return []
 
 # ================================================================
 # THREAD-LOCAL SUPABASE CLIENT
@@ -1089,18 +1093,33 @@ STEP 2 — CLASSIFY ROUTE (pick exactly one):
   "title_lookup"   → user names a specific paper and wants its record only (no analysis).
   "compare"        → side-by-side of 2+ papers, methods, or approaches.
   "timeline"       → chronological evolution of a topic across years.
-  "survey"         → broad synthesis of a research area.
-  "rag"            → explanation, analysis, synthesis of concepts.
+  "survey"         → BROAD field-level synthesis. Use this whenever the query asks about the overall
+                     state, landscape, or advances of a research field — NOT a specific named paper.
+                     STRONG TRIGGERS (use survey if ANY appear): "latest advances", "recent advances",
+                     "state of the art", "overview of", "survey of", "progress in", "landscape of",
+                     "how has X evolved", "what are the advances in", "advances in X",
+                     "what's new in", "current trends in", "developments in", "breakthroughs in".
+                     vector_keywords MUST cover 4-5 distinct sub-areas of the field.
+  "conceptual"     → explanation, tutoring, or educational overview of a general scientific concept,
+                     algorithm, methodology, model family, or research area (e.g. "explain graph neural networks",
+                     "what is message passing?", "how do CNNs work?", "explain contrastive learning").
+                     Trigger: User asks "explain X", "what is X", "how does X work", "introduction to X",
+                     "conceptual overview of X", or wants to understand the fundamentals/math/intuition of a field.
+  "rag"            → explanation or analysis of a SPECIFIC named concept, paper, or mechanism
+                     (e.g., "how does FlashAttention work?", "explain RLHF"). Not broad field surveys.
   "chitchat"       → greeting or non-research question.
 
 STEP 3 — EXTRACT GRAPH ANCHORS
   1–3 minimal paper title substrings or author names for Neo4j lookup.
   Use shortest identifying substring: "DeepSketch" not "DeepSketch paper on sketch recognition".
-  Return [] if no specific entity is named.
+  For survey/conceptual routes: return [] unless the query explicitly names specific papers.
 
 STEP 4 — EXTRACT VECTOR KEYWORDS
   3–5 dense technical terms for semantic vector search.
   Exclude: "paper", "author", "year", "list", "find", "published", "research".
+  For survey route: keywords MUST span multiple distinct sub-areas of the field, not just one angle.
+  Example for "latest advances in transformer architectures":
+  ["mixture of experts", "state space models", "efficient attention", "multimodal transformers", "long context"]
 
 STEP 5 — IDENTIFY REQUIRED METRICS
   Specific data the answer MUST include: accuracy, dataset, year, author names, citation count, etc.
@@ -1118,7 +1137,7 @@ Respond ONLY with a valid JSON object. No markdown. No explanation outside JSON.
 {{
   "standalone_query": "<self-contained rewrite>",
   "ambiguous": false,
-  "route": "<one of the 8 routes>",
+  "route": "<one of the 9 routes>",
   "graph_anchors": ["<minimal anchor>"],
   "vector_keywords": ["<term>"],
   "required_metrics": ["<metric>"],
@@ -1131,6 +1150,7 @@ Respond ONLY with a valid JSON object. No markdown. No explanation outside JSON.
 - chitchat → ALL retrieval fields MUST be []. No search triggered.
 - ambiguous=true → standalone_query ends with " [UNRESOLVED]", route = "rag".
 - compare → graph_anchors MUST have exactly 2 entries (one per paper).
+- survey → vector_keywords MUST have 4–5 entries spanning distinct sub-areas.
 - NEVER add extra keys. NEVER return prose.
 
 ━━━ EXAMPLES ━━━
@@ -1142,6 +1162,15 @@ Input: "compare its accuracy with ResNet-50" (prev turn: DeepSketch)
 
 Input: "hey what's up"
 {{"standalone_query":"hey what's up","ambiguous":false,"route":"chitchat","graph_anchors":[],"vector_keywords":[],"required_metrics":[],"reasoning_path":"No retrieval needed.","cache_key":"hey whats up"}}
+
+Input: "What are the latest advances in transformer architectures?"
+{{"standalone_query":"What are the latest advances in transformer architectures?","ambiguous":false,"route":"survey","graph_anchors":[],"vector_keywords":["mixture of experts","state space models","efficient attention","multimodal transformers","long context scaling"],"required_metrics":[],"reasoning_path":"Survey broad transformer landscape across efficient attention, MoE, SSMs, multimodal, and long-context sub-areas from retrieved and general knowledge.","cache_key":"latest advances transformer architectures"}}
+
+Input: "explain graph neural networks and their applications"
+{{"standalone_query":"Explain graph neural networks (GNNs) and their applications.","ambiguous":false,"route":"conceptual","graph_anchors":[],"vector_keywords":["graph neural networks","message passing","graph convolution","recommender systems","drug discovery"],"required_metrics":[],"reasoning_path":"Provide a conceptual explanation of Graph Neural Networks, including the mathematical intuition, why traditional architectures fail, architectural evolution, and real-world applications.","cache_key":"explain graph neural networks and applications"}}
+
+Input: "overview of reinforcement learning from human feedback"
+{{"standalone_query":"Overview of reinforcement learning from human feedback (RLHF).","ambiguous":false,"route":"survey","graph_anchors":[],"vector_keywords":["RLHF","reward model","PPO","preference learning","alignment"],"required_metrics":[],"reasoning_path":"Survey RLHF landscape covering reward modeling, PPO fine-tuning, DPO, and alignment techniques.","cache_key":"overview reinforcement learning human feedback"}}
 
 
 """
@@ -1195,8 +1224,10 @@ async def plan_query(query: str, context: str = "") -> QueryPlan:
 
 def rank_papers(papers: List[Dict], anchors: List[str]) -> List[Dict]:
     """Score and sort papers by relevance to the search anchors."""
+    import math
     if not anchors:
-        return papers
+        # If no anchors, we should still sort by citation count to surface the most important papers
+        return sorted(papers, key=lambda p: float(p.get("in_citations") or p.get("n_citation") or 0), reverse=True)
 
     def score(p: Dict) -> float:
         title = (p.get("title") or "").lower()
@@ -1221,6 +1252,9 @@ def rank_papers(papers: List[Dict], anchors: List[str]) -> List[Dict]:
             pass
         # seed papers get a graph-score boost
         s += (p.get("score", 1) - 1) * 5.0
+        # citation boost (log-scaled)
+        citations = float(p.get("in_citations") or p.get("n_citation") or 0)
+        s += math.log1p(citations) * 5.0
         return s
 
     return sorted(papers, key=score, reverse=True)
@@ -1385,6 +1419,41 @@ async def retrieve_graph_papers(
         # Rank by anchor relevance
         ranked = rank_papers(merged, anchors or keywords or [])
         result = ranked[:limit]
+
+        # Query citation links among the final top result IDs to trace research lineage
+        top_ids = [r["research_id"] for r in result if r.get("research_id")]
+        if top_ids:
+            try:
+                def _fetch_links():
+                    cypher = """
+                    MATCH (p1:Publication)-[:CITES]->(p2:Publication)
+                    WHERE p1.research_id IN $ids AND p2.research_id IN $ids
+                    RETURN p1.research_id AS source, p2.research_id AS target
+                    """
+                    with pool.neo4j.session() as session:
+                        return [dict(r) for r in session.run(cypher, {"ids": top_ids})]
+
+                links = await asyncio.to_thread(_fetch_links)
+                
+                # Map links back to the papers
+                id_to_paper = {p["research_id"]: p for p in result}
+                for link in links:
+                    src_id = link["source"]
+                    tgt_id = link["target"]
+                    if src_id in id_to_paper and tgt_id in id_to_paper:
+                        src_paper = id_to_paper[src_id]
+                        tgt_paper = id_to_paper[tgt_id]
+                        
+                        if "cites_retrieved_papers" not in src_paper:
+                            src_paper["cites_retrieved_papers"] = []
+                        if "cited_by_retrieved_papers" not in tgt_paper:
+                            tgt_paper["cited_by_retrieved_papers"] = []
+                            
+                        src_paper["cites_retrieved_papers"].append(tgt_paper["title"])
+                        tgt_paper["cited_by_retrieved_papers"].append(src_paper["title"])
+            except Exception as e:
+                log.warning(f"Failed to fetch citation relationships: {e}")
+
         set_cache("graph", ck, result)
         return result
 
@@ -2046,6 +2115,18 @@ def build_relationship_context(graph_nodes: List[Dict]) -> str:
                 f"by {authors_str} — {n.get('in_citations',0)} citations"
             )
 
+    # Append direct citation lineage among retrieved papers
+    lineage_lines = []
+    for n in graph_nodes:
+        cites = n.get("cites_retrieved_papers")
+        if cites:
+            cites_str = ", ".join(f'"{title}"' for title in cites)
+            lineage_lines.append(f'  • "{n.get("title")}" ({n.get("year")}) cites: {cites_str}')
+
+    if lineage_lines:
+        lines.append("\nCITATION PATHWAYS & RESEARCH LINEAGE (cites relationships):")
+        lines.extend(lineage_lines)
+
     return "\n".join(lines)
 
 
@@ -2060,6 +2141,13 @@ async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, A
     """Retrieve relevant paper abstracts from arXiv API in real-time."""
     if not query.strip():
         return []
+
+    ck = cache_key("arxiv", query, limit)
+    cached = get_cache("api", ck)
+    if cached is not None:
+        log.info(f"Cache HIT for arXiv context query: {query} (limit={limit})")
+        return cached
+
     
     # Try ArXiv MCP Server if configured in env
     mcp_url = os.getenv("ARXIV_MCP_URL")
@@ -2099,11 +2187,13 @@ async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, A
     else:
         search_term = clean_query
 
-    # Build arXiv query using title+abstract field search for <=5 words phrase,
-    # or combined ti/abs keyword search for longer queries
+    # Build arXiv query using title+abstract field search for <=5 words phrase (if quotes are present)
+    # or general keyword search (parenthesized) to prevent strict phrase match issues
     if len(search_term.split()) <= 5:
-        # Phrase match works well for short precise queries like "BERT masked language modeling"
-        encoded_query = urllib.parse.quote(f'all:"{search_term}"')
+        if '"' in search_term or "'" in search_term:
+            encoded_query = urllib.parse.quote(f'all:"{search_term}"')
+        else:
+            encoded_query = urllib.parse.quote(f'all:({search_term})')
     else:
         # Title + abstract keyword search for longer keyword sets
         encoded_query = urllib.parse.quote(f'ti:{search_term} OR abs:{search_term}')
@@ -2207,6 +2297,7 @@ async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, A
                     "has_code": False,
                 })
             
+            set_cache("api", ck, papers)
             return papers
     except Exception as e:
         log.warning(f"Error fetching from arXiv: {e}")
@@ -2256,17 +2347,18 @@ def format_s2_context(s2_papers: List[Dict]) -> str:
 
 
 def format_pwc_context(arxiv_papers: List[Dict]) -> str:
-    """Format Papers with Code & Hugging Face enrichment (repos, datasets, models, spaces) as LLM context."""
+    """Format Papers with Code & Hugging Face enrichment (repos, datasets, metrics, models, spaces) as LLM context."""
     entries = []
     for p in arxiv_papers:
         repos = p.get('code_repos') or []
         datasets = p.get('datasets') or []
+        metrics = p.get('metrics') or []
         models = p.get('linked_models') or []
         spaces = p.get('linked_spaces') or []
         upvotes = p.get('hf_upvotes', 0)
         ai_summary = p.get('hf_ai_summary') or ""
         
-        if not repos and not datasets and not models and not spaces and not upvotes and not ai_summary:
+        if not repos and not datasets and not metrics and not models and not spaces and not upvotes and not ai_summary:
             continue
             
         parts = [f"[{p.get('title', '?')}]"]
@@ -2290,6 +2382,11 @@ def format_pwc_context(arxiv_papers: List[Dict]) -> str:
                 else:
                     ds_strs.append(d.get('name', '?'))
             parts.append(f"  Datasets: {' | '.join(ds_strs)}")
+        if metrics:
+            metric_strs = []
+            for m in metrics[:5]:
+                metric_strs.append(m['metric_string'])
+            parts.append(f"  Extracted Benchmarks/Metrics: {' | '.join(metric_strs)}")
         if models:
             model_strs = []
             for m in models[:3]:
@@ -2475,14 +2572,33 @@ def _base_rules() -> str:
     return (
         """
 ═══ ABSOLUTE RULES ═══
-1. Prioritize answering using information explicitly stated in the context below. Include inline citations (e.g., [N] or [ArXiv-N]) for every factual claim backed by the context.
+1. Prioritize answering using information explicitly stated in the context below (except for broad overview/survey/landscape queries, where you must follow the BROAD FIELD SURVEY DECOMPOSITION instructions in Rule 4 below). Include inline citations (e.g., [N] or [ArXiv-N]) for every factual claim backed by the context.
 2. For every paper or reference cited, if it has a real URL in the context (e.g. in the Live ArXiv Cross-Reference Evidence), you MUST explicitly include it using clickable markdown links (e.g. `[ArXiv-N](pdf_url)` or `[PDF Link](pdf_url)`).
 3. If a cited paper has NO real URL in the context (e.g., local database chunks [N]), do NOT invent a URL or use placeholders like `(url)`. Just output the citation tag [N] and the paper title without any link markup.
-4. DYNAMIC SYNTHESIS FALLBACK: If the retrieved context is insufficient, empty, or lacks details to fully support the query, DO NOT respond with a boilerplate "insufficient data" or "no evidence found" message. Instead, dynamically switch to providing an in-depth, comprehensive synthesis using your own general scientific and academic knowledge.
+4. DYNAMIC SYNTHESIS FALLBACK & BROAD SURVEY GUIDELINES:
+   - BROAD FIELD SURVEY DECOMPOSITION: If the query is a general field overview, landscape, or survey (e.g. "latest advances in X", "overview of Y", "state of the art in Z"), you MUST ALWAYS:
+     (a) Identify all major canonical sub-areas of the field from your own knowledge (e.g., for transformer advances: efficient attention, Mixture-of-Experts (MoE), State Space Models (SSMs) / selective SSMs, long-context scaling, multimodal transformers, reasoning and test-time compute).
+     (b) Structure and organize your entire response around these canonical sub-areas — NOT around the retrieved papers/chunks.
+     (c) Use retrieved niche papers/chunks (e.g., PyramidTNT, ExpertFlow, Thermodynamic Isomorphism) ONLY as minor contemporary case studies or examples inside their appropriate sub-areas. They must NOT dictate the overall response layout, tables, or timelines, and must occupy less than 20% of the total response text.
+     (d) For each sub-area, list 2-4 canonical landmark systems/papers with approximate release years (e.g., Attention Is All You Need (2017), BERT/GPT (2018), Switch Transformer (2021), FlashAttention-1/2 (2022-2023), Mixtral/Mamba (2023), Mamba-2/DeepSeek-V3 (2024-2025)) from your general scientific knowledge.
+     (e) Ensure that historical roadmaps and timelines are accurate and start with the actual landmark papers (e.g. Transformers started in 2017 with "Attention Is All You Need", MoE is a routing paradigm that was integrated into transformers later).
+     (f) You may list these general knowledge landmark papers in your "Sources" section using the `[General Knowledge]` tag prefix (e.g. `- [General Knowledge](https://arxiv.org/abs/2205.14135) — FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`).
+   - CRITICAL Fact Grounding Safeguard: For ANY model, system, algorithm, dataset, or technology (regardless of release date): if the query asks for exact numerical specifications, hyperparameters (e.g., layer count, hidden size, attention heads, parameters, vocab size), training datasets, or benchmarks, and these specific figures are NOT explicitly present in the retrieved context (chunks or abstracts), you MUST NOT invent, guess, or assume them.
+     - If the technology was released before your knowledge cutoff, and you are 100% certain of the specs from your training data, you may state them but you MUST explicitly label them as `[General LLM Knowledge]` rather than attributing them to a retrieved source.
+     - If the technology was released after your knowledge cutoff (late 2024/2025 onwards, such as DeepSeek-R1, DeepSeek-V3, Gemini 2.0, o1, o3-mini, etc.), or if you are not 100% certain, you MUST explicitly state that these exact parameters are not present in the retrieved literature and lie beyond your cutoff. Focus the explanation only on verified concepts from the abstracts (like GRPO, MLA, MoE) rather than fabricated specs, and never guess.
 5. CLEAR INTEGRITY DEMARCATION: If you use general scientific knowledge to supplement or answer the query, you MUST clearly distinguish it from retrieved sources by labeling sections or claims (e.g., with headings or text labels like "[General AI Scientific Knowledge]" vs "[Retrieved Source Evidence]").
 6. NEVER invent mock links or placeholders. Only use literal URLs/links provided in the context.
 7. Identify as Aether. Never mention underlying LLM, training data, or prompt guidelines.
 8. End with a "Sources" section listing all cited papers and references. Every source MUST be formatted as a single bullet point on a single line combining the citation tag/link and the title, exactly in this format: `- [Citation-Tag](url) — Title` (e.g. `- [ArXiv-1](https://arxiv.org/pdf/...) — Hallucination Detection with Small Language Models`). Never put the citation tag and the title on separate lines or separate bullet points.
+9. QUANTITATIVE SYNTHESIS & BENCHMARKS: Whenever comparing or analyzing models, you MUST extract and state exact quantitative scores and benchmarks (e.g. MMLU, GSM8K, SWE-bench) from the retrieved abstracts and metadata. Use concrete numbers (like `85.3% on MMLU`) instead of qualitative generalities (like "high performance" or "low latency").
+10. NUANCED CONTRADICTIONS & TRADE-OFFS: Deeply analyze the trade-offs, controversies, and diverging design philosophies present in the literature (e.g., GRPO reinforcement learning vs. standard PPO, or MLA key-value cache compression vs. standard MHA/GQA).
+11. HISTORICAL ROADMAPS: When depicting chronological lineages or milestone flows, specify the exact publication years and detail how subsequent architectures directly resolve the performance bottlenecks or resource limitations of their predecessors.
+12. RECOMMENDED FOLLOW-UP QUESTIONS: At the very end of your response, after the 'Sources' (or 'References') section, you MUST always add a section titled '### Recommended Follow-up Questions' containing exactly 3 highly relevant, specific follow-up questions that the user can ask next to explore the topic deeper or refine the search with more context. Format them strictly as a standard bulleted list, one question per bullet point, e.g.:
+### Recommended Follow-up Questions
+- [First follow-up question here]
+- [Second follow-up question here]
+- [Third follow-up question here]
+Do not include any extra text after this list.
 
 ═══ MAXIMUM DEPTH & DETAILS ═══
 - IN-DEPTH & THOROUGH: Provide extremely detailed, comprehensive responses. Do not summarize aggressively. Elaborate on structural mechanisms, design choices, methodology formulas, and experimental configurations in full detail.
@@ -2593,6 +2709,94 @@ Return exactly one Mermaid code block using either ```mermaid\ngraph TD\n...\n``
 
 
 
+def parse_year(val) -> int:
+    if not val:
+        return 0
+    import re
+    if isinstance(val, int):
+        return val
+    match = re.search(r"\b(19\d{2}|20\d{2})\b", str(val))
+    if match:
+        return int(match.group())
+    return 0
+
+
+def build_chronological_flow(
+    graph_nodes: List[Dict],
+    arxiv_papers: Optional[List[Dict]] = None,
+    s2_papers: Optional[List[Dict]] = None,
+) -> str:
+    """Combines papers from all retrieved sources, parses years, deduplicates,
+    and returns a clean chronological list for RAG context synthesis.
+    """
+    import re
+    all_papers = []
+    seen_titles = set()
+
+    def clean_title(t):
+        return re.sub(r'[^a-z0-9]', '', t.lower()) if t else ""
+
+    sources_list = [
+        ("Graph", graph_nodes or []),
+        ("arXiv/CORE", arxiv_papers or []),
+        ("Semantic Scholar", s2_papers or [])
+    ]
+
+    for source_label, papers in sources_list:
+        for p in papers:
+            if not isinstance(p, dict):
+                continue
+            title = p.get("title")
+            if not title:
+                continue
+            c_title = clean_title(title)
+            if c_title and c_title not in seen_titles:
+                seen_titles.add(c_title)
+                
+                yr_val = p.get("year")
+                if not yr_val and p.get("published"):
+                    yr_val = p.get("published")
+                year = parse_year(yr_val)
+                
+                citations = p.get("citation_count") or p.get("citations") or p.get("in_citations") or 0
+                try:
+                    citations = int(citations)
+                except (ValueError, TypeError):
+                    citations = 0
+                
+                authors = p.get("authors") or []
+                if isinstance(authors, list):
+                    clean_authors = [a for a in authors if a]
+                    authors_str = ", ".join(clean_authors[:3])
+                    if len(clean_authors) > 3:
+                        authors_str += " et al."
+                else:
+                    authors_str = str(authors)
+                
+                src = p.get("source") or source_label
+                
+                all_papers.append({
+                    "title": title.strip(),
+                    "year": year,
+                    "year_str": str(year) if year > 0 else "?",
+                    "authors": authors_str.strip() or "Unknown",
+                    "citations": citations,
+                    "source": src,
+                })
+
+    if not all_papers:
+        return "(No paper lineage available.)"
+
+    all_papers.sort(key=lambda x: (x["year"] == 0, x["year"], -x["citations"]))
+
+    lines = ["=== CHRONOLOGICAL LITERATURE ROADMAP ==="]
+    for idx, p in enumerate(all_papers):
+        cite_str = f" [Cited {p['citations']}×]" if p['citations'] > 0 else ""
+        lines.append(f"  {idx+1}. [{p['year_str']}] \"{p['title']}\" — {p['authors']}{cite_str} ({p['source']})")
+    
+    return "\n".join(lines)
+
+
 def grounded_prompt(
     query: str,
     chunks: List[Dict],
@@ -2612,7 +2816,8 @@ def grounded_prompt(
     graph_ctx = build_relationship_context(graph_nodes)
     arxiv_ctx = format_arxiv_context(arxiv_papers)
     s2_ctx = format_s2_context(s2_papers)
-    pwc_ctx = format_pwc_context(arxiv_papers or [])
+    pwc_ctx = format_pwc_context((arxiv_papers or []) + (s2_papers or []))
+    chrono_flow = build_chronological_flow(graph_nodes, arxiv_papers, s2_papers)
 
     return f"""You are Aether, a precise research assistant grounded in retrieved evidence.
 {_base_rules()}
@@ -2629,6 +2834,8 @@ def grounded_prompt(
 
 {pwc_ctx}
 
+{chrono_flow}
+
 === RETRIEVED CHUNK EVIDENCE ===
 {chunk_text}
 
@@ -2636,18 +2843,23 @@ def grounded_prompt(
 {query}
 
 ═══ SMART RESPONSE INSTRUCTIONS ═══
-Analyze the query and all provided evidence. Structure your response as follows:
+Analyze the query and all provided evidence. You must synthesize the literature by constructing structured comparative and relational components. Do not just summarize each paper sequentially; connect them explicitly.
 
-1. **Executive Summary** — 2–3 sentence direct answer.
-2. **Visual Flowchart** — If applicable, include a detailed Mermaid flowchart (e.g., `graph TD`) depicting the system architecture, model layers, or procedural flow described in the papers to visually aid the user.
-3. **Detailed Analysis** — Extensive thematic sections with methodology, findings, and relationships. Use HTML details-accordions for dense parameters/formulations and callouts to highlight constraints/notes.
-4. **Research Lineage & Graph Connections** — How cited papers connect (use graph context).
-5. **Key Papers & Citation Impact** — List the most important papers with citation counts from context.
-6. **Datasets & Code Resources** — If code repos or datasets appear in the context, list them with links.
-7. **Productivity & Practical Applications** — Concrete takeaways: tools researchers/engineers can use TODAY, open problems, recommended next papers to read.
-8. **References** — Full citation list with links. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
+Structure your response as follows:
 
-Only include sections that have relevant evidence or relevant general scientific knowledge. Prioritize retrieved evidence, but feel free to synthesize general scientific knowledge to make the answer comprehensive and detailed.
+1. **Executive Summary** — A 2–3 sentence direct, high-level answer summarizing the consensus of the literature.
+2. **Model Taxonomy & Milestone Flow** — Include a detailed Mermaid tree or flowchart (e.g., `graph TD` or `graph LR`) depicting the architectural classifications, family relationships, or taxonomic evolution of the models or methods.
+3. **Comparative Analysis Table** — A detailed markdown table comparing the main methods across multiple dimensions (e.g., Retrieval Type, Multi-Hop support, Planning capabilities, Computation cost, and Benchmark performance).
+4. **Citation Pathways & Research Lineage** — Trace the citation pathways. Describe how papers build upon, inspire, or extend one another (e.g., "Paper B extended Paper A by solving...").
+5. **Contradictions, Controversies & Consensus** — Identify conflicting findings, differing methodologies, or tradeoffs in the literature (e.g., scaling efficiency vs. data quality, or model complexity vs. cost). State where consensus exists.
+6. **Open Research Gaps & Future Directions** — Highlight unsolved challenges, limitations, or future directions mentioned in the evidence (e.g., long-context constraints, evaluation benchmarks, or latency concerns).
+7. **Annotated Key Papers & Contributions** — For each major paper, briefly synthesize:
+   * **Problem**: What issue it addresses.
+   * **Method**: The proposed solution.
+   * **Results/Metrics**: Specific quantitative numbers/metrics from the text.
+8. **Datasets & Code Resources** — List any datasets or repositories with links.
+9. **References** — Full citation list with links. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
+10. **Recommended Follow-up Questions** — A section titled '### Recommended Follow-up Questions' containing exactly 3 highly relevant, specific follow-up questions formatted as a standard bulleted list.
 """
 
 
@@ -2670,7 +2882,8 @@ def compare_prompt(
     graph_ctx = build_relationship_context(graph_nodes)
     arxiv_ctx = format_arxiv_context(arxiv_papers)
     s2_ctx = format_s2_context(s2_papers)
-    pwc_ctx = format_pwc_context(arxiv_papers or [])
+    pwc_ctx = format_pwc_context((arxiv_papers or []) + (s2_papers or []))
+    chrono_flow = build_chronological_flow(graph_nodes, arxiv_papers, s2_papers)
 
     return f"""You are Aether. Compare the requested papers using the evidence below, supplemented by general scientific knowledge if the evidence is sparse or missing.
 {_base_rules()}
@@ -2683,23 +2896,27 @@ def compare_prompt(
 
 {arxiv_ctx}
 
+{chrono_flow}
+
 === EVIDENCE ===
 {chunk_text}
 
 ═══ SMART COMPARISON INSTRUCTIONS ═══
 Analyze the query, the paper comparison aspects, and the graph relationships.
-- DYNAMIC ADAPTATION: Adapt the comparison format to best fit the user's query and specific research questions. Feel free to focus on specific aspects (e.g., comparison of a single metric) instead of forcing a full rigid table if the user requests a simple explanation.
+- DYNAMIC ADAPTATION: Adapt the comparison format to best fit the user's query and specific research questions.
 - VISUAL COMPARISON DIAGRAM: Draw a detailed Mermaid side-by-side or pipeline diagram highlighting the core difference in architecture or data flow between the compared methods.
 - SUGGESTED FRAMEWORK (for comprehensive comparisons):
   1. **Overview**: A 1-2 sentence high-level summary of each paper's main focus.
-  2. **Key Differences Table**: A detailed markdown table comparing specific dimensions (e.g., methodology, dataset size, parameters, performance).
-  3. **Visual Architecture Comparison**: The Mermaid diagram showing compared pipelines.
-  4. **Citation Impact**: Mention citation counts for each paper (from context) if available.
-  5. **Datasets & Code**: If code repos or datasets appear in context, include them.
-  6. **Shared Foundations & Connections**: Describe how the papers relate to each other.
+  2. **Chronological Milestone Timeline**: A year-by-year progression showing how the compared methods relate historically.
+  3. **Key Differences Table**: A detailed markdown table comparing specific dimensions (e.g., methodology, dataset size, parameters, performance metrics, computational cost).
+  4. **Visual Architecture Comparison**: The Mermaid diagram showing compared pipelines.
+  5. **Citation Pathways & Lineage**: Describe how they relate or inspire one another.
+  6. **Contradictions & Performance Trade-offs**: Detail any disagreements, tradeoffs (e.g., latency vs. accuracy), or differing conclusions between the papers.
   7. **Which to Use When**: Concrete, evidence-backed decision guidelines for researchers. Use Callouts (`> [!TIP]`) to recommend selections.
-  8. **Productivity & Practical Applications** — Tools engineers can use TODAY, datasets to experiment with. Use HTML details accordions for long parameter lists or logs.
+  8. **Open Gaps & Limitations**: Highlight limits of both approaches.
   9. **Sources**: A list of cited sources. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
+  10. **Recommended Follow-up Questions**: A section titled '### Recommended Follow-up Questions' containing exactly 3 highly relevant, specific follow-up questions formatted as a standard bulleted list.
+
 
 {s2_ctx}
 
@@ -2726,9 +2943,10 @@ def survey_prompt(
     graph_ctx = build_relationship_context(graph_nodes)
     arxiv_ctx = format_arxiv_context(arxiv_papers)
     s2_ctx = format_s2_context(s2_papers)
-    pwc_ctx = format_pwc_context(arxiv_papers or [])
+    pwc_ctx = format_pwc_context((arxiv_papers or []) + (s2_papers or []))
+    chrono_flow = build_chronological_flow(graph_nodes, arxiv_papers, s2_papers)
 
-    return f"""You are Aether. Generate a structured mini-survey of the research area using the evidence below, supplemented by general scientific knowledge if the evidence is sparse or missing.
+    return f"""You are Aether. Generate a comprehensive, expert-level field survey for the research area using the retrieved evidence AND your general scientific knowledge.
 {_base_rules()}
 
 ━━━ TOPIC ━━━
@@ -2743,6 +2961,8 @@ def survey_prompt(
 
 {pwc_ctx}
 
+{chrono_flow}
+
 === EVIDENCE ===
 {chunk_text}
 
@@ -2752,13 +2972,14 @@ Synthesize the evidence into a smart, structured literature survey.
 - SUGGESTED FRAMEWORK:
   1. **Area Overview**: A 2-3 sentence blockquote of the current state of this research area.
   2. **Model Taxonomy Diagram**: The Mermaid tree diagram illustrating models.
-  3. **Key Papers & Contributions**: For each major paper: **Title** (Year, Cited X×) — contribution [citation].
-  4. **Research Evolution & Timeline**: Chronological narrative of how methods evolved.
-  5. **Dominant Methods Table**: Markdown table comparing dominant methods.
-  6. **Datasets & Code Resources**: List all datasets and code repos found in the evidence with links.
-  7. **Productivity & Practical Applications** — Tools researchers can use TODAY, open problems, next papers to read. Wrap long benchmark specs inside HTML details accordions.
-  8. **Open Challenges & Future Directions**: Unsolved problems from the evidence. Use callouts (`> [!WARNING]`) to highlight research gaps.
-  9. **Sources**: A list of cited sources with links. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
+  3. **Research Evolution & Timeline**: Chronological narrative of how methods evolved, citing milestone years.
+  4. **Dominant Methods Table**: Markdown table comparing dominant methods (e.g. Columns: Method, Paradigm, Core Technique, Computational Overhead, Main Metrics).
+  5. **Key Papers & Contributions**: For each major paper, summarize the problem, method, dataset/metrics, and results.
+  6. **Citation Pathways & Lineage**: Highlight direct inspiration/extension pathways.
+  7. **Contradictions, Controversies & Trade-offs**: Detail any contrasting findings or disagreements (e.g., optimal parameter sizing, training stability).
+  8. **Open Challenges & Research Gaps**: Unsolved problems from the evidence. Use callouts (`> [!WARNING]`) to highlight research gaps.
+  9. **Datasets & Code Resources**: List all datasets and code repos found in the evidence with links.
+  10. **Sources**: A list of cited sources with links. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
 """
 
 
@@ -2795,7 +3016,8 @@ def timeline_prompt(
 
     arxiv_ctx = format_arxiv_context(arxiv_papers)
     s2_ctx = format_s2_context(s2_papers)
-    pwc_ctx = format_pwc_context(arxiv_papers or [])
+    pwc_ctx = format_pwc_context((arxiv_papers or []) + (s2_papers or []))
+    chrono_flow = build_chronological_flow(graph_nodes, arxiv_papers, s2_papers)
 
     return f"""You are Aether. Construct a chronological timeline of research evolution using the evidence below, supplemented by general scientific knowledge if the evidence is sparse or missing.
 {_base_rules()}
@@ -2813,6 +3035,8 @@ PAPERS ORDERED BY YEAR:
 
 {pwc_ctx}
 
+{chrono_flow}
+
 === CHUNK EVIDENCE ===
 {chunk_text}
 
@@ -2820,13 +3044,111 @@ PAPERS ORDERED BY YEAR:
 Construct a smart, narrative-driven research timeline.
 - CHRONOLOGICAL MILESTONE FLOW: Include a Mermaid workflow diagram (preferably 'graph LR' to stack milestones vertically and prevent horizontal squeezing) showing the logical sequence of key milestones.
 - SUGGESTED FRAMEWORK:
-  1. **Milestone Flow Diagram**: The Mermaid timeline roadmap.
-  2. **Chronological Milestones**: For each key year: `[YEAR]` — **Paper Title** (Cited X×) — Key breakthrough [citation].
-  3. **Breakthrough Moments**: Highlight when the field pivoted to new techniques. Use Callouts (`> [!IMPORTANT]`) to highlight the shift.
-  4. **Datasets & Code**: If datasets or repos appear, list them with links.
-  5. **Productivity & Practical Applications** — Tools researchers can use TODAY, open problems.
+  1. **Milestone Flow Diagram**: The Mermaid timeline roadmap showing milestones.
+  2. **Chronological Milestones**: For each key year: `[YEAR]` — **Paper Title** (Cited X×) — Key breakthrough [citation]. Include problems solved and methods used.
+  3. **Breakthrough Moments & Paradigm Shifts**: Highlight when the field pivoted to new techniques. Use Callouts (`> [!IMPORTANT]`) to highlight the shift.
+  4. **Citation Relationships**: Highlight which milestones inspired or directly built on previous ones.
+  5. **Contradictions & Shift Drivers**: Identify what disagreements or performance bottlenecks drove the transition from older methods to newer ones.
   6. **Open Challenges & Research Gaps**: Unsolved problems at the end of the timeline.
   7. **Sources**: A list of cited sources. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
+  8. **Recommended Follow-up Questions**: A section titled '### Recommended Follow-up Questions' containing exactly 3 highly relevant, specific follow-up questions formatted as a standard bulleted list.
+"""
+
+
+def conceptual_prompt(
+    query: str,
+    chunks: List[Dict],
+    graph_nodes: List[Dict],
+    arxiv_papers: List[Dict] = None,
+    s2_papers: List[Dict] = None,
+) -> str:
+    chunk_text = (
+        "\n\n".join(
+            f"[{i+1}] {c.get('title','?')} ({c.get('year','?')}) | {c.get('section') or 'N/A'}\n{c.get('chunk','')}"
+            for i, c in enumerate(chunks)
+        )
+        if chunks
+        else "(No relevant chunks retrieved.)"
+    )
+
+    graph_ctx = build_relationship_context(graph_nodes)
+    arxiv_ctx = format_arxiv_context(arxiv_papers)
+    s2_ctx = format_s2_context(s2_papers)
+    pwc_ctx = format_pwc_context((arxiv_papers or []) + (s2_papers or []))
+    chrono_flow = build_chronological_flow(graph_nodes, arxiv_papers, s2_papers)
+
+    return f"""You are Aether, a precise research assistant focused on conceptual and educational synthesis.
+{_base_rules()}
+
+━━━ CONCEPTUAL TOPIC ━━━
+{query}
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+{graph_ctx}
+
+{arxiv_ctx}
+
+{s2_ctx}
+
+{pwc_ctx}
+
+{chrono_flow}
+
+=== RETRIEVED CHUNK EVIDENCE ===
+{chunk_text}
+
+━━━ QUERY (reminder) ━━━
+{query}
+
+═══ SMART CONCEPTUAL INSTRUCTIONS ═══
+You must synthesize the evidence and your general knowledge to provide a comprehensive, educational explanation of the concept, structured exactly as follows.
+Every statement must be grounded and clear, suitable for both beginners and experts. You MUST prioritize established landmark architectures of the field (e.g. for GNNs: GCN, GraphSAGE, GAT, GIN, Graph Transformers) and ensure timelines and diagrams accurately depict these primary milestones rather than getting distracted by narrow retrieved papers.
+
+Structure your response exactly as follows:
+
+1. **Introduction & Motivation**
+   - Explain what the concept/architecture family is in simple, clear terms (e.g., if GNNs, explain what a Graph is, what Nodes and Edges represent).
+   - Detail exactly WHY traditional architectures (like CNNs and RNNs) are suboptimal or fail for this kind of data (e.g., they assume grid or sequence structure, graphs are non-Euclidean, node ordering doesn't matter/permutation invariance).
+
+2. **Core Mechanisms & Mathematical Intuition**
+   - Explain the core mechanism in detail (e.g., for GNNs, explain the Message Passing paradigm: how nodes aggregate information from neighbors and update their state).
+   - Write out the fundamental mathematical aggregate and update equations using standard LaTeX notation, e.g.:
+     $$h_v^{{k+1}} = \\text{{AGGREGATE}}\\left(\\{{h_u^{{k}}, u \\in \\mathcal{{N}}(v)\\}}\\right)$$
+     $$h_v^{{k+1}} = \\text{{UPDATE}}\\left(h_v^{{k}}, m_v^{{k+1}}\\right)$$
+   - Provide a clear, simplified English intuition of the math (e.g., "New Node Representation = Own Features + Neighbor Information").
+
+3. **Architectural Evolution & Taxonomic Lineage**
+   - Provide a chronological timeline of key architectures/milestones (e.g., 2005 Scarselli GNN, 2016 GCN, 2017 GraphSAGE, 2018 GAT, 2019 GIN, 2020+ Graph Transformers, 2023+ Graph Foundation Models).
+   - Explain how each milestone resolved the specific bottlenecks, scalability limitations, or expressive capacity limitations of its predecessors (e.g., GraphSAGE neighborhood sampling to scale to large graphs; GAT attention to learn dynamic weights; GIN maximizing expressive power).
+   - Include a Mermaid flowchart (e.g., `graph TD` or `graph LR`) visualizing this taxonomic/evolutionary lineage of methods.
+
+4. **Detailed Real-World Applications**
+   - Provide a comprehensive, detailed Markdown table showing major application areas.
+   - For each application, you MUST explicitly define:
+     - **Application Area**: The name of the field.
+     - **Graph Mapping**: What the **Nodes** and **Edges** represent.
+     - **GNN Function**: Exactly *how* the GNN operates (e.g., molecule classification, user-item interaction representation, transaction fraud prediction).
+   - Include at least these 8 application areas:
+     - Social Networks
+     - Recommendation Systems
+     - Drug Discovery
+     - Fraud Detection
+     - Traffic Prediction
+     - Knowledge Graphs
+     - Cybersecurity
+     - Computer Vision
+
+5. **Key Challenges & Practical Bottlenecks**
+   - Discuss major limitations and challenges, including:
+     - **Over-smoothing**: What happens when the network goes deep (nodes converge to similar vectors).
+     - **Over-squashing**: Information loss when squeezing exponential neighborhood structures into fixed-size representations.
+     - **Scalability**: Computational cost on massive real-world graphs.
+     - **Explainability**: The difficulty in debugging or explaining GNN predictions.
+
+6. **Sources & References**
+   - List cited sources and references. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
+7. **Recommended Follow-up Questions**
+   - A section titled '### Recommended Follow-up Questions' containing exactly 3 highly relevant, specific follow-up questions formatted as a standard bulleted list.
 """
 
 
@@ -3020,8 +3342,21 @@ def extract_verifiable_claims(answer: str) -> List[str]:
     return list(set(years + numbers + names + quoted))
 
 
-def hard_verify(claims: List[str], chunks: List[Dict]) -> List[str]:
-    raw = " ".join(c.get("chunk", "") for c in chunks).lower()
+def hard_verify(
+    claims: List[str],
+    chunks: List[Dict],
+    arxiv_papers: Optional[List[Dict]] = None,
+    s2_papers: Optional[List[Dict]] = None,
+) -> List[str]:
+    raw_texts = [c.get("chunk", "") for c in chunks]
+    for p in (arxiv_papers or []) + (s2_papers or []):
+        raw_texts.append(p.get("title", ""))
+        raw_texts.append(p.get("abstract", ""))
+        raw_texts.append(p.get("tldr") or "")
+        raw_texts.extend(p.get("authors") or [])
+        if p.get("year"):
+            raw_texts.append(str(p["year"]))
+    raw = " ".join(raw_texts).lower()
     return [c for c in claims if c.lower() not in raw]
 
 
@@ -3045,8 +3380,14 @@ def sanitise_flagged(flagged: List[str]) -> List[str]:
     ]
 
 
-async def verify_answer(answer: str, chunks: List[Dict], model: str) -> Dict[str, Any]:
-    flagged_hard = hard_verify(extract_verifiable_claims(answer), chunks)
+async def verify_answer(
+    answer: str,
+    chunks: List[Dict],
+    model: str,
+    arxiv_papers: Optional[List[Dict]] = None,
+    s2_papers: Optional[List[Dict]] = None,
+) -> Dict[str, Any]:
+    flagged_hard = hard_verify(extract_verifiable_claims(answer), chunks, arxiv_papers, s2_papers)
     chunk_text = "\n\n".join(
         f"[{i+1}] {c.get('title','?')}: {c.get('chunk','')}"
         for i, c in enumerate(chunks)
@@ -3189,9 +3530,15 @@ async def run_vector_pipeline(
 
 
 async def apply_verification(
-    answer: str, chunks: List[Dict], model: str, rid: str, warning: Optional[str]
+    answer: str,
+    chunks: List[Dict],
+    model: str,
+    rid: str,
+    warning: Optional[str],
+    arxiv_papers: Optional[List[Dict]] = None,
+    s2_papers: Optional[List[Dict]] = None,
 ) -> Tuple[str, Optional[Dict], Optional[str]]:
-    verification = await verify_answer(answer, chunks, model)
+    verification = await verify_answer(answer, chunks, model, arxiv_papers, s2_papers)
     conf = verification.get("confidence", 1.0)
     verdict = verification.get("verdict", "PASS")
     flagged = sanitise_flagged(verification.get("flagged_claims", []))
@@ -3294,13 +3641,22 @@ async def compile_chat_messages(system_prompt: str, chat_messages: List[ChatMess
 
 async def search_huggingface_datasets(query: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Search Hugging Face Hub for datasets matching a query."""
+    if not query.strip():
+        return []
+
+    ck = cache_key("hf_datasets", query, limit)
+    cached = get_cache("api", ck)
+    if cached is not None:
+        log.info(f"Cache HIT for HF datasets query: {query}")
+        return cached
+
     url = "https://huggingface.co/api/datasets"
     params = {"search": query, "limit": limit}
     headers = {
         "User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"
     }
     try:
-        async with httpx.AsyncClient(headers=headers, timeout=8.0) as client:
+        async with httpx.AsyncClient(headers=headers, timeout=3.5) as client:
             resp = await client.get(url, params=params)
             if resp.status_code != 200:
                 return []
@@ -3317,10 +3673,50 @@ async def search_huggingface_datasets(query: str, limit: int = 5) -> List[Dict[s
                         "modalities": [],
                         "source": "huggingface_search"
                     })
+            set_cache("api", ck, results)
             return results
     except Exception as e:
         log.error(f"Error querying Hugging Face datasets API: {e}")
         return []
+
+
+async def suggest_datasets_for_query(query: str) -> List[str]:
+    """Uses LLM to suggest 1-3 canonical academic dataset names relevant to a query."""
+    if not query.strip():
+        return []
+
+    ck = cache_key("suggested_datasets", query)
+    cached = get_cache("api", ck)
+    if cached is not None:
+        log.info(f"Cache HIT for suggested datasets query: {query}")
+        return cached
+
+    sys_p = (
+        "You are Aether, an academic research assistant. Given a research query, identify up to 3 canonical, "
+        "widely-used benchmark datasets that are highly relevant to the topic. "
+        "Respond ONLY with a valid JSON object containing a 'datasets' key with a list of dataset name strings. "
+        "Do NOT include any explanations, introduction, markdown blocks, or extra text. "
+        "Example output: {\"datasets\": [\"Cora\", \"CiteSeer\", \"PubMed\"]}"
+    )
+    try:
+        raw = await groq_chat(
+            [{"role": "system", "content": sys_p}, {"role": "user", "content": query}],
+            model=REASON_MODEL,
+            temperature=0.0,
+            max_tokens=100,
+            json_mode=True,
+            purpose="plan"
+        )
+        import json
+        data = json.loads(raw.strip())
+        suggested = data.get("datasets", [])
+        if isinstance(suggested, list):
+            res = [str(s).strip() for s in suggested if s][:3]
+            set_cache("api", ck, res)
+            return res
+    except Exception as e:
+        log.warning(f"Failed to suggest datasets via LLM: {e}")
+    return []
 
 
 async def retrieve_datasets_and_repos(
@@ -3386,11 +3782,13 @@ async def retrieve_datasets_and_repos(
                 for repo in p.get("code_repos") or []:
                     all_repos.append(repo)
 
-    # 2. Search Kaggle & HF in parallel for the query + top mentioned datasets
-    search_queries = [query]
-    # Add top mentioned dataset names to search specifically for them
+    # 2. Search Kaggle & HF in parallel for LLM-suggested + top mentioned datasets
+    llm_suggested = await suggest_datasets_for_query(query)
+    log.info(f"LLM suggested benchmark datasets for query '{query}': {llm_suggested}")
+    
+    search_queries = list(llm_suggested)
     for ds_name in list(mentioned_ds_names)[:2]:
-        if ds_name.lower() not in query.lower():
+        if not any(ds_name.lower() in sq.lower() or sq.lower() in ds_name.lower() for sq in search_queries):
             search_queries.append(ds_name)
 
     search_tasks = []
@@ -3476,7 +3874,22 @@ async def _research_impl(req: ResearchRequest, request: Request):
     # ─────────────────────────────────────────────────────────────────
 
     raw_query = req.resolved_query()
-    log.info(f"\n{'='*70}\n[{rid}] QUERY: {raw_query}\n{'='*70}")
+
+    # Auto-detect wikipedia: / wiki: prefixes to enable instant Wiki mode
+    is_wiki_prefix = False
+    prefix_query = raw_query.strip()
+    if prefix_query.lower().startswith("wikipedia:"):
+        prefix_query = prefix_query[len("wikipedia:"):].strip()
+        is_wiki_prefix = True
+    elif prefix_query.lower().startswith("wiki:"):
+        prefix_query = prefix_query[len("wiki:"):].strip()
+        is_wiki_prefix = True
+
+    if is_wiki_prefix:
+        req.mode = "wikipedia"
+        raw_query = prefix_query
+
+    log.info(f"\n{'='*70}\n[{rid}] QUERY: {raw_query} (mode: {req.mode})\n{'='*70}")
 
     # ── Wikipedia Mode Direct Search ──
     if req.mode == "wikipedia":
@@ -3712,26 +4125,188 @@ async def _research_impl(req: ResearchRequest, request: Request):
             raise HTTPException(502, str(e))
 
     async def fetch_arxiv():
-        # Retrieve relevant abstracts from arXiv dynamically in parallel
-        return await retrieve_arxiv_context(query, limit=5)
+        # For survey-type broad queries, fire multiple targeted sub-queries covering
+        # each vector_keyword sub-area to get a diverse, representative paper pool.
+        if plan.route == "survey" and plan.vector_keywords:
+            seen_ids: set = set()
+            merged: List[Dict] = []
 
-    graph_nodes, chunks, arxiv_papers = await asyncio.gather(
-        fetch_graph(), fetch_supabase(), fetch_arxiv()
+            # Build sub-queries: one per vector keyword + one general query
+            sub_queries: List[str] = list(dict.fromkeys(
+                [query] + [f"{kw} transformer" for kw in plan.vector_keywords[:4]]
+            ))
+
+            sub_results = await asyncio.gather(
+                *[retrieve_arxiv_context(sq, limit=4) for sq in sub_queries],
+                return_exceptions=True,
+            )
+            for result in sub_results:
+                if isinstance(result, Exception):
+                    continue
+                for paper in result:
+                    arxiv_id = paper.get("id", "")
+                    dedup_key = arxiv_id or paper.get("title", "")
+                    if dedup_key and dedup_key not in seen_ids:
+                        seen_ids.add(dedup_key)
+                        merged.append(paper)
+
+            log.info(f"[{rid}] Survey ArXiv multi-query: {len(sub_queries)} sub-queries → {len(merged)} unique papers")
+            return merged[:14]  # cap at 14 to keep prompt within token budget
+
+        # Default: single query for non-survey routes
+        return await retrieve_arxiv_context(query, limit=10)
+
+
+    async def fetch_s2():
+        ck = cache_key("s2", query)
+        cached = get_cache("api", ck)
+        if cached is not None:
+            log.info(f"[{rid}] Cache HIT for S2 query: {query}")
+            return cached
+        try:
+            res = await search_papers_s2(query, limit=10)
+            set_cache("api", ck, res)
+            return res
+        except Exception as e:
+            log.warning(f"Failed to fetch S2 papers: {e}")
+            return []
+
+    async def fetch_core():
+        ck = cache_key("core", query)
+        cached = get_cache("api", ck)
+        if cached is not None:
+            log.info(f"[{rid}] Cache HIT for CORE query: {query}")
+            return cached
+        try:
+            res = await search_core_papers(query, limit=10)
+            set_cache("api", ck, res)
+            return res
+        except Exception as e:
+            log.warning(f"Failed to fetch CORE papers: {e}")
+            return []
+
+
+    graph_nodes, chunks, arxiv_papers, s2_papers, core_papers = await asyncio.gather(
+        fetch_graph(), fetch_supabase(), fetch_arxiv(), fetch_s2(), fetch_core()
     )
     chunks = merge_adjacent_chunks(chunks)
     chunks = pack_context_within_budget(chunks, limit_tokens=5000)
 
-    try:
-        s2_papers = await search_papers_s2(query, limit=5)
-    except Exception as e:
-        log.warning(f"Failed to fetch S2 papers: {e}")
-        s2_papers = []
+    # ── Deduplicate and Enrich papers with S2 data ──
+    def get_clean_title(title: str) -> str:
+        import re
+        return re.sub(r'[^a-z0-9]', '', title.lower())
 
-    if arxiv_papers:
+    s2_by_title = {}
+    for p in s2_papers:
+        c_title = get_clean_title(p.get("title", ""))
+        if c_title:
+            s2_by_title[c_title] = p
+
+    # Deduplicate ArXiv papers and reuse S2 data if available
+    arxiv_to_enrich = []
+    enriched_arxiv = []
+    
+    for p in arxiv_papers:
+        c_title = get_clean_title(p.get("title", ""))
+        matched_s2 = s2_by_title.get(c_title)
+        if matched_s2:
+            merged = {
+                **p,
+                "citation_count": matched_s2.get("citation_count") or 0,
+                "influential_citations": matched_s2.get("influential_citations") or 0,
+                "tldr": matched_s2.get("tldr") or "",
+                "doi": matched_s2.get("doi") or "",
+                "doi_url": matched_s2.get("doi_url") or "",
+                "fields_of_study": matched_s2.get("fields_of_study") or [],
+                "s2_id": matched_s2.get("s2_id") or "",
+                "s2_url": matched_s2.get("s2_url") or "",
+                "venue": matched_s2.get("venue") or p.get("venue", ""),
+            }
+            enriched_arxiv.append(merged)
+        else:
+            arxiv_to_enrich.append(p)
+
+    # For ArXiv papers not in S2 search results, enrich only the top 5 (or top 2 if no API key) to optimize speed and avoid rate limiter timeouts
+    enrich_limit = 5 if os.getenv("S2_API_KEY") else 2
+    arxiv_to_enrich = arxiv_to_enrich[:enrich_limit]
+    if arxiv_to_enrich:
         try:
-            arxiv_papers = await enrich_arxiv_papers_with_s2(arxiv_papers)
+            enriched_new = await enrich_arxiv_papers_with_s2(arxiv_to_enrich)
+            enriched_arxiv.extend(enriched_new)
         except Exception as e:
-            log.warning(f"Failed to enrich arXiv papers with S2: {e}")
+            log.warning(f"Failed to enrich new arXiv papers with S2: {e}")
+            enriched_arxiv.extend(arxiv_to_enrich)
+
+    # Deduplicate CORE papers and reuse S2 data if available
+    enriched_core = []
+    for p in core_papers:
+        c_title = get_clean_title(p.get("title", ""))
+        matched_s2 = s2_by_title.get(c_title)
+        if matched_s2:
+            merged = {
+                **p,
+                "citation_count": matched_s2.get("citation_count") or 0,
+                "influential_citations": matched_s2.get("influential_citations") or 0,
+                "tldr": matched_s2.get("tldr") or "",
+                "doi": matched_s2.get("doi") or "",
+                "doi_url": matched_s2.get("doi_url") or "",
+                "fields_of_study": matched_s2.get("fields_of_study") or [],
+                "s2_id": matched_s2.get("s2_id") or "",
+                "s2_url": matched_s2.get("s2_url") or "",
+                "venue": matched_s2.get("venue") or p.get("venue", ""),
+            }
+            enriched_core.append(merged)
+        else:
+            enriched_core.append(p)
+
+    if enriched_core:
+        enriched_arxiv.extend(enriched_core)
+
+    # Combine all candidate papers
+    all_candidates = []
+    seen_titles = set()
+
+    # Add S2 search results
+    for idx, p in enumerate(s2_papers):
+        c_title = get_clean_title(p.get("title", ""))
+        if c_title and c_title not in seen_titles:
+            seen_titles.add(c_title)
+            p["_source"] = "s2"
+            p["_rank"] = idx
+            all_candidates.append(p)
+
+    # Add enriched ArXiv papers
+    for idx, p in enumerate(enriched_arxiv):
+        c_title = get_clean_title(p.get("title", ""))
+        if c_title and c_title not in seen_titles:
+            seen_titles.add(c_title)
+            p["_source"] = "arxiv"
+            p["_rank"] = idx
+            all_candidates.append(p)
+
+    # Rank candidates by hybrid significance score (relevance rank + citation count + recency bonus)
+    import math
+    for p in all_candidates:
+        rank_score = max(0, 10 - p.get("_rank", 0))
+        citations = p.get("citation_count") or 0
+        citation_bonus = 2.5 * math.log(1 + citations)
+        year = p.get("year")
+        recency_bonus = 0.0
+        try:
+            if year and int(year) >= 2025:
+                recency_bonus = 3.5
+            elif year and int(year) == 2024:
+                recency_bonus = 1.5
+        except ValueError:
+            pass
+        p["_significance_score"] = rank_score + citation_bonus + recency_bonus
+
+    all_candidates.sort(key=lambda x: x.get("_significance_score", 0.0), reverse=True)
+    top_papers = all_candidates[:8]
+
+    arxiv_papers = [p for p in top_papers if p.get("_source") == "arxiv"]
+    s2_papers = [p for p in top_papers if p.get("_source") == "s2"]
 
     if not chunks and not arxiv_papers and not s2_papers:
         sys_p = (
@@ -3775,10 +4350,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
     )
 
     if unique_datasets:
-        try:
-            unique_datasets = await enrich_datasets_with_wikipedia(unique_datasets)
-        except Exception as e:
-            log.warning(f"Error enriching unique datasets with Wikipedia: {e}")
+        # Wikipedia enrichment is disabled in standard Research mode (only runs in Wikipedia Mode)
         try:
             unique_datasets = await enrich_datasets_with_kaggle(unique_datasets)
         except Exception as e:
@@ -3791,6 +4363,8 @@ async def _research_impl(req: ResearchRequest, request: Request):
     elif plan.route == "survey":
         prompt = survey_prompt(query, chunks, graph_nodes, arxiv_papers, s2_papers)
         model = HEAVY_MODEL  # surveys always use heavy model
+    elif plan.route == "conceptual":
+        prompt = conceptual_prompt(query, chunks, graph_nodes, arxiv_papers, s2_papers)
     elif plan.route == "timeline":
         prompt = timeline_prompt(query, chunks, graph_nodes, arxiv_papers, s2_papers)
     else:
@@ -3809,7 +4383,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
     verification = None
     if req.verify and chunks:
         answer, verification, warning = await apply_verification(
-            answer, chunks, REASON_MODEL, rid, warning
+            answer, chunks, REASON_MODEL, rid, warning, arxiv_papers, s2_papers
         )
 
     if verification:
@@ -3898,7 +4472,25 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     if not last_user_msg:
         raise HTTPException(400, "No user message found.")
 
-    log.info(f"[{rid}] CHAT: {last_user_msg}")
+    # Auto-detect wikipedia: / wiki: prefixes
+    is_wiki_prefix = False
+    prefix_query = last_user_msg.strip()
+    if prefix_query.lower().startswith("wikipedia:"):
+        prefix_query = prefix_query[len("wikipedia:"):].strip()
+        is_wiki_prefix = True
+    elif prefix_query.lower().startswith("wiki:"):
+        prefix_query = prefix_query[len("wiki:"):].strip()
+        is_wiki_prefix = True
+
+    if is_wiki_prefix:
+        req.mode = "wikipedia"
+        last_user_msg = prefix_query
+        for m in reversed(req.messages):
+            if m.role == "user":
+                m.content = prefix_query
+                break
+
+    log.info(f"[{rid}] CHAT: {last_user_msg} (mode: {req.mode})")
 
     # ── Wikipedia Mode Direct Search in Chat ──
     if req.mode == "wikipedia":
@@ -4122,7 +4714,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
 
     # ── Route: structured ─────────────────────────────────────────────
     if plan.route == "structured":
-        kw = plan.graph_anchors or plan.vector_keywords or [query]
+        kw = (plan.graph_anchors or []) + (plan.vector_keywords or [])
+        if not kw:
+            kw = [query]
         try:
             papers = await retrieve_graph_papers(
                 keywords=kw, filters=req.filters, anchors=plan.graph_anchors, limit=20
@@ -4208,6 +4802,10 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     # ── Full RAG ──────────────────────────────────────────────────────
     warning = None
 
+    # Combine graph anchors and vector keywords to preserve both specific entities and domain terms
+    search_keywords = (plan.graph_anchors or []) + (plan.vector_keywords or [])
+    search_query = " ".join(search_keywords) if search_keywords else query
+
     async def fetch_graph():
         nonlocal warning
         try:
@@ -4222,9 +4820,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
 
     async def fetch_supabase():
         try:
-            embedding = await create_embedding(
-                " ".join(plan.vector_keywords or plan.graph_anchors or [query])
-            )
+            embedding = await create_embedding(search_query)
         except EmbeddingError as e:
             raise HTTPException(502, str(e))
 
@@ -4237,28 +4833,134 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             raise HTTPException(502, str(e))
 
     async def fetch_arxiv():
-        # Retrieve relevant abstracts from arXiv using extracted keywords (not raw NL query)
-        arxiv_search = " ".join(plan.vector_keywords or plan.graph_anchors or [query])
-        return await retrieve_arxiv_context(arxiv_search, limit=5)
+        # Retrieve relevant abstracts from arXiv using combined keywords (not raw NL query)
+        return await retrieve_arxiv_context(search_query, limit=10)
 
-    graph_nodes, chunks, arxiv_papers = await asyncio.gather(
-        fetch_graph(), fetch_supabase(), fetch_arxiv()
+    async def fetch_s2():
+        try:
+            return await search_papers_s2(search_query, limit=10)
+        except Exception as e:
+            log.warning(f"Failed to fetch S2 papers: {e}")
+            return []
+
+    async def fetch_core():
+        try:
+            return await search_core_papers(search_query, limit=10)
+        except Exception as e:
+            log.warning(f"Failed to fetch CORE papers: {e}")
+            return []
+
+    graph_nodes, chunks, arxiv_papers, s2_papers, core_papers = await asyncio.gather(
+        fetch_graph(), fetch_supabase(), fetch_arxiv(), fetch_s2(), fetch_core()
     )
     chunks = merge_adjacent_chunks(chunks)
     chunks = pack_context_within_budget(chunks, limit_tokens=5000)
 
-    # ── Enrich arXiv papers with S2 + PwC ──
-    try:
-        s2_papers = await search_papers_s2(query, limit=5)
-    except Exception as e:
-        log.warning(f"Failed to fetch S2 papers: {e}")
-        s2_papers = []
+    # ── Deduplicate and Enrich papers with S2 data ──
+    def get_clean_title(title: str) -> str:
+        import re
+        return re.sub(r'[^a-z0-9]', '', title.lower())
 
-    if arxiv_papers:
+    s2_by_title = {}
+    for p in s2_papers:
+        c_title = get_clean_title(p.get("title", ""))
+        if c_title:
+            s2_by_title[c_title] = p
+
+    # Deduplicate ArXiv papers and reuse S2 data if available
+    arxiv_to_enrich = []
+    enriched_arxiv = []
+    
+    for p in arxiv_papers:
+        c_title = get_clean_title(p.get("title", ""))
+        # Check if we already have it in S2 search results
+        matched_s2 = s2_by_title.get(c_title)
+        if matched_s2:
+            # Merge S2 data (citation_count, tldr, etc.)
+            merged = {
+                **p,
+                "citation_count": matched_s2.get("citation_count") or 0,
+                "influential_citations": matched_s2.get("influential_citations") or 0,
+                "tldr": matched_s2.get("tldr") or "",
+                "doi": matched_s2.get("doi") or "",
+                "doi_url": matched_s2.get("doi_url") or "",
+                "fields_of_study": matched_s2.get("fields_of_study") or [],
+                "s2_id": matched_s2.get("s2_id") or "",
+                "s2_url": matched_s2.get("s2_url") or "",
+                "venue": matched_s2.get("venue") or p.get("venue", ""),
+            }
+            enriched_arxiv.append(merged)
+        else:
+            arxiv_to_enrich.append(p)
+
+    # For ArXiv papers not in S2 search results, enrich only the top 5 (or top 2 if no API key) to optimize speed and avoid rate limiter timeouts
+    enrich_limit = 5 if os.getenv("S2_API_KEY") else 2
+    arxiv_to_enrich = arxiv_to_enrich[:enrich_limit]
+    if arxiv_to_enrich:
         try:
-            arxiv_papers = await enrich_arxiv_papers_with_s2(arxiv_papers)
+            enriched_new = await enrich_arxiv_papers_with_s2(arxiv_to_enrich)
+            enriched_arxiv.extend(enriched_new)
         except Exception as e:
-            log.warning(f"Failed to enrich arXiv papers with S2: {e}")
+            log.warning(f"Failed to enrich new arXiv papers with S2: {e}")
+            enriched_arxiv.extend(arxiv_to_enrich)
+
+    if core_papers:
+        enriched_arxiv.extend(core_papers)
+
+    # Combine all candidate papers
+    all_candidates = []
+    seen_titles = set()
+
+    # Add S2 search results
+    for idx, p in enumerate(s2_papers):
+        c_title = get_clean_title(p.get("title", ""))
+        if c_title and c_title not in seen_titles:
+            seen_titles.add(c_title)
+            p["_source"] = "s2"
+            p["_rank"] = idx
+            all_candidates.append(p)
+
+    # Add enriched ArXiv papers
+    for idx, p in enumerate(enriched_arxiv):
+        c_title = get_clean_title(p.get("title", ""))
+        if c_title and c_title not in seen_titles:
+            seen_titles.add(c_title)
+            p["_source"] = "arxiv"
+            p["_rank"] = idx
+            all_candidates.append(p)
+
+    # Rank candidates by hybrid significance score (relevance rank + citation count + recency bonus)
+    import math
+    for p in all_candidates:
+        # Base rank score (lower rank in search is better: 10 - rank)
+        rank_score = max(0, 10 - p.get("_rank", 0))
+        
+        # Citation bonus: 2.5 * ln(1 + citation_count)
+        citations = p.get("citation_count") or 0
+        citation_bonus = 2.5 * math.log(1 + citations)
+        
+        # Recency bonus: ensure recent papers (e.g. 2025/2026) are highly competitive
+        year = p.get("year")
+        recency_bonus = 0.0
+        try:
+            if year and int(year) >= 2025:
+                recency_bonus = 3.5
+            elif year and int(year) == 2024:
+                recency_bonus = 1.5
+        except ValueError:
+            pass
+            
+        p["_significance_score"] = rank_score + citation_bonus + recency_bonus
+
+    # Sort candidates by significance score in descending order
+    all_candidates.sort(key=lambda x: x.get("_significance_score", 0.0), reverse=True)
+
+    # Select the top 8 overall papers
+    top_papers = all_candidates[:8]
+
+    # Split back into arxiv_papers and s2_papers preserving the ranked order for prompts
+    arxiv_papers = [p for p in top_papers if p.get("_source") == "arxiv"]
+    s2_papers = [p for p in top_papers if p.get("_source") == "s2"]
 
     # [BEGIN OPTION A FALLBACK FIX] - Commented out original unconditional fallback
     # if not chunks and not arxiv_papers and not s2_papers and not pdf_context:
@@ -4336,10 +5038,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     )
 
     if unique_datasets:
-        try:
-            unique_datasets = await enrich_datasets_with_wikipedia(unique_datasets)
-        except Exception as e:
-            log.warning(f"Error enriching unique datasets with Wikipedia: {e}")
+        # Wikipedia enrichment is disabled in standard Research mode (only runs in Wikipedia Mode)
         try:
             unique_datasets = await enrich_datasets_with_kaggle(unique_datasets)
         except Exception as e:
@@ -4352,6 +5051,8 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     elif plan.route == "survey":
         prompt = survey_prompt(query, chunks, graph_nodes, arxiv_papers, s2_papers)
         model = HEAVY_MODEL
+    elif plan.route == "conceptual":
+        prompt = conceptual_prompt(query, chunks, graph_nodes, arxiv_papers, s2_papers)
     elif plan.route == "timeline":
         prompt = timeline_prompt(query, chunks, graph_nodes, arxiv_papers, s2_papers)
     else:
@@ -4369,7 +5070,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     verification = None
     if req.verify and chunks:
         answer, verification, warning = await apply_verification(
-            answer, chunks, REASON_MODEL, rid, warning
+            answer, chunks, REASON_MODEL, rid, warning, arxiv_papers, s2_papers
         )
 
     if verification:
@@ -4564,9 +5265,18 @@ async def research_timeline(req: TimelineRequest, request: Request):
     async def fetch_arxiv():
         return await retrieve_arxiv_context(req.topic, limit=3)
 
-    graph_nodes, chunks, arxiv_papers = await asyncio.gather(
-        fetch_graph(), fetch_supabase(), fetch_arxiv()
+    async def fetch_core():
+        try:
+            return await search_core_papers(req.topic, limit=3)
+        except Exception as e:
+            log.warning(f"Failed to fetch CORE papers: {e}")
+            return []
+
+    graph_nodes, chunks, arxiv_papers, core_papers = await asyncio.gather(
+        fetch_graph(), fetch_supabase(), fetch_arxiv(), fetch_core()
     )
+    if core_papers:
+        arxiv_papers.extend(core_papers)
     chunks = merge_adjacent_chunks(chunks)
     chunks = pack_context_within_budget(chunks, limit_tokens=5000)
 
@@ -4636,9 +5346,18 @@ async def research_survey(req: SurveyRequest, request: Request):
     async def fetch_arxiv():
         return await retrieve_arxiv_context(req.topic, limit=3)
 
-    graph_nodes, chunks, arxiv_papers = await asyncio.gather(
-        fetch_graph(), fetch_supabase(), fetch_arxiv()
+    async def fetch_core():
+        try:
+            return await search_core_papers(req.topic, limit=3)
+        except Exception as e:
+            log.warning(f"Failed to fetch CORE papers: {e}")
+            return []
+
+    graph_nodes, chunks, arxiv_papers, core_papers = await asyncio.gather(
+        fetch_graph(), fetch_supabase(), fetch_arxiv(), fetch_core()
     )
+    if core_papers:
+        arxiv_papers.extend(core_papers)
     chunks = merge_adjacent_chunks(chunks)
     chunks = pack_context_within_budget(chunks, limit_tokens=5000)
 

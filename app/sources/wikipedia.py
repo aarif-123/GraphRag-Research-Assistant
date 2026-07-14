@@ -1,3 +1,4 @@
+import os
 import httpx
 import logging
 import urllib.parse
@@ -6,6 +7,9 @@ import time
 from typing import List, Dict, Any, Optional
 
 log = logging.getLogger(__name__)
+
+# WIKIPEDIA API KEY from env (utilises Bearer token auth for Enterprise/Portal endpoints)
+_WIKI_API_KEY = os.getenv("WIKIPEDIA_API_KEY", "").strip()
 
 # Cache search and summary results
 _WIKI_CACHE = {}
@@ -47,8 +51,11 @@ async def search_wikipedia_summary(query: str) -> Optional[Dict[str, Any]]:
     }
 
     headers = {
-        "User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"
+        "User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)",
+        "Accept": "application/json"
     }
+    if _WIKI_API_KEY:
+        headers["Authorization"] = f"Bearer {_WIKI_API_KEY}"
 
     try:
         async with httpx.AsyncClient(headers=headers, timeout=8.0) as client:
