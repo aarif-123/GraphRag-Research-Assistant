@@ -6594,6 +6594,18 @@ async def get_pdf_text(pdf_id: str, request: Request):
     return {"text": doc["text"], "name": doc.get("name", "Document")}
 
 
+def is_whisper_hallucination(text: str) -> bool:
+    if not text:
+        return True
+    # Strip punctuation and lowercase
+    cleaned = "".join(c for c in text if c.isalnum()).lower().strip()
+    hallucinations = {
+        "", "you", "thankyou", "thankyouforwatching", "pleaselikeandsubscribe", 
+        "subscribe", "watching", "bye", "thankyoubye", "thankyousomuch"
+    }
+    return cleaned in hallucinations
+
+
 @app.post("/api/audio/transcribe")
 async def transcribe_audio(request: Request, file: UploadFile = File(...)):
     await set_user_context(request)
@@ -6624,8 +6636,13 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...)):
             "Authorization": f"Bearer {current_key}"
         }
         
+        # Normalize content type by stripping parameters (e.g. codecs=opus)
+        content_type = file.content_type or "audio/webm"
+        if ";" in content_type:
+            content_type = content_type.split(";")[0].strip()
+            
         files = {
-            "file": (file.filename or "speech.webm", content, file.content_type or "audio/webm")
+            "file": (file.filename or "speech.webm", content, content_type)
         }
         data = {
             "model": "whisper-large-v3"
@@ -6642,7 +6659,10 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...)):
             
             if r.status_code == 200:
                 resp_json = r.json()
-                return {"text": resp_json.get("text", "")}
+                text = resp_json.get("text", "")
+                if is_whisper_hallucination(text):
+                    text = ""
+                return {"text": text}
             elif r.status_code == 429:
                 rotate_groq_key()
                 last_err = f"Groq HTTP 429: {r.text[:200]}"

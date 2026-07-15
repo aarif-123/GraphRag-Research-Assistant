@@ -3923,6 +3923,7 @@ async function startSpeechToText() {
     if (state.audioRecording) return;
     state.discardRecording = false;
     state.audioChunks = [];
+    state.maxVolumeRecorded = 0;
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -3957,6 +3958,7 @@ async function startSpeechToText() {
                     sum += Math.abs(timeData[i] - 128);
                 }
                 const volume = sum / timeData.length; // 0 to ~128
+                state.maxVolumeRecorded = Math.max(state.maxVolumeRecorded, volume);
 
                 // Boost factor based on volume to make it dense and responsive
                 const boost = 0.5 + (volume / 6);
@@ -4024,6 +4026,13 @@ async function startSpeechToText() {
             }
 
             if (state.discardRecording) {
+                resetSpeechToTextUI();
+                return;
+            }
+
+            // Check if there was any sound/speech signal recorded
+            if (state.maxVolumeRecorded < 1.5) {
+                alert("No speech detected. Please check your microphone input volume or browser permissions.");
                 resetSpeechToTextUI();
                 return;
             }
