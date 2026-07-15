@@ -488,6 +488,45 @@ function initEventListeners() {
     }
 
     // Profile Modal Event Listeners
+    const pTabDetails = document.getElementById('profile-tab-details');
+    const pTabSecurity = document.getElementById('profile-tab-security');
+    const pTabBilling = document.getElementById('profile-tab-billing');
+
+    const pContentDetails = document.getElementById('profileDetailsTabContent');
+    const pContentSecurity = document.getElementById('profileSecurityTabContent');
+    const pContentBilling = document.getElementById('profileBillingTabContent');
+
+    if (pTabDetails && pTabSecurity && pTabBilling) {
+        const switchProfileTab = (activeTab, activeContent) => {
+            [pTabDetails, pTabSecurity, pTabBilling].forEach(t => {
+                if (t) t.classList.remove('active');
+            });
+            [pContentDetails, pContentSecurity, pContentBilling].forEach(c => {
+                if (c) c.style.display = 'none';
+            });
+            activeTab.classList.add('active');
+            if (activeContent) activeContent.style.display = 'block';
+
+            // Clear message alerts when switching tabs
+            const errorEl = document.getElementById('profileError');
+            const successEl = document.getElementById('profileSuccess');
+            if (errorEl) errorEl.style.display = 'none';
+            if (successEl) successEl.style.display = 'none';
+        };
+
+        pTabDetails.addEventListener('click', () => switchProfileTab(pTabDetails, pContentDetails));
+        pTabSecurity.addEventListener('click', () => switchProfileTab(pTabSecurity, pContentSecurity));
+        pTabBilling.addEventListener('click', () => switchProfileTab(pTabBilling, pContentBilling));
+    }
+
+    const profileUpgradeBtn = document.getElementById('profileUpgradeBtn');
+    if (profileUpgradeBtn) {
+        profileUpgradeBtn.addEventListener('click', () => {
+            if (els.profileModal) els.profileModal.classList.remove('visible');
+            if (els.paymentModal) els.paymentModal.classList.add('visible');
+        });
+    }
+
     if (els.profileSettingsBtn) {
         els.profileSettingsBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -498,6 +537,18 @@ function initEventListeners() {
             const successEl = document.getElementById('profileSuccess');
             if (errorEl) errorEl.style.display = 'none';
             if (successEl) successEl.style.display = 'none';
+
+            // Reset to Account tab on open
+            if (pTabDetails && pContentDetails) {
+                [pTabDetails, pTabSecurity, pTabBilling].forEach(t => {
+                    if (t) t.classList.remove('active');
+                });
+                [pContentDetails, pContentSecurity, pContentBilling].forEach(c => {
+                    if (c) c.style.display = 'none';
+                });
+                pTabDetails.classList.add('active');
+                pContentDetails.style.display = 'block';
+            }
 
             // Load user profile details
             try {
@@ -554,6 +605,39 @@ function initEventListeners() {
                     }
                 } catch (payErr) {
                     console.error("Failed to load payment history:", payErr);
+                }
+
+                // Fetch and display plan/credit info
+                try {
+                    const creditsRes = await fetch('/api/credits', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (creditsRes.ok) {
+                        const cData = await creditsRes.json();
+                        const profilePlanName = document.getElementById('profilePlanName');
+                        const profilePlanCredits = document.getElementById('profilePlanCredits');
+                        const profileUpgradeBtn = document.getElementById('profileUpgradeBtn');
+                        const profileProBadge = document.getElementById('profileProBadge');
+
+                        if (cData.is_unlimited || cData.plan === 'pro') {
+                            if (profilePlanName) profilePlanName.textContent = 'Pro Plan (Unlimited)';
+                            if (profilePlanCredits) profilePlanCredits.style.display = 'none';
+                            if (profileUpgradeBtn) profileUpgradeBtn.style.display = 'none';
+                            if (profileProBadge) profileProBadge.style.display = 'inline-block';
+                        } else {
+                            if (profilePlanName) profilePlanName.textContent = 'Free Tier';
+                            if (profilePlanCredits) {
+                                const remaining = cData.credits_remaining ?? 0;
+                                const limit = cData.credits_limit ?? 20;
+                                profilePlanCredits.textContent = `${remaining} / ${limit} credits remaining today`;
+                                profilePlanCredits.style.display = 'block';
+                            }
+                            if (profileUpgradeBtn) profileUpgradeBtn.style.display = 'block';
+                            if (profileProBadge) profileProBadge.style.display = 'none';
+                        }
+                    }
+                } catch (creditsErr) {
+                    console.error("Failed to load plan details for profile:", creditsErr);
                 }
 
                 els.profileModal.classList.add('visible');
@@ -2044,20 +2128,18 @@ function updateCreditPill(credits) {
     const icon = document.getElementById('creditIcon');
     if (!pill || !text) return;
 
-    pill.style.display = 'flex';
-
-    if (!credits) return;
+    if (!credits) {
+        pill.style.display = 'none';
+        return;
+    }
 
     if (credits.is_unlimited || credits.plan === 'pro') {
-        // Pro: show infinity + PRO badge
-        text.textContent = '\u221e';
-        pill.style.borderColor = 'rgba(167,139,250,0.4)';
-        pill.style.background = 'rgba(167,139,250,0.1)';
-        pill.style.color = '#a78bfa';
-        if (badge) badge.style.display = 'inline';
-        if (icon) icon.setAttribute('stroke', '#a78bfa');
+        // Pro/Unlimited: hide the entire credit pill
+        pill.style.display = 'none';
         if (els.upgradeDropdownBtn) els.upgradeDropdownBtn.style.display = 'none';
     } else {
+        // Free plan: show credits remaining
+        pill.style.display = 'flex';
         const remaining = credits.credits_remaining ?? 0;
         const limit = credits.credits_limit ?? 20;
         const pct = remaining / limit;
@@ -2084,6 +2166,7 @@ function updateCreditPill(credits) {
             pill.style.color = '#ef4444';
             if (icon) icon.setAttribute('stroke', '#ef4444');
         }
+
 
         // Pulse animation when very low
         if (remaining <= 3 && remaining > 0) {
@@ -2246,26 +2329,17 @@ function addAssistantMessage(data, stream = true) {
     </span>`);
     */
 
+
     const copyBtnHtml = `<span class="message-stat btn-copy" data-copy-target=".message-content">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
         Copy
     </span>`;
 
-    let bibtexHtml = '';
     let matrixHtml = '';
     if (data.papers && data.papers.length > 0) {
-        // Construct BibTeX block
-        const bibtexPayload = btoa(unescape(encodeURIComponent(data.papers.map(p => {
-            const authorLast = p.author ? p.author.split(' ').pop() : 'Unknown';
-            const yearStr = p.year || '2020';
-            const id = `${authorLast}${yearStr}${p.title.replace(/\W/g, '').substring(0, 8)}`;
-            return `@article{${id},\n  title={${p.title}},\n  author={${p.author || 'Unknown'}},\n  year={${yearStr}},\n  journal={${p.domain || 'Tech. Report'}}\n}`;
-        }).join('\n\n'))));
-        bibtexHtml = `<span class="message-stat btn-copy" style="color: var(--accent-cyan);" onclick="navigator.clipboard.writeText(decodeURIComponent(escape(atob('${bibtexPayload}')))); this.innerHTML='(Copied!)'; setTimeout(()=>this.innerHTML='BibTeX Export', 2000)">BibTeX Export</span>`;
-
         // Matrix Generator Feature
         const topTitles = data.papers.slice(0, 4).map(p => p.title).join(' | ');
-        matrixHtml = `<span class="message-stat btn-copy" style="color: var(--accent-emerald);" onclick="document.getElementById('queryInput').value = 'Generate a tight markdown comparison matrix table for these papers: ${topTitles.replace(/'/g, "\'")} (Compare Methodology, Datasets, and Accuracy)'; document.getElementById('queryInput').focus(); document.getElementById('sendBtn').click();">Matrix Summary</span>`;
+        matrixHtml = `<span class="message-stat btn-copy" style="color: var(--accent-emerald);" onclick="document.getElementById('queryInput').value = 'Generate a tight markdown comparison matrix table for these papers: ${topTitles.replace(/'/g, "\\'")} (Compare Methodology, Datasets, and Accuracy)'; document.getElementById('queryInput').focus(); document.getElementById('sendBtn').click();">Matrix Summary</span>`;
     }
 
     div.innerHTML = `
@@ -2285,11 +2359,12 @@ function addAssistantMessage(data, stream = true) {
             <div class="message-footer" style="opacity: 0; transition: opacity 0.5s;">
                 <div class="message-stats-group">${stats.join('')}</div>
                 <div class="message-actions-group">
-                    ${copyBtnHtml} ${bibtexHtml} ${matrixHtml}
+                    ${copyBtnHtml} ${matrixHtml}
                 </div>
             </div>
         </div>
     `;
+
 
     els.chatMessages.appendChild(div);
     const contentDiv = div.querySelector('.message-content');
@@ -2847,7 +2922,56 @@ async function postProcessResponse(container) {
                     wrapper.innerHTML = svgContent;
                     wrapper.style.position = 'relative';
 
-                    // Add zoom controls
+                    // ── Auto-size: give the diagram room based on its natural dimensions ──
+                    // Mermaid renders the SVG with explicit width/height attributes that
+                    // reflect the content size. We read those here (before any style
+                    // overrides) to decide whether to fit or scroll, and to enforce a
+                    // sensible minimum height so long horizontal diagrams aren't squished.
+                    const svgEl = wrapper.querySelector('svg');
+                    let naturalW = 0;
+                    let naturalH = 0;
+                    if (svgEl) {
+                        // Prefer the viewBox or explicit attrs over getBBox (layout not yet painted)
+                        const vb = svgEl.getAttribute('viewBox');
+                        if (vb) {
+                            const parts = vb.trim().split(/[\s,]+/);
+                            naturalW = parseFloat(parts[2]) || 0;
+                            naturalH = parseFloat(parts[3]) || 0;
+                        }
+                        if (!naturalW) naturalW = parseFloat(svgEl.getAttribute('width'))  || 0;
+                        if (!naturalH) naturalH = parseFloat(svgEl.getAttribute('height')) || 0;
+                    }
+
+                    // Container's available width (wrapper is not yet in DOM, approximate via parent)
+                    const availW = (wrapper.parentElement && wrapper.parentElement.offsetWidth)
+                        ? wrapper.parentElement.offsetWidth - 32   // subtract wrapper padding
+                        : 700;
+
+                    // Always keep a useful minimum height (clamped 140px–520px)
+                    // so that even a 30px-tall squished SVG is readable.
+                    const minH = naturalH > 0
+                        ? Math.min(Math.max(Math.round(naturalH * 1.05), 140), 520)
+                        : 180;
+                    wrapper.style.minHeight = `${minH}px`;
+
+                    // If the diagram is naturally wider than the container, default to
+                    // scroll mode so it renders at its true size instead of being crushed.
+                    let zoomState = 'fit';
+                    if (svgEl) {
+                        if (naturalW > availW * 0.95) {
+                            // Wide diagram — use scroll mode by default
+                            zoomState = 'scroll';
+                            svgEl.style.setProperty('max-width', 'none', 'important');
+                            svgEl.style.setProperty('width', 'auto', 'important');
+                            svgEl.style.setProperty('height', `${minH - 24}px`, 'important');
+                            wrapper.style.alignItems = 'flex-start';
+                        } else {
+                            // Fits comfortably — fit-width mode
+                            svgEl.style.setProperty('max-width', '100%', 'important');
+                            svgEl.style.setProperty('width', '100%', 'important');
+                        }
+                    }
+
                     const controls = document.createElement('div');
                     controls.className = 'mermaid-controls';
                     controls.style.position = 'absolute';
@@ -2881,34 +3005,32 @@ async function postProcessResponse(container) {
                         btnZoom.style.borderColor = 'rgba(255, 255, 255, 0.1)';
                     });
 
-                    // State: 'fit' by default, toggle to 'scroll'
-                    let zoomState = 'fit';
+                    // Sync initial button icon with the auto-detected zoom state
+                    const _fitIcon   = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 12h16M4 12l4-4m-4 4l4 4m12-8l4 4-4 4"/></svg>`;
+                    const _scrollIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 12H4M8 8l-4 4 4 4m8-8l4 4-4 4"/></svg>`;
+                    btnZoom.innerHTML = zoomState === 'scroll' ? _scrollIcon : _fitIcon;
+
                     btnZoom.addEventListener('click', () => {
-                        const svgEl = wrapper.querySelector('svg');
-                        if (!svgEl) return;
+                        const svgEl2 = wrapper.querySelector('svg');
+                        if (!svgEl2) return;
 
                         if (zoomState === 'fit') {
                             zoomState = 'scroll';
-                            svgEl.style.setProperty('max-width', 'none', 'important');
-                            svgEl.style.setProperty('width', 'auto', 'important');
-                            wrapper.style.alignItems = 'flex-start'; // Align left when scrolling
-                            btnZoom.innerHTML = `
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                    <path d="M20 12H4M8 8l-4 4 4 4m8-8l4 4-4 4"/>
-                                </svg>
-                            `;
+                            svgEl2.style.setProperty('max-width', 'none', 'important');
+                            svgEl2.style.setProperty('width', 'auto', 'important');
+                            svgEl2.style.setProperty('height', `${minH - 24}px`, 'important');
+                            wrapper.style.alignItems = 'flex-start';
+                            btnZoom.innerHTML = _scrollIcon;
                         } else {
                             zoomState = 'fit';
-                            svgEl.style.setProperty('max-width', '100%', 'important');
-                            svgEl.style.setProperty('width', '100%', 'important');
+                            svgEl2.style.removeProperty('height');
+                            svgEl2.style.setProperty('max-width', '100%', 'important');
+                            svgEl2.style.setProperty('width', '100%', 'important');
                             wrapper.style.alignItems = 'center';
-                            btnZoom.innerHTML = `
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                    <path d="M4 12h16M4 12l4-4m-4 4l4 4m12-8l4 4-4 4"/>
-                                </svg>
-                            `;
+                            btnZoom.innerHTML = _fitIcon;
                         }
                     });
+
 
                     // Fullscreen control button
                     const btnFullscreen = document.createElement('button');

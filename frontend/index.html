@@ -641,86 +641,111 @@
                 <div id="profileSuccess" class="auth-success-msg"
                     style="margin-bottom: 12px; display: none; color: var(--accent-emerald);"></div>
 
-                <form id="profileForm" style="display: flex; flex-direction: column; gap: 16px;">
-                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                        <label
-                            style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Email
-                            Address (Read-only)</label>
-                        <input type="email" id="profileEmail" readonly
-                            style="background: rgba(0,0,0,0.25); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-muted); cursor: not-allowed; width: 100%; box-sizing: border-box;" />
+                <!-- Profile Tabs -->
+                <div class="auth-tabs" style="margin-bottom: 20px;">
+                    <button type="button" id="profile-tab-details" class="auth-tab active">Account</button>
+                    <button type="button" id="profile-tab-security" class="auth-tab">Security</button>
+                    <button type="button" id="profile-tab-billing" class="auth-tab">Billing</button>
+                </div>
+
+                <!-- Tab content 1: Account Details -->
+                <div id="profileDetailsTabContent">
+                    <form id="profileForm" style="display: flex; flex-direction: column; gap: 16px;">
+                        <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                            <label
+                                style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Email
+                                Address (Read-only)</label>
+                            <input type="email" id="profileEmail" readonly
+                                style="background: rgba(0,0,0,0.25); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-muted); cursor: not-allowed; width: 100%; box-sizing: border-box;" />
+                        </div>
+
+                        <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="profileFullName"
+                                style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Full
+                                Name</label>
+                            <input type="text" id="profileFullName" placeholder="Your display name"
+                                style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
+                        </div>
+
+                        <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="profileInstitution"
+                                style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Institution
+                                / Organization</label>
+                            <input type="text" id="profileInstitution" placeholder="e.g. Stanford University"
+                                style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
+                        </div>
+
+                        <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="profileRole"
+                                style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Academic
+                                Role</label>
+                            <select id="profileRole"
+                                style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box; font-family: inherit; font-size: 14px;">
+                                <option value="">Select your role...</option>
+                                <option value="Researcher">Researcher</option>
+                                <option value="Student">Student</option>
+                                <option value="Professor">Professor / Faculty</option>
+                                <option value="Developer">Software Engineer</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+
+                        <button type="submit" id="saveProfileBtn" class="btn btn-primary"
+                            style="margin-top: 4px; padding: 12px; font-weight: 600;">Update Profile Details</button>
+                    </form>
+                </div>
+
+                <!-- Tab content 2: Security -->
+                <div id="profileSecurityTabContent" style="display: none;">
+                    <form id="passwordForm" style="display: flex; flex-direction: column; gap: 16px;">
+                        <!-- Hidden username field for accessibility -->
+                        <input type="text" id="passwordFormUsername" autocomplete="username" style="display: none;" readonly />
+                        <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">Change
+                            Password</h3>
+
+                        <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="profilePassword"
+                                style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">New
+                                Password</label>
+                            <input type="password" id="profilePassword" autocomplete="new-password"
+                                placeholder="At least 6 characters" required
+                                style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
+                        </div>
+
+                        <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="profileConfirmPassword"
+                                style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Confirm
+                                New Password</label>
+                            <input type="password" id="profileConfirmPassword" autocomplete="new-password"
+                                placeholder="Repeat password" required
+                                style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
+                        </div>
+
+                        <button type="submit" id="savePasswordBtn" class="btn btn-secondary"
+                            style="padding: 12px; font-weight: 600;">Update Password</button>
+                    </form>
+                </div>
+
+                <!-- Tab content 3: Billing & Subscription -->
+                <div id="profileBillingTabContent" style="display: none;">
+                    <!-- Active Plan Info Card -->
+                    <div id="profilePlanCard" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(167, 139, 250, 0.05)); border: 1px solid var(--surface-glass-border); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 4px;">Current Plan</div>
+                            <div id="profilePlanName" style="font-size: 18px; font-weight: 700; color: var(--text-primary);">Loading...</div>
+                            <div id="profilePlanCredits" style="font-size: 13px; color: var(--text-secondary); margin-top: 4px; display: none;"></div>
+                        </div>
+                        <div>
+                            <button type="button" id="profileUpgradeBtn" class="btn btn-primary" style="padding: 8px 16px; font-size: 13px; font-weight: 600; display: none;">Upgrade to Pro</button>
+                            <span id="profileProBadge" style="display: none; background: linear-gradient(135deg, #6366f1, #a78bfa); color: white; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; box-shadow: 0 4px 12px rgba(99,102,241,0.2);">PRO</span>
+                        </div>
                     </div>
 
-                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                        <label for="profileFullName"
-                            style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Full
-                            Name</label>
-                        <input type="text" id="profileFullName" placeholder="Your display name"
-                            style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
-                    </div>
-
-                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                        <label for="profileInstitution"
-                            style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Institution
-                            / Organization</label>
-                        <input type="text" id="profileInstitution" placeholder="e.g. Stanford University"
-                            style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
-                    </div>
-
-                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                        <label for="profileRole"
-                            style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Academic
-                            Role</label>
-                        <select id="profileRole"
-                            style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box; font-family: inherit; font-size: 14px;">
-                            <option value="">Select your role...</option>
-                            <option value="Researcher">Researcher</option>
-                            <option value="Student">Student</option>
-                            <option value="Professor">Professor / Faculty</option>
-                            <option value="Developer">Software Engineer</option>
-                            <option value="Other">Other</option>
-                        </select>
-                    </div>
-
-                    <button type="submit" id="saveProfileBtn" class="btn btn-primary"
-                        style="margin-top: 4px; padding: 12px; font-weight: 600;">Update Profile Details</button>
-                </form>
-
-                <div style="height: 1px; background: var(--glass-border); margin: 24px 0 16px 0;"></div>
-
-                <form id="passwordForm" style="display: flex; flex-direction: column; gap: 16px;">
-                    <!-- Hidden username field for accessibility -->
-                    <input type="text" id="passwordFormUsername" autocomplete="username" style="display: none;" readonly />
-                    <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">Change
-                        Password</h3>
-
-                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                        <label for="profilePassword"
-                            style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">New
-                            Password</label>
-                        <input type="password" id="profilePassword" autocomplete="new-password"
-                            placeholder="At least 6 characters" required
-                            style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
-                    </div>
-
-                    <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                        <label for="profileConfirmPassword"
-                            style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">Confirm
-                            New Password</label>
-                        <input type="password" id="profileConfirmPassword" autocomplete="new-password"
-                            placeholder="Repeat password" required
-                            style="background: var(--bg-primary); border: 1px solid var(--surface-glass-border); padding: 10px; border-radius: var(--radius-md); color: var(--text-primary); width: 100%; box-sizing: border-box;" />
-                    </div>
-
-                    <button type="submit" id="savePasswordBtn" class="btn btn-secondary"
-                        style="padding: 12px; font-weight: 600;">Update Password</button>
-                </form>
-
-                <div style="height: 1px; background: var(--glass-border); margin: 24px 0 16px 0;"></div>
-
-                <div id="billingHistorySection" style="display: flex; flex-direction: column; gap: 8px;">
-                    <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">Subscription & Billing History</h3>
-                    <div id="billingHistoryList" style="display: flex; flex-direction: column; gap: 8px; max-height: 180px; overflow-y: auto; padding-right: 4px;">
-                        <div style="font-size: 13px; color: var(--text-secondary); text-align: center; padding: 12px 0;">Loading payment history...</div>
+                    <div id="billingHistorySection" style="display: flex; flex-direction: column; gap: 8px;">
+                        <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">Subscription & Billing History</h3>
+                        <div id="billingHistoryList" style="display: flex; flex-direction: column; gap: 8px; max-height: 180px; overflow-y: auto; padding-right: 4px;">
+                            <div style="font-size: 13px; color: var(--text-secondary); text-align: center; padding: 12px 0;">Loading payment history...</div>
+                        </div>
                     </div>
                 </div>
             </div>
