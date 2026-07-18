@@ -97,3 +97,19 @@ ingestion/dblp-v10.csv
 ingestion/paper_chunks_rows.csv
 ingestion/*.csv
 ingestion/*.json
+
+# ──────────────────────────────────────────
+# Scratch / temporary dev files
+# ──────────────────────────────────────────
+scratch_*.py
+commit_msg.txt
+tmp_*/
+tmp_ponytail/
+fix_symbols.py
+connectivity_report.json
+project_summary_report.md
+test_server_output.log
+test_prompt.py
+test_research_cycle.py
+test_sources.py
+test_arxiv_debug.py

@@ -23,6 +23,10 @@ from .kaggle import (
     search_kaggle_dataset,
     enrich_datasets_with_kaggle,
 )
+from .openalex import (
+    search_openalex,
+    enrich_arxiv_papers_with_openalex,
+)
 
 __all__ = [
     "search_papers_s2",
@@ -36,4 +40,6 @@ __all__ = [
     "enrich_datasets_with_wikipedia",
     "search_kaggle_dataset",
     "enrich_datasets_with_kaggle",
+    "search_openalex",
+    "enrich_arxiv_papers_with_openalex",
 ]

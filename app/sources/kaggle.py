@@ -10,7 +10,7 @@ import httpx
 import logging
 from typing import List, Dict, Any, Optional
 
-log = logging.getLogger("graphrag.kaggle")
+log = logging.getLogger("aether.kaggle")
 
 # In-memory TTL cache to minimize API calls
 _KAGGLE_CACHE: Dict[str, Any] = {}

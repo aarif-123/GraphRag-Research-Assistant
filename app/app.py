@@ -96,7 +96,7 @@ except ImportError:
 
 import threading
 
-# External source connectors (Semantic Scholar, Papers with Code)
+# External source connectors (Semantic Scholar, Papers with Code, OpenAlex)
 try:
     from app.sources.semantic_scholar import (
         enrich_arxiv_papers_with_s2,
@@ -116,11 +116,15 @@ try:
     from app.sources.core import (
         search_core_papers,
     )
+    from app.sources.openalex import (
+        search_openalex,
+        enrich_arxiv_papers_with_openalex,
+    )
     _SOURCES_AVAILABLE = True
 except ImportError as e:
     _SOURCES_AVAILABLE = False
-    log = logging.getLogger("graphrag")
-    log.warning(f"External source connectors not found — S2/PwC/Wikipedia/Kaggle/CORE disabled (error: {e})")
+    log = logging.getLogger("aether")
+    log.warning(f"External source connectors not found — S2/PwC/Wikipedia/Kaggle/CORE/OpenAlex disabled (error: {e})")
     async def enrich_arxiv_papers_with_s2(papers, **kw): return papers
     async def search_papers_s2(query, **kw): return []
     async def enrich_arxiv_papers_with_pwc(papers, **kw): return papers
@@ -129,6 +133,8 @@ except ImportError as e:
     async def search_kaggle_dataset(query, **kw): return None
     async def enrich_datasets_with_kaggle(datasets, **kw): return datasets
     async def search_core_papers(query, **kw): return []
+    async def search_openalex(query, **kw): return None
+    async def enrich_arxiv_papers_with_openalex(papers, **kw): return papers
 
 # ================================================================
 # THREAD-LOCAL SUPABASE CLIENT
@@ -190,6 +196,7 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-base-en")
 REASON_MODEL = os.getenv("REASON_MODEL", "openai/gpt-oss-20b")
 HEAVY_MODEL = os.getenv("HEAVY_MODEL", "llama-3.3-70b-versatile")
 PLAN_MODEL = os.getenv("PLAN_MODEL", "openai/gpt-oss-20b")  # strategic brain
+FREEZE_RETRIEVAL = os.getenv("FREEZE_RETRIEVAL", "false").lower() == "true"
 
 MAX_GRAPH_NODES = int(os.getenv("MAX_GRAPH_NODES", "25"))
 GROQ_TIMEOUT = int(os.getenv("GROQ_TIMEOUT", "30"))
@@ -228,7 +235,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     handlers=_log_handlers,
 )
-log = logging.getLogger("graphrag")
+log = logging.getLogger("aether")
 
 
 # ================================================================
@@ -572,6 +579,25 @@ else:
 
 
 # ================================================================
+# UPSTASH REDIS CONFIGURATION
+# ================================================================
+UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL")
+UPSTASH_REDIS_REST_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+
+upstash_redis = None
+local_chunks_cache = {}  # Fallback in-memory cache: {url_hash: [chunks]}
+local_embeddings_cache = {}  # Fallback in-memory cache: {url_hash: [[embeddings]]}
+
+if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+    try:
+        from upstash_redis import Redis as UpstashRedis
+        upstash_redis = UpstashRedis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
+        log.info("Upstash Redis client initialized successfully for PDF caching.")
+    except Exception as e:
+        log.warning(f"Failed to initialize Upstash Redis client: {e}. Using in-memory fallback.")
+
+
+# ================================================================
 # PYDANTIC MODELS
 # ================================================================
 
@@ -689,7 +715,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Aether GraphRAG Research API",
+    title="Aether Research API",
     version="4.0.0",
     description="Graph-augmented RAG for academic research — Intelligence Edition",
     lifespan=lifespan,
@@ -1108,6 +1134,12 @@ STEP 2 — CLASSIFY ROUTE (pick exactly one):
   "rag"            → explanation or analysis of a SPECIFIC named concept, paper, or mechanism
                      (e.g., "how does FlashAttention work?", "explain RLHF"). Not broad field surveys.
   "chitchat"       → greeting or non-research question.
+  "context_only"   → conversational follow-up, clarification, formatting/summarization request, or query
+                     that can be answered entirely using the CONVERSATION HISTORY and the information
+                     already presented.
+                     Trigger: "explain the second point", "summarize what you said", "tell me more about that first paper",
+                     "rewrite your previous response as a table", "thanks, that makes sense".
+
 
 STEP 3 — EXTRACT GRAPH ANCHORS
   1–3 minimal paper title substrings or author names for Neo4j lookup.
@@ -1148,6 +1180,7 @@ Respond ONLY with a valid JSON object. No markdown. No explanation outside JSON.
 ━━━ HARD RULES ━━━
 - entity_lookup → graph_anchors MUST have exactly 1 entry; vector_keywords SHOULD be [].
 - chitchat → ALL retrieval fields MUST be []. No search triggered.
+- context_only → ALL retrieval fields MUST be []. No search triggered.
 - ambiguous=true → standalone_query ends with " [UNRESOLVED]", route = "rag".
 - compare → graph_anchors MUST have exactly 2 entries (one per paper).
 - survey → vector_keywords MUST have 4–5 entries spanning distinct sub-areas.
@@ -1291,6 +1324,10 @@ async def retrieve_graph_papers(
       2. Expand: CITES, CITED_BY, WRITTEN_BY co-authors, PUBLISHED_IN venue peers
       3. Rank by relevance to anchors
     """
+    if FREEZE_RETRIEVAL:
+        log.info("Database retrieval is frozen. Skipping retrieve_graph_papers.")
+        return []
+
     if not pool.neo4j:
         raise GraphRetrievalError("Neo4j not connected")
 
@@ -1467,6 +1504,9 @@ async def retrieve_graph_papers(
 
 async def get_paper_full(paper_id_or_title: str) -> Optional[Dict]:
     """Fetch a single paper with all its relationships from Neo4j."""
+    if FREEZE_RETRIEVAL:
+        return None
+
     if not pool.neo4j:
         return None
 
@@ -1517,6 +1557,9 @@ async def get_paper_full(paper_id_or_title: str) -> Optional[Dict]:
 
 async def get_author_network(author_name: str) -> Dict:
     """Get an author's ego-network: papers, co-authors, venues."""
+    if FREEZE_RETRIEVAL:
+        return {}
+
     if not pool.neo4j:
         return {}
 
@@ -1557,6 +1600,9 @@ async def get_author_network(author_name: str) -> Dict:
 
 async def get_citation_path(from_title: str, to_title: str, max_depth: int = 4) -> Dict:
     """Find shortest citation path between two papers."""
+    if FREEZE_RETRIEVAL:
+        return {"path_titles": [], "path_length": -1}
+
     if not pool.neo4j:
         return {}
 
@@ -1599,6 +1645,9 @@ async def get_citation_path(from_title: str, to_title: str, max_depth: int = 4) 
 
 async def get_trending_papers(limit: int = 10) -> List[Dict]:
     """Papers with high recent citation velocity (cited in last 2 years)."""
+    if FREEZE_RETRIEVAL:
+        return []
+
     if not pool.neo4j:
         return []
 
@@ -1638,6 +1687,9 @@ async def get_trending_papers(limit: int = 10) -> List[Dict]:
 
 async def get_graph_stats() -> Dict:
     """Database statistics from Neo4j and Supabase."""
+    if FREEZE_RETRIEVAL:
+        return {}
+
     if not pool.neo4j:
         return {}
 
@@ -1670,6 +1722,9 @@ async def get_graph_stats() -> Dict:
 
 async def get_co_citation_cluster(paper_ids: List[str], limit: int = 10) -> List[Dict]:
     """Find papers frequently cited together with the given papers (co-citation)."""
+    if FREEZE_RETRIEVAL:
+        return []
+
     if not pool.neo4j or not paper_ids:
         return []
 
@@ -1713,6 +1768,10 @@ async def vector_search(
     match_count: int,
     filter_ids: Optional[List[str]] = None,
 ) -> List[Dict]:
+    if FREEZE_RETRIEVAL:
+        log.info("Database retrieval is frozen. Skipping vector_search.")
+        return []
+
     if not pool.supabase:
         raise VectorSearchError("Supabase not connected")
     try:
@@ -1744,6 +1803,10 @@ async def hybrid_search(
     match_count: int,
     filter_ids: Optional[List[str]] = None,
 ) -> List[Dict]:
+    if FREEZE_RETRIEVAL:
+        log.info("Database retrieval is frozen. Skipping hybrid_search.")
+        return []
+
     if not pool.supabase:
         raise VectorSearchError("Supabase not connected")
     try:
@@ -1785,7 +1848,7 @@ def _bge_normalize(vec: List[float]) -> List[float]:
     return (arr / norm).tolist() if norm > 0.0 else vec
 
 
-async def create_embedding(text: str) -> List[float]:
+async def create_embedding(text: str, bypass_freeze: bool = False) -> List[float]:
     """
     Convert text to a BAAI/bge-base-en embedding vector.
 
@@ -1796,6 +1859,10 @@ async def create_embedding(text: str) -> List[float]:
 
     Locally (if sentence-transformers is installed): uses local model.
     """
+    if FREEZE_RETRIEVAL and not bypass_freeze:
+        log.debug("Database retrieval is frozen. Skipping embedding generation.")
+        return [0.0] * 768
+
     # BGE models require a specific query instruction prefix for retrieval tasks
     query_text = f"Represent this sentence for searching relevant passages: {text}"
 
@@ -1868,6 +1935,110 @@ async def create_embedding(text: str) -> List[float]:
         raise
     except Exception as exc:
         raise EmbeddingError(f"BAAI/bge-base-en HF API embedding failed: {exc}")
+
+
+async def create_embeddings_batch(texts: List[str], bypass_freeze: bool = False) -> List[List[float]]:
+    """
+    Convert a list of texts to BAAI/bge-base-en embedding vectors.
+    Resolves cached embeddings first, then processes missing embeddings:
+    - Locally: uses local model.encode() in a single thread/call.
+    - On Vercel: processes missing texts in batches of 16 using HF Inference API.
+    """
+    if not texts:
+        return []
+
+    if FREEZE_RETRIEVAL and not bypass_freeze:
+        log.debug("Database retrieval is frozen. Skipping batch embedding generation.")
+        return [[0.0] * 768 for _ in texts]
+
+    results = [None] * len(texts)
+    missing_indices = []
+    missing_query_texts = []
+
+    for i, text in enumerate(texts):
+        query_text = f"Represent this sentence for searching relevant passages: {text}"
+        ck = cache_key(query_text)
+        cached = get_cache("embed", ck)
+        if cached:
+            results[i] = cached
+        else:
+            missing_indices.append(i)
+            missing_query_texts.append((query_text, ck))
+
+    if not missing_indices:
+        return results
+
+    # 1. Primary path: local model
+    if embed_model is not None:
+        try:
+            raw_texts = [item[0] for item in missing_query_texts]
+            embs = await asyncio.to_thread(
+                embed_model.encode,
+                raw_texts,
+                normalize_embeddings=True,
+                show_progress_bar=False
+            )
+            for idx, raw_idx in enumerate(missing_indices):
+                emb_list = embs[idx].tolist()
+                set_cache("embed", missing_query_texts[idx][1], emb_list)
+                results[raw_idx] = emb_list
+            return results
+        except Exception as exc:
+            log.warning(f"Local BGE batch encoding failed, falling back to HF API: {exc}")
+
+    # 2. Vercel path: HuggingFace Inference API in batches of 16
+    if not HF_TOKEN:
+        raise EmbeddingError(
+            "HF_TOKEN not set. Required for BAAI/bge-base-en embeddings on Vercel."
+        )
+
+    batch_size = 16
+    url = f"https://router.huggingface.co/hf-inference/models/{EMBED_MODEL}/pipeline/feature-extraction"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(EMBED_TIMEOUT, connect=5.0)) as client:
+        for offset in range(0, len(missing_query_texts), batch_size):
+            batch = missing_query_texts[offset : offset + batch_size]
+            batch_inputs = [item[0] for item in batch]
+            payload = {"inputs": batch_inputs}
+
+            try:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 503:
+                    wait = min(int(resp.headers.get("Retry-After", "5")), 10)
+                    await asyncio.sleep(wait)
+                    resp = await client.post(url, headers=headers, json=payload)
+
+                if resp.status_code != 200:
+                    raise EmbeddingError(
+                        f"HF embedding HTTP {resp.status_code}: {resp.text[:300]}"
+                    )
+
+                data = resp.json()
+                
+                if isinstance(data, list) and len(data) > 0:
+                    # HF returns [[[...], [...]]] or [[...], [...]]
+                    if isinstance(data[0], list) and len(data[0]) > 0 and isinstance(data[0][0], list):
+                        data = [item[0] for item in data]
+                    
+                    for idx, emb in enumerate(data):
+                        norm_emb = _bge_normalize(emb)
+                        raw_idx = missing_indices[offset + idx]
+                        ck = batch[idx][1]
+                        set_cache("embed", ck, norm_emb)
+                        results[raw_idx] = norm_emb
+                else:
+                    raise EmbeddingError(f"Unexpected response format from HF API: {type(data)}")
+
+            except Exception as e:
+                log.error(f"Error in HuggingFace batch embedding call: {e}")
+                raise EmbeddingError(f"HuggingFace batch embedding failed: {str(e)}")
+
+    for i in range(len(results)):
+        if results[i] is None:
+            results[i] = [0.0] * 768
+
+    return results
 
 
 # ================================================================
@@ -2516,6 +2687,137 @@ async def get_or_parse_pdf_safe(url: str, raise_on_error: bool = False) -> Tuple
         return "", []
 
 
+def chunk_document_text(text: str) -> List[str]:
+    """Splits raw document text into semantic chunks using LangChain's text splitter."""
+    if not text:
+        return []
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    # 1000 characters per chunk, with 200 characters overlap
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    return splitter.split_text(text)
+
+
+async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
+    """
+    Retrieves the most semantically relevant chunks of a PDF using FAISS.
+    Caches parsed PDF chunks and their corresponding embeddings in Upstash Redis
+    to bypass both parsing and embedding generation on subsequent calls.
+    """
+    if not url:
+        return []
+
+    import hashlib
+    import json
+    import zlib
+    import base64
+    import faiss
+    import numpy as np
+
+    url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()
+    redis_key = f"pdf:chunks:{url_hash}"
+    redis_emb_key = f"pdf:embeddings:{url_hash}"
+    chunks = None
+    embeddings = None
+
+    # 1. Try retrieving cached chunks and embeddings from Upstash Redis (base64 compressed)
+    if upstash_redis:
+        try:
+            b64_str = upstash_redis.get(redis_key)
+            if b64_str:
+                compressed_data = base64.b64decode(b64_str.encode("utf-8"))
+                decompressed = zlib.decompress(compressed_data).decode("utf-8")
+                chunks = json.loads(decompressed)
+                log.info(f"Loaded chunks for PDF {url} from Upstash Redis cache.")
+
+            b64_emb_str = upstash_redis.get(redis_emb_key)
+            if b64_emb_str:
+                compressed_emb = base64.b64decode(b64_emb_str.encode("utf-8"))
+                decompressed_emb = zlib.decompress(compressed_emb).decode("utf-8")
+                embeddings = json.loads(decompressed_emb)
+                log.info(f"Loaded embeddings for PDF {url} from Upstash Redis cache.")
+        except Exception as e:
+            log.warning(f"Error reading from Upstash Redis: {e}")
+
+    # 2. Try in-memory fallback cache
+    if not chunks:
+        chunks = local_chunks_cache.get(url_hash)
+    if not embeddings:
+        embeddings = local_embeddings_cache.get(url_hash)
+
+    # 3. If cache miss for chunks, parse and chunk the PDF
+    if not chunks:
+        log.info(f"Cache miss for PDF {url}. Downloading and parsing...")
+        doc_text, doc_links = await get_or_parse_pdf_safe(url, raise_on_error=False)
+        if not doc_text:
+            return []
+        
+        chunks = chunk_document_text(doc_text)
+        if not chunks:
+            return []
+
+        # Save to Upstash Redis (base64 encoded)
+        if upstash_redis:
+            try:
+                serialized = json.dumps(chunks).encode("utf-8")
+                compressed = zlib.compress(serialized)
+                b64_str = base64.b64encode(compressed).decode("utf-8")
+                upstash_redis.set(redis_key, b64_str, ex=24 * 3600)  # 24 hour TTL
+                log.info(f"Cached {len(chunks)} chunks for PDF {url} in Upstash Redis.")
+            except Exception as e:
+                log.warning(f"Failed to cache PDF chunks in Upstash Redis: {e}")
+
+        # Save to in-memory fallback
+        local_chunks_cache[url_hash] = chunks
+
+    # 4. Build in-memory FAISS index and perform similarity search
+    try:
+        # Check if embeddings are already loaded/valid
+        if not embeddings or len(embeddings) != len(chunks):
+            # Embed all chunks using the batch embedding helper
+            embeddings = await create_embeddings_batch(chunks, bypass_freeze=True)
+            if not embeddings:
+                return []
+            
+            # Save generated embeddings to Redis and in-memory cache
+            if upstash_redis:
+                try:
+                    serialized_emb = json.dumps(embeddings).encode("utf-8")
+                    compressed_emb = zlib.compress(serialized_emb)
+                    b64_emb_str = base64.b64encode(compressed_emb).decode("utf-8")
+                    upstash_redis.set(redis_emb_key, b64_emb_str, ex=24 * 3600)  # 24 hour TTL
+                    log.info(f"Cached {len(embeddings)} chunk embeddings for PDF {url} in Upstash Redis.")
+                except Exception as e:
+                    log.warning(f"Failed to cache PDF embeddings in Upstash Redis: {e}")
+            
+            local_embeddings_cache[url_hash] = embeddings
+
+        vectors = np.array(embeddings, dtype=np.float32)
+        dimension = vectors.shape[1]
+
+        # Use flat inner product index (equivalent to cosine similarity on L2-normalized vectors)
+        index = faiss.IndexFlatIP(dimension)
+        faiss.normalize_L2(vectors)
+        index.add(vectors)
+
+        # Embed query
+        query_vector = await create_embedding(query, bypass_freeze=True)
+        query_arr = np.array([query_vector], dtype=np.float32)
+        faiss.normalize_L2(query_arr)
+
+        # Search index for top K relevant chunks
+        k = min(5, len(chunks))
+        distances, indices = index.search(query_arr, k=k)
+        
+        relevant_chunks = [chunks[idx] for idx in indices[0] if idx != -1]
+        log.info(f"Retrieved top {len(relevant_chunks)} relevant PDF chunks via FAISS.")
+        return relevant_chunks
+
+    except Exception as e:
+        log.error(f"Error in FAISS similarity search for PDF: {e}")
+        # Fallback to returning the first 5 chunks if FAISS fails
+        return chunks[:5]
+
+
 def document_summary_system_instruction() -> str:
     return r"""You are Aether, a precise research assistant specialized in scientific literature analysis.
 Analyze the user's provided document text and generate a comprehensive, highly structured, and readable summary.
@@ -3152,6 +3454,51 @@ Structure your response exactly as follows:
 """
 
 
+def mask_credentials_and_secrets(text: str) -> str:
+    """Masks API keys, database connection strings, passwords, and private document URLs in LLM outputs."""
+    if not text:
+        return text
+
+    # 1. Mask JWTs and long tokens (including Supabase JWT keys starting with eyJhbGciOi)
+    text = re.sub(r'\beyJhbGciOi[a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9_\-\.]+\b', '[MASKED_TOKEN]', text)
+    text = re.sub(r'\beyJhbGciOi[a-zA-Z0-9_\-\.]{50,}\b', '[MASKED_TOKEN]', text)
+
+    # 2. Mask specific API Keys
+    text = re.sub(r'\bgsk_[a-zA-Z0-9_\-]{30,}\b', '[MASKED_GROQ_KEY]', text)
+    text = re.sub(r'\bhf_[a-zA-Z0-9_\-]{30,}\b', '[MASKED_HF_TOKEN]', text)
+    text = re.sub(r'\brzp_[a-zA-Z0-9_\-]{10,}\b', '[MASKED_RAZORPAY_KEY]', text)
+
+    # 3. Mask database URI passwords (e.g. mongodb+srv://username:password@host)
+    text = re.sub(
+        r'(\b[a-zA-Z0-9\+\-]+:\/\/)([^:\s]+):([^@\/\s]+)(@[^\s]+)',
+        lambda m: f"{m.group(1)}{m.group(2)}:[MASKED_PASSWORD]{m.group(4)}",
+        text
+    )
+
+    # 4. Mask key-value patterns (e.g. api_key="value", password=value)
+    pattern = r'(?i)\b(api[-_]?key|client[-_]?secret|password|access[-_]?token|auth[-_]?token|rest[-_]?token|secret[-_]?key)\b(\s*[:=]\s*["\']?)([a-zA-Z0-9_\-]{12,})(["\']?)'
+    text = re.sub(
+        pattern,
+        lambda m: f"{m.group(1)}{m.group(2)}[MASKED_SECRET]{m.group(4)}",
+        text
+    )
+
+    # 5. Mask markdown links to local uploaded PDFs (replaces [Text](url) with [Text])
+    text = re.sub(
+        r'\[([^\]]+)\]\((?:https?://[a-zA-Z0-9\.\-]+:\d+)?/api/pdf/[a-zA-Z0-9\-]+\.pdf\)',
+        r'[\1]',
+        text
+    )
+    # Also mask raw unlinked URLs
+    text = re.sub(
+        r'(?:https?://[a-zA-Z0-9\.\-]+:\d+)?/api/pdf/[a-zA-Z0-9\-]+\.pdf',
+        '[Uploaded PDF]',
+        text
+    )
+
+    return text
+
+
 def clean_and_resolve_links(
     answer: str,
     chunks: Optional[List[Dict]] = None,
@@ -3324,6 +3671,9 @@ def clean_and_resolve_links(
 
     # 6. Clean up leftover parentheses from placeholder removals
     answer = re.sub(r"\((pdf_url|url|arxiv_url|placeholder|link)\)", "", answer)
+
+    # 7. Mask credentials, API keys, and sensitive links in response
+    answer = mask_credentials_and_secrets(answer)
 
     return answer
 
@@ -3891,6 +4241,131 @@ async def _research_impl(req: ResearchRequest, request: Request):
 
     log.info(f"\n{'='*70}\n[{rid}] QUERY: {raw_query} (mode: {req.mode})\n{'='*70}")
 
+    # ── PDF/arXiv URLs processing in Research ──
+    latest_urls = extract_paper_urls(raw_query)
+    all_urls = list(dict.fromkeys(latest_urls))
+    
+    new_docs = []
+    if all_urls:
+        for url in all_urls:
+            try:
+                doc_text, doc_links = await get_or_parse_pdf_safe(url, raise_on_error=True)
+                new_docs.append((url, doc_text, doc_links))
+            except Exception as e:
+                raise HTTPException(400, f"Failed to download/parse PDF from {url}: {str(e)}")
+
+    # Simple paste summarize bypass in Research
+    if all_urls and is_simple_link_paste(raw_query, all_urls):
+        target_url = all_urls[0]
+        try:
+            target_text, target_links = await get_or_parse_pdf_safe(target_url, raise_on_error=True)
+        except Exception as e:
+            raise HTTPException(400, f"Failed to download/parse PDF from {target_url}: {str(e)}")
+            
+        system_instruction = document_summary_system_instruction()
+        user_content = document_summary_user_content(target_url, target_text, target_links)
+        
+        msgs = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_content}
+        ]
+        try:
+            answer = await groq_chat(msgs, HEAVY_MODEL, temperature=req.temperature, max_tokens=2500)
+        except LLMError as e:
+            raise HTTPException(502, f"LLM error while generating summary: {str(e)}")
+            
+        latency = int((time.time() - t0) * 1000)
+        return {
+            "request_id": rid,
+            "answer": answer,
+            "route": "pdf_summary",
+            "plan": {
+                "standalone_query": raw_query,
+                "reasoning_path": f"PDF parsed directly from {target_url}. Generated structured summary.",
+            },
+            "papers": [],
+            "chunks": [],
+            "arxiv_papers": [],
+            "s2_papers": [],
+            "datasets": [],
+            "code_repos": [],
+            "verification": None,
+            "latency_ms": latency,
+            "model_used": HEAVY_MODEL,
+            "warning": None,
+        }
+
+    # Build pdf_context using FAISS vector search
+    pdf_context_parts = []
+    pdf_chunks_raw = []
+    for url in all_urls:
+        relevant_chunks = await get_relevant_pdf_chunks(url, raw_query)
+        if relevant_chunks:
+            pdf_chunks_raw.extend(relevant_chunks)
+            chunks_text = "\n\n".join(relevant_chunks)
+            pdf_context_parts.append(
+                f"━━━ RELEVANT PDF SECTION FOR {url} ━━━\n"
+                f"{chunks_text}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            )
+    pdf_context = "\n\n".join(pdf_context_parts) if pdf_context_parts else ""
+
+    # ── Uploaded PDF Direct QA Route in Research ──
+    has_uploaded_pdf = any("/api/pdf/" in url for url in all_urls)
+    if has_uploaded_pdf:
+        if not pdf_context:
+            answer = "The uploaded PDF document(s) could not be read or parsed. Please ensure the PDF is not password-protected, corrupt, or scanned as images without OCR."
+            return _empty_response(rid, answer, "pdf_qa", t0)
+            
+        log.info(f"[{rid}] Processing query via Uploaded PDF QA route (bypassing external APIs)")
+        
+        sys_p = (
+            "You are Aether, a precise research assistant.\n"
+            "Use the provided uploaded PDF context to answer the user's query.\n"
+            "CRITICAL: Base your answers ONLY on the provided PDF context. "
+            "If the context does not contain the answer, state that clearly and do not hallucinate or invent facts. "
+            "Cite relevant sections/findings from the document."
+            f"\n\n{pdf_context}"
+        )
+        msgs = [{"role": "system", "content": sys_p}, {"role": "user", "content": raw_query}]
+        model = HEAVY_MODEL if req.use_heavy else REASON_MODEL
+        try:
+            answer = await groq_chat(msgs, model, temperature=req.temperature, max_tokens=2000)
+        except LLMError as e:
+            raise HTTPException(502, f"LLM error while answering from PDF: {str(e)}")
+            
+        # Format the retrieved chunks for rendering in the frontend sources panel
+        formatted_chunks = [
+            {
+                "text": chunk,
+                "title": "Uploaded PDF Source",
+                "page": "PDF Content",
+                "similarity": 0.95
+            }
+            for chunk in pdf_chunks_raw
+        ]
+            
+        latency = int((time.time() - t0) * 1000)
+        return {
+            "request_id": rid,
+            "answer": answer,
+            "route": "pdf_qa",
+            "plan": {
+                "standalone_query": raw_query,
+                "reasoning_path": f"Answered directly using retrieved chunks from the uploaded PDF(s).",
+            },
+            "papers": [],
+            "chunks": formatted_chunks,
+            "arxiv_papers": [],
+            "s2_papers": [],
+            "datasets": [],
+            "code_repos": [],
+            "verification": None,
+            "latency_ms": latency,
+            "model_used": model,
+            "warning": None,
+        }
+
     # ── Wikipedia Mode Direct Search ──
     if req.mode == "wikipedia":
         log.info(f"[{rid}] Processing query in Wikipedia Mode: {raw_query}")
@@ -4238,6 +4713,21 @@ async def _research_impl(req: ResearchRequest, request: Request):
             log.warning(f"Failed to enrich new arXiv papers with S2: {e}")
             enriched_arxiv.extend(arxiv_to_enrich)
 
+    # Fallback/supplement with OpenAlex: if any paper in enriched_arxiv lacks DOI or venue, enrich via OpenAlex
+    try:
+        to_enrich_oa = [p for p in enriched_arxiv if not p.get("doi") or not p.get("venue")]
+        if to_enrich_oa:
+            log.info(f"Enriching {len(to_enrich_oa)} papers with OpenAlex...")
+            enriched_oa = await enrich_arxiv_papers_with_openalex(to_enrich_oa)
+            # Map by clean title
+            oa_by_title = {get_clean_title(p.get("title", "")): p for p in enriched_oa}
+            for idx, p in enumerate(enriched_arxiv):
+                title_clean = get_clean_title(p.get("title", ""))
+                if title_clean in oa_by_title:
+                    enriched_arxiv[idx].update(oa_by_title[title_clean])
+    except Exception as e:
+        log.warning(f"Failed to enrich arXiv papers with OpenAlex: {e}")
+
     # Deduplicate CORE papers and reuse S2 data if available
     enriched_core = []
     for p in core_papers:
@@ -4369,6 +4859,9 @@ async def _research_impl(req: ResearchRequest, request: Request):
         prompt = timeline_prompt(query, chunks, graph_nodes, arxiv_papers, s2_papers)
     else:
         prompt = grounded_prompt(query, chunks, graph_nodes, arxiv_papers, s2_papers)
+
+    if pdf_context:
+        prompt += f"\n\n{pdf_context}"
 
     try:
         answer = await groq_chat(
@@ -4627,25 +5120,84 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         }
 
 
-    # Compile parsed PDF context for the LLM
-    all_urls = list(dict.fromkeys(history_urls + latest_urls))
-    pdf_context_parts = []
-    for url in all_urls:
-        doc_text, doc_links = await get_or_parse_pdf_safe(url, raise_on_error=False)
-        if doc_text:
-            pdf_context_parts.append(
-                f"━━━ PARSED DOCUMENT CONTEXT FOR {url} ━━━\n"
-                f"{doc_text[:30000]}\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            )
-    pdf_context = "\n\n".join(pdf_context_parts) if pdf_context_parts else ""
-
     # Build context string for pronoun resolution
     ctx = build_conversation_context(req.messages[:-1])
 
     # ── Strategic planning (includes pronoun resolution) ─────────────
     plan = await plan_query(last_user_msg, context=ctx)
     query = plan.standalone_query
+
+    # Compile parsed PDF context for the LLM using FAISS vector search
+    all_urls = list(dict.fromkeys(history_urls + latest_urls))
+    pdf_context_parts = []
+    pdf_chunks_raw = []
+    for url in all_urls:
+        relevant_chunks = await get_relevant_pdf_chunks(url, query)
+        if relevant_chunks:
+            pdf_chunks_raw.extend(relevant_chunks)
+            chunks_text = "\n\n".join(relevant_chunks)
+            pdf_context_parts.append(
+                f"━━━ RELEVANT PDF SECTION FOR {url} ━━━\n"
+                f"{chunks_text}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            )
+    pdf_context = "\n\n".join(pdf_context_parts) if pdf_context_parts else ""
+
+    # ── Uploaded PDF Direct QA Route ──
+    has_uploaded_pdf = any("/api/pdf/" in url for url in all_urls)
+    if has_uploaded_pdf:
+        if not pdf_context:
+            answer = "The uploaded PDF document(s) could not be read or parsed. Please ensure the PDF is not password-protected, corrupt, or scanned as images without OCR."
+            return _empty_response(rid, answer, "pdf_qa", t0)
+            
+        log.info(f"[{rid}] Processing query via Uploaded PDF QA route (bypassing external APIs)")
+        
+        sys_p = (
+            "You are Aether, a precise research assistant.\n"
+            "Use the provided uploaded PDF context to answer the user's query.\n"
+            "CRITICAL: Base your answers ONLY on the provided PDF context. "
+            "If the context does not contain the answer, state that clearly and do not hallucinate or invent facts. "
+            "Cite relevant sections/findings from the document."
+            f"\n\n{pdf_context}"
+        )
+        msgs = await compile_chat_messages(sys_p, req.messages)
+        model = HEAVY_MODEL if req.use_heavy else REASON_MODEL
+        try:
+            answer = await groq_chat(msgs, model, temperature=req.temperature, max_tokens=2000)
+        except LLMError as e:
+            raise HTTPException(502, f"LLM error while answering from PDF: {str(e)}")
+            
+        # Format the retrieved chunks for rendering in the frontend sources panel
+        formatted_chunks = [
+            {
+                "text": chunk,
+                "title": "Uploaded PDF Source",
+                "page": "PDF Content",
+                "similarity": 0.95
+            }
+            for chunk in pdf_chunks_raw
+        ]
+            
+        latency = int((time.time() - t0) * 1000)
+        return {
+            "request_id": rid,
+            "answer": answer,
+            "route": "pdf_qa",
+            "plan": {
+                "standalone_query": query,
+                "reasoning_path": f"Answered directly using retrieved chunks from the uploaded PDF(s).",
+            },
+            "papers": [],
+            "chunks": formatted_chunks,
+            "arxiv_papers": [],
+            "s2_papers": [],
+            "datasets": [],
+            "code_repos": [],
+            "verification": None,
+            "latency_ms": latency,
+            "model_used": model,
+            "warning": None,
+        }
 
     # ── Route: entity_lookup ──────────────────────────────────────────
     if plan.route == "entity_lookup":
@@ -4799,6 +5351,20 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature, max_tokens=350 if pdf_context else 250)
         return _empty_response(rid, answer, "chitchat", t0)
 
+    # ── Route: context_only ───────────────────────────────────────────
+    if plan.route == "context_only":
+        sys_p = (
+            "You are Aether, an academic research assistant. "
+            "Address the user's query using the conversation history. "
+            "Rely on the facts and papers already discussed in the chat. Do not invent new academic facts."
+        )
+        if pdf_context:
+            sys_p += f"\n\n{pdf_context}"
+            
+        msgs = await compile_chat_messages(sys_p, req.messages)
+        answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature, max_tokens=1500)
+        return _empty_response(rid, answer, "context_only", t0)
+
     # ── Full RAG ──────────────────────────────────────────────────────
     warning = None
 
@@ -4903,6 +5469,21 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         except Exception as e:
             log.warning(f"Failed to enrich new arXiv papers with S2: {e}")
             enriched_arxiv.extend(arxiv_to_enrich)
+
+    # Fallback/supplement with OpenAlex: if any paper in enriched_arxiv lacks DOI or venue, enrich via OpenAlex
+    try:
+        to_enrich_oa = [p for p in enriched_arxiv if not p.get("doi") or not p.get("venue")]
+        if to_enrich_oa:
+            log.info(f"Enriching {len(to_enrich_oa)} papers with OpenAlex...")
+            enriched_oa = await enrich_arxiv_papers_with_openalex(to_enrich_oa)
+            # Map by clean title
+            oa_by_title = {get_clean_title(p.get("title", "")): p for p in enriched_oa}
+            for idx, p in enumerate(enriched_arxiv):
+                title_clean = get_clean_title(p.get("title", ""))
+                if title_clean in oa_by_title:
+                    enriched_arxiv[idx].update(oa_by_title[title_clean])
+    except Exception as e:
+        log.warning(f"Failed to enrich arXiv papers with OpenAlex: {e}")
 
     if core_papers:
         enriched_arxiv.extend(core_papers)
@@ -6498,7 +7079,7 @@ async def get_payment_history(request: Request):
 def health():
     return {
         "status": "ok",
-        "service": "Aether GraphRAG Research API",
+        "service": "Aether Research API",
         "version": "4.0.0",
         "ready": pool._ready,
         "neo4j": pool.neo4j_ok,

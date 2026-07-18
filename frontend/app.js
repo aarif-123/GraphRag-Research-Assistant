@@ -1,5 +1,5 @@
 /**
- * GraphRAG Research Assistant â€” Frontend Logic
+ * Aether Research Assistant — Frontend Logic
  * Handles chat, sources panel, health checks, and history
  */
 
@@ -3852,7 +3852,7 @@ async function startRazorpayCheckout() {
             "key": data.key_id,
             "amount": data.amount,
             "currency": data.currency,
-            "name": "Aether GraphRAG",
+            "name": "Aether",
             "description": "Pro Plan Upgrade",
             "order_id": data.order_id,
             "handler": async function (response) {
