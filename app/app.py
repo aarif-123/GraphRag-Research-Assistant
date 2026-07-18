@@ -2699,8 +2699,10 @@ def chunk_document_text(text: str) -> List[str]:
 
 async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
     """
-    Retrieves the most semantically relevant chunks of a PDF using FAISS.
-    Caches parsed PDF chunks and their corresponding embeddings in Upstash Redis
+    Retrieves the most semantically relevant chunks of a PDF using numpy cosine
+    similarity (dot product on L2-normalized BGE embeddings). Equivalent to FAISS
+    IndexFlatIP without the native dependency, making it compatible with Vercel.
+    Caches parsed PDF chunks and their embeddings in Upstash Redis
     to bypass both parsing and embedding generation on subsequent calls.
     """
     if not url:
@@ -2710,7 +2712,6 @@ async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
     import json
     import zlib
     import base64
-    import faiss
     import numpy as np
 
     url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()
@@ -2792,29 +2793,33 @@ async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
             local_embeddings_cache[url_hash] = embeddings
 
         vectors = np.array(embeddings, dtype=np.float32)
-        dimension = vectors.shape[1]
 
-        # Use flat inner product index (equivalent to cosine similarity on L2-normalized vectors)
-        index = faiss.IndexFlatIP(dimension)
-        faiss.normalize_L2(vectors)
-        index.add(vectors)
+        # L2-normalize so dot product == cosine similarity (matches BGE model output)
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1.0, norms)  # avoid division by zero
+        vectors = vectors / norms
 
-        # Embed query
+        # Embed query and L2-normalize
         query_vector = await create_embedding(query, bypass_freeze=True)
-        query_arr = np.array([query_vector], dtype=np.float32)
-        faiss.normalize_L2(query_arr)
+        query_arr = np.array(query_vector, dtype=np.float32)
+        q_norm = np.linalg.norm(query_arr)
+        if q_norm > 0:
+            query_arr = query_arr / q_norm
 
-        # Search index for top K relevant chunks
+        # Cosine similarity via dot product on normalized vectors
+        scores = vectors @ query_arr  # shape: (n_chunks,)
+
+        # Pick top-K indices
         k = min(5, len(chunks))
-        distances, indices = index.search(query_arr, k=k)
-        
-        relevant_chunks = [chunks[idx] for idx in indices[0] if idx != -1]
-        log.info(f"Retrieved top {len(relevant_chunks)} relevant PDF chunks via FAISS.")
+        top_indices = np.argsort(scores)[::-1][:k].tolist()
+
+        relevant_chunks = [chunks[idx] for idx in top_indices]
+        log.info(f"Retrieved top {len(relevant_chunks)} relevant PDF chunks via numpy cosine similarity.")
         return relevant_chunks
 
     except Exception as e:
-        log.error(f"Error in FAISS similarity search for PDF: {e}")
-        # Fallback to returning the first 5 chunks if FAISS fails
+        log.error(f"Error in numpy similarity search for PDF: {e}")
+        # Fallback to returning the first 5 chunks if similarity search fails
         return chunks[:5]
 
 
