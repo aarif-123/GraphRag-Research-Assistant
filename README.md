@@ -95,7 +95,7 @@ graph TB
 
     subgraph ExternalAPIs["External Academic APIs"]
         ArXivXML["ArXiv XML API export.arxiv.org"]
-        S2["Semantic Scholar API Citations, Abstracts, TL;DR"]
+        S2["Semantic Scholar API Citations, Abstracts, TLDR"]
         PwC["Papers With Code GitHub Repos, Datasets, HF Models/Spaces"]
         OpenAlex["OpenAlex Open scholarly graph"]
         CORE["CORE Open Access core.ac.uk v3"]
@@ -206,7 +206,7 @@ sequenceDiagram
         API->>Ext: enrich_arxiv_papers_with_s2(papers)
         API->>Ext: enrich_arxiv_papers_with_pwc(papers)
         API->>Ext: enrich_arxiv_papers_with_openalex(papers)
-        Ext-->>API: citations, TL;DR, repos, datasets, models
+        Ext-->>API: citations, TLDR summaries, repos, datasets, models
     end
 
     API->>API: RRF fusion and MMR re-rank lambda=0.6
@@ -260,7 +260,7 @@ flowchart LR
 
     subgraph ExternalEnrichment["External Source Enrichment parallel"]
         AX["ArXiv XML API\nplus MCP Server /sse"]
-        S2E["Semantic Scholar\ncitations, TL;DR, abstract"]
+        S2E["Semantic Scholar\ncitations, TLDR, abstract"]
         PWCE["Papers With Code\nGitHub repos, datasets\nHF models, spaces, metrics"]
         OA["OpenAlex\nopen scholarly graph"]
         CE["CORE Open Access"]
