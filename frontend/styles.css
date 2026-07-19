@@ -5971,18 +5971,62 @@ mjx-container:not([display="true"]) {
         padding: 7px 12px;
     }
 
-    /* ── Input area: compact ── */
+    /* ── Input area: mobile-optimised ── */
     .input-area {
-        padding: 0 10px 12px;
+        /* Use env() for devices with gesture bars / notches */
+        padding: 0 10px calc(12px + env(safe-area-inset-bottom, 0px));
+        /* Prevent iOS Safari bottom-bar from covering the input */
+        padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
     }
 
     .input-wrapper {
         border-radius: 20px;
-        padding: 10px 12px;
+        /* Remove explicit padding — let composer-main own it */
+        padding: 0;
+        width: 100%;
     }
 
+    /* Composer row: shrink gaps and padding on mobile */
+    .composer-main {
+        gap: 8px;
+        padding: 10px 12px;
+        /* Ensure textarea stretches to fill remaining width */
+        align-items: flex-end;
+    }
+
+    /* Textarea fills the remaining horizontal space */
+    .composer-main textarea,
     .input-wrapper textarea {
-        font-size: 14px;
+        flex: 1 1 0;
+        min-width: 0;      /* Prevent flex child overflow */
+        font-size: 16px;   /* 16px prevents iOS auto-zoom on focus */
+        max-height: 160px; /* Tighter cap on mobile */
+    }
+
+    /* Shrink icon buttons slightly for narrow screens */
+    .btn-plus {
+        width: 34px;
+        height: 34px;
+        flex-shrink: 0;
+    }
+
+    .btn-mic,
+    .btn-link {
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
+    }
+
+    .btn-send {
+        width: 36px;
+        height: 36px;
+        flex-shrink: 0;
+    }
+
+    /* Keep action cluster from wrapping */
+    .input-actions {
+        gap: 6px;
+        flex-shrink: 0;
     }
 
     .input-hints {
@@ -6086,6 +6130,36 @@ mjx-container:not([display="true"]) {
     /* Reduce icon button padding */
     .btn-icon {
         padding: 6px;
+    }
+
+    /* ── Extra-compact composer on very small phones ── */
+    .input-area {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .composer-main {
+        gap: 6px;
+        padding: 8px 10px;
+    }
+
+    /* Hide the link button on very small screens to save space */
+    .btn-link {
+        display: none;
+    }
+
+    /* Textarea still full-width, slightly smaller font */
+    .composer-main textarea,
+    .input-wrapper textarea {
+        font-size: 15px;
+        max-height: 120px;
+    }
+
+    /* Attachment card: stretch to full width on tiny phones */
+    .attachment-card {
+        min-width: 0;
+        width: 100%;
+        max-width: 100%;
     }
 
 }
