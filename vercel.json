@@ -1,11 +1,11 @@
 {
   "rewrites": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/:path*",
       "destination": "/api/index.py"
     },
     {
-      "source": "/v1/(.*)",
+      "source": "/v1/:path*",
       "destination": "/api/index.py"
     },
     {
@@ -21,19 +21,31 @@
       "destination": "/api/index.py"
     },
     {
-      "source": "/(app/)?(.*\\.(css|js|png|jpg|svg|ico|woff|woff2|ttf))",
-      "destination": "/frontend/$2"
+      "source": "/app.js",
+      "destination": "/frontend/app.js"
     },
     {
-      "source": "/app/?",
+      "source": "/styles.css",
+      "destination": "/frontend/styles.css"
+    },
+    {
+      "source": "/app/app.js",
+      "destination": "/frontend/app.js"
+    },
+    {
+      "source": "/app/styles.css",
+      "destination": "/frontend/styles.css"
+    },
+    {
+      "source": "/app",
       "destination": "/frontend/index.html"
     },
     {
-      "source": "/app/(.*)",
+      "source": "/app/:path*",
       "destination": "/frontend/index.html"
     },
     {
-      "source": "/(.*)",
+      "source": "/:path*",
       "destination": "/frontend/landing.html"
     }
   ]
