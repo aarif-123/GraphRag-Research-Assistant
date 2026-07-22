@@ -1,6 +1,8 @@
 # Development and testing dependencies — do NOT install in production.
 # Install with: pip install -r requirements-dev.txt
 
+-r requirements.txt
+
 # Testing
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
