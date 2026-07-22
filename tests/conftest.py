@@ -4,7 +4,21 @@ Root pytest configuration and shared fixtures for unit and integration test suit
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List
+
+# Set fallback dummy environment variables for tests when running in CI or unconfigured environments
+_TEST_ENV_DEFAULTS = {
+    "SUPABASE_URL": "https://dummy.supabase.co",
+    "SUPABASE_SERVICE_ROLE_KEY": "dummy_service_role_key",
+    "NEO4J_URI": "bolt://localhost:7687",
+    "NEO4J_USER": "neo4j",
+    "NEO4J_PASSWORD": "dummy_password",
+    "GROQ_API_KEY": "gsk_dummy_key",
+}
+for key, val in _TEST_ENV_DEFAULTS.items():
+    if not os.getenv(key):
+        os.environ[key] = val
 
 import pytest
 
