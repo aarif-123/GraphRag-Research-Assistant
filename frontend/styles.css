@@ -3432,6 +3432,19 @@ textarea {
     }
 }
 
+.voice-preview-container {
+    max-width: 240px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.voice-preview-text {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #94a3b8);
+    font-style: italic;
+}
+
 .voice-wave-dotted-line {
     flex: 1;
     border-bottom: 2px dotted rgba(255, 255, 255, 0.15);

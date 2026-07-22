@@ -85,7 +85,7 @@ import httpx
 import jwt
 import numpy as np
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -7359,10 +7359,12 @@ async def get_pdf_text(pdf_id: str, request: Request):
 
 
 def is_whisper_hallucination(text: str) -> bool:
-    if not text:
+    if not text or not text.strip():
         return True
     # Strip punctuation and lowercase
     cleaned = "".join(c for c in text if c.isalnum()).lower().strip()
+    if len(cleaned) <= 1:
+        return True
     hallucinations = {
         "",
         "you",
@@ -7374,12 +7376,37 @@ def is_whisper_hallucination(text: str) -> bool:
         "bye",
         "thankyoubye",
         "thankyousomuch",
+        "amaraorg",
+        "subtitlesby",
+        "captionedby",
+        "translatedby",
+        "mb",
+        "so",
+        "oh",
+        "uh",
+        "um",
     }
-    return cleaned in hallucinations
+    if cleaned in hallucinations:
+        return True
+    
+    # Check subtitle/caption artifact patterns
+    lower = text.lower().strip()
+    if any(pat in lower for pat in [
+        "subtitles by", "captioned by", "amara.org", "thanks for watching",
+        "please subscribe", "like and subscribe", "thank you for watching",
+        "copyright", "all rights reserved"
+    ]):
+        return True
+    return False
 
 
 @app.post("/api/audio/transcribe")
-async def transcribe_audio(request: Request, file: UploadFile = File(...)):
+async def transcribe_audio(
+    request: Request,
+    file: UploadFile = File(...),
+    language: Optional[str] = Form("en"),
+    prompt: Optional[str] = Form(None),
+):
     await set_user_context(request)
 
     if not GROQ_API_KEY and not GROQ_API_KEYS:
@@ -7391,6 +7418,12 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...)):
 
     max_attempts = len(GROQ_API_KEYS) if GROQ_API_KEYS else 1
     last_err = None
+
+    default_prompt = (
+        "User question, research query, or conversation about artificial intelligence, "
+        "graph RAG, machine learning, Python, computer science, literature, or general topics."
+    )
+    effective_prompt = prompt.strip() if (prompt and prompt.strip()) else default_prompt
 
     for attempt in range(max_attempts):
         current_key = GROQ_API_KEY or ""
@@ -7406,7 +7439,13 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...)):
             content_type = content_type.split(";")[0].strip()
 
         files = {"file": (file.filename or "speech.webm", content, content_type)}
-        data = {"model": "whisper-large-v3"}
+        data = {
+            "model": "whisper-large-v3",
+            "temperature": "0",
+            "prompt": effective_prompt,
+        }
+        if language and language.strip() and language.strip().lower() != "auto":
+            data["language"] = language.strip().lower()
 
         try:
             r = await pool.groq_http.post(

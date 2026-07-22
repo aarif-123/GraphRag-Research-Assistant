@@ -96,6 +96,7 @@ const els = {
     voiceCancelBtn: $('#voiceCancelBtn'),
     voiceConfirmBtn: $('#voiceConfirmBtn'),
     voiceWaveContainer: $('#voiceWaveContainer'),
+    voicePreviewText: $('#voicePreviewText'),
 };
 
 // INIT
@@ -3924,12 +3925,71 @@ async function startSpeechToText() {
     state.discardRecording = false;
     state.audioChunks = [];
     state.maxVolumeRecorded = 0;
+    state.liveTranscript = '';
+
+    if (els.voicePreviewText) {
+        els.voicePreviewText.textContent = "Listening...";
+    }
 
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const audioConstraints = {
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1,
+                sampleRate: 44100
+            }
+        };
+
+        let stream;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+        } catch (e) {
+            console.warn("Failed to apply advanced audio constraints, trying basic mic access:", e);
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
         state.audioStream = stream;
 
-        // Try initializing AudioContext and AnalyserNode
+        // Start Web Speech API live preview if available in browser
+        const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognitionClass) {
+            try {
+                state.speechRecognizer = new SpeechRecognitionClass();
+                state.speechRecognizer.continuous = true;
+                state.speechRecognizer.interimResults = true;
+                state.speechRecognizer.lang = 'en-US';
+
+                state.speechRecognizer.onresult = (event) => {
+                    let interim = '';
+                    let final = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            final += event.results[i][0].transcript;
+                        } else {
+                            interim += event.results[i][0].transcript;
+                        }
+                    }
+                    const text = (final || interim).trim();
+                    if (text) {
+                        state.liveTranscript = text;
+                        if (els.voicePreviewText) {
+                            els.voicePreviewText.textContent = `"${text}"`;
+                        }
+                    }
+                };
+
+                state.speechRecognizer.onerror = (err) => {
+                    console.warn("Web Speech API live preview error (falling back to server Whisper):", err);
+                };
+
+                state.speechRecognizer.start();
+            } catch (srErr) {
+                console.warn("Web Speech API initialization failed:", srErr);
+            }
+        }
+
+        // Try initializing AudioContext and AnalyserNode for visualizer
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
             state.audioContext = new AudioContextClass();
@@ -3942,8 +4002,8 @@ async function startSpeechToText() {
             const dataArray = new Uint8Array(bufferLength);
             const timeData = new Uint8Array(bufferLength);
 
-            const bars = els.voiceWaveContainer.querySelectorAll('.voice-wave-bar');
-            els.voiceWaveContainer.classList.remove('fallback-animated');
+            const bars = els.voiceWaveContainer ? els.voiceWaveContainer.querySelectorAll('.voice-wave-bar') : [];
+            if (els.voiceWaveContainer) els.voiceWaveContainer.classList.remove('fallback-animated');
 
             function animateWave() {
                 if (!state.audioRecording || state.discardRecording) return;
@@ -3952,15 +4012,13 @@ async function startSpeechToText() {
                 state.audioAnalyser.getByteTimeDomainData(timeData);
                 state.audioAnalyser.getByteFrequencyData(dataArray);
 
-                // Calculate average volume from time domain
                 let sum = 0;
                 for (let i = 0; i < timeData.length; i++) {
                     sum += Math.abs(timeData[i] - 128);
                 }
-                const volume = sum / timeData.length; // 0 to ~128
+                const volume = sum / timeData.length;
                 state.maxVolumeRecorded = Math.max(state.maxVolumeRecorded, volume);
 
-                // Boost factor based on volume to make it dense and responsive
                 const boost = 0.5 + (volume / 6);
 
                 for (let i = 0; i < bars.length; i++) {
@@ -3969,12 +4027,11 @@ async function startSpeechToText() {
 
                     let targetHeight = (val / 255) * 35 * boost;
                     targetHeight += volume * 0.5;
-                    targetHeight += (Math.random() - 0.5) * 3; // tiny organic jitter
+                    targetHeight += (Math.random() - 0.5) * 3;
 
                     const height = Math.max(4, Math.min(32, targetHeight));
                     bars[i].style.height = `${height}px`;
 
-                    // Transition color based on volume (from slate #94a3b8 to primary indigo #6366f1)
                     const ratio = Math.min(1, volume / 25);
                     const r = Math.round(148 + (99 - 148) * ratio);
                     const g = Math.round(163 + (102 - 163) * ratio);
@@ -3986,23 +4043,32 @@ async function startSpeechToText() {
             state.animationFrameId = requestAnimationFrame(animateWave);
         } catch (audioErr) {
             console.warn("Failed to initialize Web Audio visualizer, falling back to CSS animation:", audioErr);
-            els.voiceWaveContainer.classList.add('fallback-animated');
+            if (els.voiceWaveContainer) els.voiceWaveContainer.classList.add('fallback-animated');
         }
 
-        // Initialize MediaRecorder
+        // Initialize MediaRecorder with preferred mime types and high bitrate
+        let recorderOptions = {};
+        const preferredTypes = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/ogg;codecs=opus',
+            'audio/mp4'
+        ];
+
+        for (const type of preferredTypes) {
+            if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) {
+                recorderOptions = { mimeType: type, audioBitsPerSecond: 128000 };
+                break;
+            }
+        }
+
         try {
-            state.mediaRecorder = new MediaRecorder(stream);
+            state.mediaRecorder = new MediaRecorder(stream, recorderOptions);
         } catch (recorderErr) {
-            let options = { mimeType: 'audio/webm' };
             try {
-                state.mediaRecorder = new MediaRecorder(stream, options);
+                state.mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
             } catch (e) {
-                options = { mimeType: 'audio/mp4' };
-                try {
-                    state.mediaRecorder = new MediaRecorder(stream, options);
-                } catch (e2) {
-                    state.mediaRecorder = new MediaRecorder(stream);
-                }
+                state.mediaRecorder = new MediaRecorder(stream);
             }
         }
 
@@ -4013,6 +4079,10 @@ async function startSpeechToText() {
         };
 
         state.mediaRecorder.onstop = async () => {
+            if (state.speechRecognizer) {
+                try { state.speechRecognizer.stop(); } catch (e) {}
+            }
+
             if (state.audioStream) {
                 state.audioStream.getTracks().forEach(track => track.stop());
             }
@@ -4030,20 +4100,22 @@ async function startSpeechToText() {
                 return;
             }
 
-            // Check if there was any sound/speech signal recorded
-            if (state.maxVolumeRecorded < 1.5) {
+            if (state.maxVolumeRecorded < 1.5 && !state.liveTranscript) {
                 alert("No speech detected. Please check your microphone input volume or browser permissions.");
                 resetSpeechToTextUI();
                 return;
             }
 
-            if (state.audioChunks.length === 0) {
+            if (state.audioChunks.length === 0 && !state.liveTranscript) {
                 alert("No audio data recorded.");
                 resetSpeechToTextUI();
                 return;
             }
 
             setSpeechToTextTranscribing(true);
+            if (els.voicePreviewText) {
+                els.voicePreviewText.textContent = "Transcribing...";
+            }
 
             try {
                 const mimeType = state.mediaRecorder.mimeType || 'audio/webm';
@@ -4053,9 +4125,12 @@ async function startSpeechToText() {
                 let extension = 'webm';
                 if (mimeType.includes('mp4')) extension = 'mp4';
                 else if (mimeType.includes('wav')) extension = 'wav';
-                else if (mimeType.includes('mpeg')) extension = 'mp3';
+                else if (mimeType.includes('mpeg') || mimeType.includes('mp3')) extension = 'mp3';
+                else if (mimeType.includes('ogg')) extension = 'ogg';
 
                 formData.append('file', audioBlob, `speech.${extension}`);
+                formData.append('language', 'en');
+                formData.append('prompt', 'User query about artificial intelligence, graph RAG, research, code, or general topic.');
 
                 const token = localStorage.getItem('aether_token');
                 const headers = {};
@@ -4075,15 +4150,19 @@ async function startSpeechToText() {
                 }
 
                 const data = await res.json();
+                let transcribedText = (data.text || '').trim();
 
-                // Hide recording UI first so the input elements become display: flex
-                // and the textarea scrollHeight evaluates correctly.
+                // If Whisper API produced no text or hallucinated empty, fall back to live browser transcript if captured
+                if (!transcribedText && state.liveTranscript && state.liveTranscript.trim()) {
+                    transcribedText = state.liveTranscript.trim();
+                }
+
                 setSpeechToTextTranscribing(false);
                 resetSpeechToTextUI();
 
-                if (data.text && data.text.trim()) {
+                if (transcribedText) {
                     const currentText = els.queryInput.value;
-                    els.queryInput.value = currentText ? `${currentText} ${data.text.trim()}` : data.text.trim();
+                    els.queryInput.value = currentText ? `${currentText} ${transcribedText}` : transcribedText;
                     handleInputChange();
                     els.queryInput.focus();
                 } else {
@@ -4091,6 +4170,19 @@ async function startSpeechToText() {
                 }
             } catch (err) {
                 console.error("Transcription failed:", err);
+
+                // Fallback to live transcript if available when server call fails
+                if (state.liveTranscript && state.liveTranscript.trim()) {
+                    const fallbackText = state.liveTranscript.trim();
+                    setSpeechToTextTranscribing(false);
+                    resetSpeechToTextUI();
+                    const currentText = els.queryInput.value;
+                    els.queryInput.value = currentText ? `${currentText} ${fallbackText}` : fallbackText;
+                    handleInputChange();
+                    els.queryInput.focus();
+                    return;
+                }
+
                 alert(`Speech recognition error: ${err.message || "Failed to communicate with Groq transcription service"}`);
                 setSpeechToTextTranscribing(false);
                 resetSpeechToTextUI();
@@ -4112,6 +4204,10 @@ async function startSpeechToText() {
 function stopSpeechToText(discard = false) {
     state.discardRecording = discard;
 
+    if (state.speechRecognizer) {
+        try { state.speechRecognizer.stop(); } catch (e) {}
+    }
+
     if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
         state.mediaRecorder.stop();
     } else {
@@ -4130,6 +4226,12 @@ function resetSpeechToTextUI() {
     state.audioContext = null;
     state.audioAnalyser = null;
     state.discardRecording = false;
+    state.speechRecognizer = null;
+    state.liveTranscript = '';
+
+    if (els.voicePreviewText) {
+        els.voicePreviewText.textContent = "Listening...";
+    }
 
     if (els.voiceRecordingOverlay) {
         els.voiceRecordingOverlay.style.display = 'none';
