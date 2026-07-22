@@ -1,18 +1,57 @@
-?
+{
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "app/**"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/v1/:path*",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/docs",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/openapi.json",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/app.js",
+      "destination": "/frontend/app.js"
+    },
+    {
+      "source": "/styles.css",
+      "destination": "/frontend/styles.css"
+    },
+    {
+      "source": "/app/app.js",
+      "destination": "/frontend/app.js"
+    },
+    {
       "source": "/app/styles.css",
-"destination": "/frontend/styles.css"
-},
-{
-"source": "/app",
-"destination": "/frontend/index.html"
-},
-{
-"source": "/app/:path*",
-"destination": "/frontend/index.html"
-},
-{
-"source": "/:path*",
-"destination": "/frontend/landing.html"
-}
-]
+      "destination": "/frontend/styles.css"
+    },
+    {
+      "source": "/app",
+      "destination": "/frontend/index.html"
+    },
+    {
+      "source": "/app/:path*",
+      "destination": "/frontend/index.html"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/frontend/landing.html"
+    }
+  ]
 }
