@@ -2790,7 +2790,9 @@ async def parse_pdf_from_url(url: str) -> Tuple[str, List[str]]:
 
     def _parse():
         if fitz is None:
-            raise Exception("PDF parsing is unavailable: PyMuPDF (fitz) is not installed in this environment.")
+            raise Exception(
+                "PDF parsing is unavailable: PyMuPDF (fitz) is not installed in this environment."
+            )
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         text_content = []
         extracted_links = []
@@ -7304,7 +7306,10 @@ async def upload_pdf(request: Request, file: UploadFile = File(...)):
 
         def _extract():
             if fitz is None:
-                raise HTTPException(status_code=500, detail="PDF parsing is unavailable: PyMuPDF is not installed in this environment.")
+                raise HTTPException(
+                    status_code=500,
+                    detail="PDF parsing is unavailable: PyMuPDF is not installed in this environment.",
+                )
             doc = fitz.open(stream=content, filetype="pdf")
             text_content = []
             for page in doc:
