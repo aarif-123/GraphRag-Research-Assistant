@@ -28,6 +28,18 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Setup Python
+        if: steps.check_credentials.outputs.has_token == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        if: steps.check_credentials.outputs.has_token == 'true'
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
       - name: Install Vercel CLI
         if: steps.check_credentials.outputs.has_token == 'true'
         run: npm install -g vercel@latest
