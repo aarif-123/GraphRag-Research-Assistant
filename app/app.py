@@ -73,7 +73,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import bcrypt
+try:
+    import bcrypt
+except ImportError:
+    bcrypt = None
 import fitz
 import httpx
 import jwt
