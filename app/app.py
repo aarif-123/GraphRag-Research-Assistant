@@ -77,7 +77,10 @@ try:
     import bcrypt
 except ImportError:
     bcrypt = None
-import fitz
+try:
+    import fitz
+except ImportError:
+    fitz = None
 import httpx
 import jwt
 import numpy as np
@@ -2786,6 +2789,8 @@ async def parse_pdf_from_url(url: str) -> Tuple[str, List[str]]:
         pdf_bytes = r.content
 
     def _parse():
+        if fitz is None:
+            raise Exception("PDF parsing is unavailable: PyMuPDF (fitz) is not installed in this environment.")
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         text_content = []
         extracted_links = []
@@ -7298,6 +7303,8 @@ async def upload_pdf(request: Request, file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Empty PDF file.")
 
         def _extract():
+            if fitz is None:
+                raise HTTPException(status_code=500, detail="PDF parsing is unavailable: PyMuPDF is not installed in this environment.")
             doc = fitz.open(stream=content, filetype="pdf")
             text_content = []
             for page in doc:
