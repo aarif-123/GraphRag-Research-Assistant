@@ -3,7 +3,7 @@ from typing import List
 
 from sentence_transformers import SentenceTransformer
 
-from app.app import EmbeddingError
+from app._server import EmbeddingError
 
 print("⬇️ Loading embedding model (local)...")
 

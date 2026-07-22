@@ -14,7 +14,7 @@ if GROQ_API_KEY and "," in GROQ_API_KEY:
 # Use openai/gpt-oss-20b by default (cascades to llama-3.3-70b-versatile on failure)
 HEAVY_MODEL = "openai/gpt-oss-20b"
 
-from app.app import get_or_parse_pdf_safe
+from app._server import get_or_parse_pdf_safe
 
 def document_summary_system_instruction() -> str:
     return r"""You are Aether, a precise research assistant specialized in scientific literature analysis.
