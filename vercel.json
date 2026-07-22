@@ -1,0 +1,40 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/v1/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/docs",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/openapi.json",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/(app/)?(.*\\.(css|js|png|jpg|svg|ico|woff|woff2|ttf))",
+      "destination": "/frontend/$2"
+    },
+    {
+      "source": "/app/?",
+      "destination": "/frontend/index.html"
+    },
+    {
+      "source": "/app/(.*)",
+      "destination": "/frontend/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/frontend/landing.html"
+    }
+  ]
+}
