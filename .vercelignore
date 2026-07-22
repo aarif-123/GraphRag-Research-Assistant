@@ -17,12 +17,5 @@ requirements-local.txt
 *.png
 test_*.py
 
-# Prevent Vercel from auto-detecting app/ Python files as serverless function
-# endpoints. Vercel creates a function for every .py file it finds, including
-# app/app.py, which has no requirements.txt so all packages are missing.
-# NOTE: "includeFiles": "app/**" in vercel.json overrides .vercelignore for
-# the purpose of *bundling* these files into api/index.py's Lambda — they are
-# still importable at runtime, just not served as standalone function routes.
-app/*.py
-app/**/*.py
+
 
