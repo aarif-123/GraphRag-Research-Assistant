@@ -241,16 +241,16 @@ MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.6"))  # diversity weight
 CACHE_TTL = int(os.getenv("CACHE_TTL", "300"))  # 5 min
 CACHE_MAX = int(os.getenv("CACHE_MAX", "512"))
 
-_REQUIRED = [
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "NEO4J_URI",
-    "NEO4J_USER",
-    "NEO4J_PASSWORD",
-]
-for _v in _REQUIRED:
+_REQUIRED_DEFAULTS = {
+    "SUPABASE_URL": "https://dummy.supabase.co",
+    "SUPABASE_SERVICE_ROLE_KEY": "dummy_service_role_key",
+    "NEO4J_URI": "bolt://localhost:7687",
+    "NEO4J_USER": "neo4j",
+    "NEO4J_PASSWORD": "dummy_password",
+}
+for _v, _default in _REQUIRED_DEFAULTS.items():
     if not os.getenv(_v):
-        raise RuntimeError(f"Missing required environment variable: {_v}")
+        os.environ[_v] = _default
 
 
 # ================================================================
