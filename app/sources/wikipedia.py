@@ -1,10 +1,11 @@
-import os
-import httpx
-import logging
-import urllib.parse
 import asyncio
+import logging
+import os
 import time
-from typing import List, Dict, Any, Optional
+import urllib.parse
+from typing import Any, Dict, List, Optional
+
+import httpx
 
 log = logging.getLogger(__name__)
 
@@ -12,8 +13,9 @@ log = logging.getLogger(__name__)
 _WIKI_API_KEY = os.getenv("WIKIPEDIA_API_KEY", "").strip()
 
 # Cache search and summary results
-_WIKI_CACHE = {}
+_WIKI_CACHE: Dict[str, Any] = {}
 _WIKI_CACHE_TTL = 43200  # 12 hours
+
 
 def _get_wiki_cache(key: str):
     entry = _WIKI_CACHE.get(key)
@@ -21,12 +23,14 @@ def _get_wiki_cache(key: str):
         return entry[0]
     return None
 
+
 def _set_wiki_cache(key: str, val):
     _WIKI_CACHE[key] = (val, time.time())
 
+
 async def search_wikipedia_summary(query: str) -> Optional[Dict[str, Any]]:
     """
-    Search Wikipedia for the given query, retrieve the top page, 
+    Search Wikipedia for the given query, retrieve the top page,
     and fetch its summary details.
     """
     if not query or not query.strip():
@@ -41,18 +45,18 @@ async def search_wikipedia_summary(query: str) -> Optional[Dict[str, Any]]:
 
     # 1. Search for pages matching query using Action API
     search_url = "https://en.wikipedia.org/w/api.php"
-    search_params = {
+    search_params: Dict[str, Any] = {
         "action": "query",
         "list": "search",
         "srsearch": clean_query,
         "format": "json",
         "utf8": 1,
-        "formatversion": 2
+        "formatversion": 2,
     }
 
     headers = {
         "User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)",
-        "Accept": "application/json"
+        "Accept": "application/json",
     }
     if _WIKI_API_KEY:
         headers["Authorization"] = f"Bearer {_WIKI_API_KEY}"
@@ -78,10 +82,12 @@ async def search_wikipedia_summary(query: str) -> Optional[Dict[str, Any]]:
             # 2. Fetch page summary using REST API
             encoded_title = urllib.parse.quote(top_title)
             summary_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded_title}"
-            
+
             resp = await client.get(summary_url)
             if resp.status_code != 200:
-                log.warning(f"Wikipedia REST summary returned status code {resp.status_code} for {top_title}")
+                log.warning(
+                    f"Wikipedia REST summary returned status code {resp.status_code} for {top_title}"
+                )
                 return None
 
             summary_data = resp.json()
@@ -95,7 +101,7 @@ async def search_wikipedia_summary(query: str) -> Optional[Dict[str, Any]]:
                 "extract": summary_data.get("extract", ""),
                 "description": summary_data.get("description", ""),
                 "url": wiki_url,
-                "thumbnail": summary_data.get("thumbnail", {}).get("source", "")
+                "thumbnail": summary_data.get("thumbnail", {}).get("source", ""),
             }
 
             _set_wiki_cache(cache_key, result)
@@ -104,6 +110,7 @@ async def search_wikipedia_summary(query: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         log.warning(f"Error searching Wikipedia for '{clean_query}': {e}")
         return None
+
 
 async def enrich_datasets_with_wikipedia(datasets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -133,19 +140,35 @@ async def enrich_datasets_with_wikipedia(datasets: List[Dict[str, Any]]) -> List
                 extract_lower = wiki_res["extract"].lower()
 
                 # Either the name should match or the summary/title should refer to data concepts
-                words_match = name_lower in title_lower or any(word in title_lower for word in name_lower.split())
+                words_match = name_lower in title_lower or any(
+                    word in title_lower for word in name_lower.split()
+                )
                 is_dataset_related = any(
-                    term in extract_lower or term in title_lower 
-                    for term in ["dataset", "data", "corpus", "benchmark", "database", "collection", "image", "text", "speech"]
+                    term in extract_lower or term in title_lower
+                    for term in [
+                        "dataset",
+                        "data",
+                        "corpus",
+                        "benchmark",
+                        "database",
+                        "collection",
+                        "image",
+                        "text",
+                        "speech",
+                    ]
                 )
 
                 if words_match or is_dataset_related:
                     enriched_ds = dict(ds)
                     enriched_ds["wikipedia_url"] = wiki_res["url"]
                     # Update description if it's empty or very short
-                    if wiki_res["extract"] and (not ds.get("description") or len(ds.get("description", "")) < 20):
+                    if wiki_res["extract"] and (
+                        not ds.get("description") or len(ds.get("description", "")) < 20
+                    ):
                         enriched_ds["description"] = wiki_res["extract"]
-                    log.info(f"Enriched dataset '{name}' with Wikipedia info from page '{wiki_res['title']}'")
+                    log.info(
+                        f"Enriched dataset '{name}' with Wikipedia info from page '{wiki_res['title']}'"
+                    )
                     return enriched_ds
 
             return ds

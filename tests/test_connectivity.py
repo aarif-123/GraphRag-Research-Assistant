@@ -8,10 +8,10 @@ Usage:
     python test_connectivity.py
 """
 
+import json
 import os
 import sys
 import time
-import json
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -195,9 +195,7 @@ def test_supabase() -> None:
     except Exception as e:
         err_msg = str(e)
         if "function" in err_msg.lower() and "not found" in err_msg.lower():
-            warn(
-                "RPC match_paper_chunks", "function not found (may not be deployed yet)"
-            )
+            warn("RPC match_paper_chunks", "function not found (may not be deployed yet)")
         else:
             warn("RPC match_paper_chunks", err_msg[:120])
         results["supabase"]["details"]["rpc_works"] = False
@@ -219,7 +217,8 @@ def test_neo4j() -> None:
         return
 
     try:
-        from neo4j import GraphDatabase, exceptions as neo4j_exceptions
+        from neo4j import GraphDatabase
+        from neo4j import exceptions as neo4j_exceptions
     except ImportError:
         status(False, "Import", "neo4j package not installed")
         results["neo4j"]["status"] = "IMPORT_ERROR"
@@ -255,9 +254,7 @@ def test_neo4j() -> None:
             f"{NEO4J_TIMEOUT}s — Aura instance may be paused/sleeping",
         )
         results["neo4j"]["status"] = "TIMEOUT"
-        results["neo4j"]["details"][
-            "error"
-        ] = f"Connection timed out after {NEO4J_TIMEOUT}s"
+        results["neo4j"]["details"]["error"] = f"Connection timed out after {NEO4J_TIMEOUT}s"
         return
     except neo4j_exceptions.ServiceUnavailable as e:
         elapsed = (time.perf_counter() - t0) * 1000
@@ -328,9 +325,7 @@ def test_neo4j() -> None:
             with driver.session() as session:
                 node_result = session.run("MATCH (n) RETURN count(n) AS total_nodes")
                 total_nodes = node_result.single()["total_nodes"]
-                rel_result = session.run(
-                    "MATCH ()-[r]->() RETURN count(r) AS total_rels"
-                )
+                rel_result = session.run("MATCH ()-[r]->() RETURN count(r) AS total_rels")
                 total_rels = rel_result.single()["total_rels"]
                 return total_nodes, total_rels
 
@@ -351,8 +346,7 @@ def test_neo4j() -> None:
         def _schema():
             with driver.session() as session:
                 labels = [
-                    r["label"]
-                    for r in session.run("CALL db.labels() YIELD label RETURN label")
+                    r["label"] for r in session.run("CALL db.labels() YIELD label RETURN label")
                 ]
                 rel_types = [
                     r["relationshipType"]

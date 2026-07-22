@@ -1,0 +1,14 @@
+# Development and testing dependencies — do NOT install in production.
+# Install with: pip install -r requirements-dev.txt
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+pytest-mock>=3.14.0
+
+# Linting & formatting
+ruff>=0.4.0
+
+# Type checking
+mypy>=1.10.0
+types-requests>=2.31.0

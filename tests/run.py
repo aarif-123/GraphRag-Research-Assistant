@@ -1,6 +1,8 @@
-import uvicorn
-import sys
 import os
+import sys
+
+import uvicorn
+
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 os.environ["PYTHONUNBUFFERED"] = "1"

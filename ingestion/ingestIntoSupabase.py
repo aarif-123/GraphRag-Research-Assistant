@@ -1,16 +1,17 @@
-import csv
 import ast
-import uuid
+import csv
 import hashlib
-import re
-import os
-import time
 import logging
+import os
+import re
+import time
+import uuid
 from queue import Queue
-from threading import Thread, Lock
-from supabase import create_client
-from sentence_transformers import SentenceTransformer
+from threading import Lock, Thread
+
 from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
+from supabase import create_client
 
 # =========================================================
 # 🔐 ENV
@@ -41,10 +42,7 @@ LOG_FILE = "ingestion.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler(LOG_FILE, encoding="utf-8"), logging.StreamHandler()],
 )
 
 log = logging.getLogger("ingestion")
@@ -66,6 +64,7 @@ else:
 
 checkpoint_lock = Lock()
 
+
 # =========================================================
 # 🧠 HELPERS
 # =========================================================
@@ -84,7 +83,7 @@ def parse_list(value):
 
 def chunk_text(text):
     words = text.split()
-    return [" ".join(words[i:i+CHUNK_SIZE]) for i in range(0, len(words), CHUNK_SIZE)]
+    return [" ".join(words[i : i + CHUNK_SIZE]) for i in range(0, len(words), CHUNK_SIZE)]
 
 
 # =========================================================
@@ -142,8 +141,8 @@ def retry(func, retries=5, base_delay=1):
         try:
             return func()
         except Exception as e:
-            wait = base_delay * (2 ** attempt)
-            log.warning(f"⚠️ Retry {attempt+1}/{retries} after {wait}s: {e}")
+            wait = base_delay * (2**attempt)
+            log.warning(f"⚠️ Retry {attempt + 1}/{retries} after {wait}s: {e}")
             time.sleep(wait)
 
     raise Exception("❌ Max retries exceeded")
@@ -162,19 +161,15 @@ def db_worker(queue):
 
         try:
             # ✅ INSERT PAPERS
-            retry(lambda: supabase.table("papers").upsert(
-                papers_batch,
-                on_conflict="id"
-            ).execute())
+            retry(lambda: supabase.table("papers").upsert(papers_batch, on_conflict="id").execute())
 
             # ✅ INSERT CHUNKS (SMALLER BATCHS)
             for i in range(0, len(chunks_batch), 100):
-                batch = chunks_batch[i:i+100]
+                batch = chunks_batch[i : i + 100]
 
-                retry(lambda: supabase.table("paper_chunks").upsert(
-                    batch,
-                    on_conflict="id"
-                ).execute())
+                retry(
+                    lambda: supabase.table("paper_chunks").upsert(batch, on_conflict="id").execute()
+                )
 
             log.info(f"✅ Row {idx} | papers={len(papers_batch)} chunks={len(chunks_batch)}")
 
@@ -220,16 +215,18 @@ def process():
                 paper_id = get_paper_id(row)
                 full_text = f"{title}. {abstract}"
 
-                papers_batch.append({
-                    "id": paper_id,
-                    "title": title,
-                    "abstract": abstract,
-                    "venue": clean_text(row.get("venue")),
-                    "year": int(row["year"]) if row.get("year") else None,
-                    "n_citation": int(row["n_citation"]) if row.get("n_citation") else 0,
-                    "authors": parse_list(row.get("authors")),
-                    "citations": parse_list(row.get("references")),
-                })
+                papers_batch.append(
+                    {
+                        "id": paper_id,
+                        "title": title,
+                        "abstract": abstract,
+                        "venue": clean_text(row.get("venue")),
+                        "year": int(row["year"]) if row.get("year") else None,
+                        "n_citation": int(row["n_citation"]) if row.get("n_citation") else 0,
+                        "authors": parse_list(row.get("authors")),
+                        "citations": parse_list(row.get("references")),
+                    }
+                )
 
                 if full_text.strip():
                     chunks = chunk_text(full_text)
@@ -239,17 +236,19 @@ def process():
                         batch_size=32,
                         convert_to_numpy=True,
                         normalize_embeddings=True,
-                        show_progress_bar=False
+                        show_progress_bar=False,
                     )
 
                     for i, chunk in enumerate(chunks):
-                        chunks_batch.append({
-                            "id": get_chunk_id(paper_id, i),
-                            "research_id": paper_id,
-                            "chunk": chunk,
-                            "chunk_index": i,
-                            "embedding": embeddings[i].tolist(),
-                        })
+                        chunks_batch.append(
+                            {
+                                "id": get_chunk_id(paper_id, i),
+                                "research_id": paper_id,
+                                "chunk": chunk,
+                                "chunk_index": i,
+                                "embedding": embeddings[i].tolist(),
+                            }
+                        )
 
                 if len(papers_batch) >= BATCH_SIZE:
                     queue.put((papers_batch.copy(), chunks_batch.copy(), idx))

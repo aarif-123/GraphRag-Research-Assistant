@@ -5,10 +5,11 @@ Queries Kaggle's public datasets search API using user-provided credentials
 and enriches extracted datasets with Kaggle references.
 """
 
-import os
-import httpx
 import logging
-from typing import List, Dict, Any, Optional
+import os
+from typing import Any, Dict, List, Optional
+
+import httpx
 
 log = logging.getLogger("aether.kaggle")
 
@@ -16,18 +17,48 @@ log = logging.getLogger("aether.kaggle")
 _KAGGLE_CACHE: Dict[str, Any] = {}
 
 COMMON_STOP_WORDS = {
-    "explain", "what", "is", "how", "does", "why", "show", "me", "find", "on", 
-    "of", "and", "their", "applications", "the", "a", "an", "to", "in", "for", 
-    "with", "about", "recent", "advances", "overview", "survey", "paper", 
-    "papers", "literature", "dataset", "datasets"
+    "explain",
+    "what",
+    "is",
+    "how",
+    "does",
+    "why",
+    "show",
+    "me",
+    "find",
+    "on",
+    "of",
+    "and",
+    "their",
+    "applications",
+    "the",
+    "a",
+    "an",
+    "to",
+    "in",
+    "for",
+    "with",
+    "about",
+    "recent",
+    "advances",
+    "overview",
+    "survey",
+    "paper",
+    "papers",
+    "literature",
+    "dataset",
+    "datasets",
 }
 
-def _get_kaggle_cache(key: str) -> Optional[Dict[str, Any]]:
+
+def _get_kaggle_cache(key: str) -> Any:
     # Simple cache logic (no expiration for run lifecycle, or simple check)
     return _KAGGLE_CACHE.get(key)
 
+
 def _set_kaggle_cache(key: str, val: Any) -> None:
     _KAGGLE_CACHE[key] = val
+
 
 async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
     """
@@ -52,15 +83,15 @@ async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
     url = "https://www.kaggle.com/api/v1/datasets/list"
     params = {"search": clean_query}
 
-    headers = {
-        "User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"
-    }
+    headers = {"User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"}
 
     try:
         async with httpx.AsyncClient(headers=headers, timeout=3.5) as client:
             resp = await client.get(url, params=params, auth=(username, key))
             if resp.status_code != 200:
-                log.warning(f"Kaggle search returned status code {resp.status_code} for query '{clean_query}'")
+                log.warning(
+                    f"Kaggle search returned status code {resp.status_code} for query '{clean_query}'"
+                )
                 _set_kaggle_cache(cache_key, None)
                 return None
 
@@ -75,15 +106,18 @@ async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
             best_score = -1.0
 
             import re
-            q_words = {w for w in re.findall(r"\b\w+\b", clean_query.lower()) if w not in COMMON_STOP_WORDS}
+
+            q_words = {
+                w for w in re.findall(r"\b\w+\b", clean_query.lower()) if w not in COMMON_STOP_WORDS
+            }
             if not q_words:
                 q_words = set(clean_query.lower().split())
 
-            for item in data[:10]: # Check top 10 results
+            for item in data[:10]:  # Check top 10 results
                 title = item.get("title", "")
                 ref = item.get("ref", "")
                 vote_count = item.get("voteCount", 0)
-                
+
                 # Check match score
                 title_lower = title.lower()
                 ref_lower = ref.lower()
@@ -100,8 +134,13 @@ async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
                     continue
 
                 # Perfect title match gets bonus
-                exact_bonus = 5.0 if clean_query.lower() == title_lower or clean_query.lower() == ref_lower.split('/')[-1] else 0.0
-                
+                exact_bonus = (
+                    5.0
+                    if clean_query.lower() == title_lower
+                    or clean_query.lower() == ref_lower.split("/")[-1]
+                    else 0.0
+                )
+
                 # Normalize vote count influence (cap at 1000 votes for scoring)
                 popularity_bonus = min(vote_count / 200.0, 5.0)
 
@@ -114,7 +153,7 @@ async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
                         "ref": ref,
                         "url": item.get("url", f"https://www.kaggle.com/datasets/{ref}"),
                         "vote_count": vote_count,
-                        "subtitle": item.get("subtitle", "")
+                        "subtitle": item.get("subtitle", ""),
                     }
 
             _set_kaggle_cache(cache_key, best_match)
@@ -125,6 +164,7 @@ async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
         _set_kaggle_cache(cache_key, None)
         return None
 
+
 async def enrich_datasets_with_kaggle(datasets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Enrich a list of dataset dictionaries with Kaggle dataset URLs and metadata.
@@ -133,14 +173,18 @@ async def enrich_datasets_with_kaggle(datasets: List[Dict[str, Any]]) -> List[Di
         return datasets
 
     import asyncio
-    
+
     async def enrich_single(ds: Dict[str, Any]) -> Dict[str, Any]:
         name = ds.get("name")
         if not name:
             return ds
-        
+
         # If it's already a Kaggle dataset or already enriched, skip searching
-        if ds.get("source") == "kaggle_search" or "kaggle.com" in (ds.get("url") or "") or ds.get("kaggle_url"):
+        if (
+            ds.get("source") == "kaggle_search"
+            or "kaggle.com" in (ds.get("url") or "")
+            or ds.get("kaggle_url")
+        ):
             return ds
 
         try:
@@ -158,7 +202,7 @@ async def enrich_datasets_with_kaggle(datasets: List[Dict[str, Any]]) -> List[Di
     # Limit to top 3 datasets for enrichment to prevent rate limit issues
     datasets_to_enrich = datasets[:3]
     remaining_datasets = datasets[3:]
-    
+
     tasks = [enrich_single(ds) for ds in datasets_to_enrich]
     enriched = await asyncio.gather(*tasks)
     return list(enriched) + remaining_datasets
@@ -188,9 +232,7 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
     url = "https://www.kaggle.com/api/v1/datasets/list"
     params = {"search": clean_query}
 
-    headers = {
-        "User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"
-    }
+    headers = {"User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"}
 
     try:
         async with httpx.AsyncClient(headers=headers, timeout=3.5) as client:
@@ -203,12 +245,15 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
                 return []
 
             import re
-            q_words = {w for w in re.findall(r"\b\w+\b", clean_query.lower()) if w not in COMMON_STOP_WORDS}
+
+            q_words = {
+                w for w in re.findall(r"\b\w+\b", clean_query.lower()) if w not in COMMON_STOP_WORDS
+            }
             if not q_words:
                 q_words = set(clean_query.lower().split())
 
             results = []
-            for item in data[:10]: # Look through top 10 results to find matches
+            for item in data[:10]:  # Look through top 10 results to find matches
                 title = item.get("title", "")
                 ref = item.get("ref", "")
                 title_lower = title.lower()
@@ -225,15 +270,17 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
                 if overlap == 0:
                     continue
 
-                results.append({
-                    "name": title or ref.split("/")[-1],
-                    "full_name": ref,
-                    "url": item.get("url", f"https://www.kaggle.com/datasets/{ref}"),
-                    "description": item.get("subtitle", ""),
-                    "kaggle_url": item.get("url", f"https://www.kaggle.com/datasets/{ref}"),
-                    "kaggle_votes": item.get("voteCount", 0),
-                    "source": "kaggle_search"
-                })
+                results.append(
+                    {
+                        "name": title or ref.split("/")[-1],
+                        "full_name": ref,
+                        "url": item.get("url", f"https://www.kaggle.com/datasets/{ref}"),
+                        "description": item.get("subtitle", ""),
+                        "kaggle_url": item.get("url", f"https://www.kaggle.com/datasets/{ref}"),
+                        "kaggle_votes": item.get("voteCount", 0),
+                        "source": "kaggle_search",
+                    }
+                )
                 if len(results) >= limit:
                     break
             _set_kaggle_cache(cache_key, results)
@@ -242,4 +289,3 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
     except Exception as e:
         log.error(f"Error querying Kaggle API for bulk query '{clean_query}': {e}")
         return []
-

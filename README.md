@@ -12,6 +12,7 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=flat-square&logo=mongodb)](https://www.mongodb.com/atlas)
 [![Groq](https://img.shields.io/badge/Groq-LLM-F55036?style=flat-square)](https://groq.com)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square)](LICENSE)
+[![CI](https://github.com/<your-username>/GraphRag-Research-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-username>/GraphRag-Research-Assistant/actions/workflows/ci.yml)
 
 </div>
 
@@ -23,6 +24,9 @@
 
 ## 📋 Table of Contents
 
+- [Quick Start](#-quick-start)
+- [Running Tests](#-running-tests)
+- [CI/CD](#-cicd)
 - [Overview](#-overview)
 - [System Architecture](#-system-architecture)
   - [High-Level Architecture](#high-level-architecture)
@@ -43,6 +47,103 @@
 - [Troubleshooting](#-troubleshooting)
 
 ---
+
+## ⚡ Quick Start
+
+```bash
+# 1. Clone
+git clone https://github.com/<your-username>/GraphRag-Research-Assistant.git
+cd GraphRag-Research-Assistant
+
+# 2. Create and activate a virtual environment
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS / Linux:
+source .venv/bin/activate
+
+# 3. Install production dependencies
+pip install -r requirements.txt
+
+# 4. Configure environment
+cp .env.example .env.local
+# Edit .env.local and fill in your real credentials (Supabase, Neo4j, Groq, etc.)
+
+# 5. Validate your configuration before starting
+python scripts/validate_env.py --env-file .env.local
+
+# 6. Start the development server
+uvicorn app.app:app --reload --host 0.0.0.0 --port 8000
+```
+
+> [!IMPORTANT]
+> `scripts/validate_env.py` will exit with a clear error report if any required variable is missing or misconfigured. Always run it after editing `.env.local`.
+
+---
+
+## 🧪 Running Tests
+
+Install dev dependencies first:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+**Unit tests** (no network, no API keys needed):
+
+```bash
+pytest tests/unit/ -v
+```
+
+**Integration tests** (HTTP is mocked — no real API calls):
+
+```bash
+pytest tests/integration/ -v
+```
+
+**All tests at once:**
+
+```bash
+pytest tests/ -v
+```
+
+**What's covered:**
+
+| Suite | Module | What's tested |
+|---|---|---|
+| Unit | `test_cache.py` | TTL expiry, eviction, per-user partitioning |
+| Unit | `test_rate_limiter.py` | Sliding window, 429, cleanup |
+| Unit | `test_text_processing.py` | Prompt compression, message truncation |
+| Unit | `test_credit_system.py` | Free/Pro limits, daily reset, cost table |
+| Unit | `sources/test_core_normalize.py` | Author formats, year extraction, URL construction |
+| Unit | `sources/test_openalex_normalize.py` | Unicode normalisation, BibTeX type inference |
+| Unit | `sources/test_s2_normalize.py` | Field mapping, cache hit/miss/expiry |
+| Unit | `sources/test_wikipedia_cache.py` | Cache TTL, enrichment relevance filter |
+| Integration | `test_search_core.py` | 200/401/5xx responses, title filtering, missing key |
+| Integration | `test_search_s2.py` | 200/429/503, cache dedup, empty query guard |
+| Integration | `test_search_wikipedia.py` | Two-stage search+summary, cache, guard |
+| Integration | `test_enrich_s2.py` | Enrichment merge, 404 passthrough, timeout |
+
+---
+
+## 🔄 CI/CD
+
+[![CI](https://github.com/<your-username>/GraphRag-Research-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-username>/GraphRag-Research-Assistant/actions/workflows/ci.yml)
+
+Every push and pull request to `main` triggers the following pipeline:
+
+| Job | Tool | What it checks |
+|---|---|---|
+| **Lint & Format** | `ruff` | Code style and formatting |
+| **Type Check** | `mypy` | Type annotations on `app/sources/` |
+| **Env Validation** | `scripts/validate_env.py` | Config format/range with stub values |
+| **Unit Tests** | `pytest tests/unit/` | Pure logic — no network needed |
+| **Integration Tests** | `pytest tests/integration/` | Mocked HTTP — no API keys needed |
+
+> [!NOTE]
+> Replace `<your-username>` in the CI badge URLs above with your actual GitHub username after pushing.
+
+------
 
 ## 🧠 Overview
 

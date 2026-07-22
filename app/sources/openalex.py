@@ -16,7 +16,7 @@ import logging
 import os
 import re
 import unicodedata
-from typing import Optional
+from typing import Dict, List, Optional
 
 import httpx
 
@@ -32,13 +32,38 @@ _OA_EMAIL = os.getenv("OPENALEX_EMAIL", "").strip()
 # ── Conference keywords used to classify entry type ──────────────────────────
 # Checked case-insensitively against the venue/host-org/type strings returned
 # by OpenAlex.  Any match → @inproceedings; otherwise → @article.
-_CONF_KEYWORDS: frozenset[str] = frozenset({
-    "cvpr", "iccv", "eccv", "neurips", "nips", "icml", "iclr",
-    "acl", "emnlp", "naacl", "aaai", "ijcai", "sigkdd", "kdd",
-    "sigmod", "vldb", "icse", "isca", "micro", "asplos", "sosp",
-    "osdi", "nsdi", "usenix", "proceedings", "conference", "workshop",
-    "symposium",
-})
+_CONF_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "cvpr",
+        "iccv",
+        "eccv",
+        "neurips",
+        "nips",
+        "icml",
+        "iclr",
+        "acl",
+        "emnlp",
+        "naacl",
+        "aaai",
+        "ijcai",
+        "sigkdd",
+        "kdd",
+        "sigmod",
+        "vldb",
+        "icse",
+        "isca",
+        "micro",
+        "asplos",
+        "sosp",
+        "osdi",
+        "nsdi",
+        "usenix",
+        "proceedings",
+        "conference",
+        "workshop",
+        "symposium",
+    }
+)
 
 
 def normalize_title(title: str) -> str:
@@ -81,9 +106,7 @@ def _infer_entry_type(work: dict) -> str:
 
     # Check venue/source name
     source = work.get("primary_location") or {}
-    source_name = (
-        (source.get("source") or {}).get("display_name", "")
-    ).lower()
+    source_name = ((source.get("source") or {}).get("display_name", "")).lower()
     if any(kw in source_name for kw in _CONF_KEYWORDS):
         return "inproceedings"
 
@@ -250,4 +273,3 @@ async def enrich_arxiv_papers_with_openalex(
 
     results = await asyncio.gather(*[_enrich_one(p) for p in arxiv_papers])
     return list(results)
-

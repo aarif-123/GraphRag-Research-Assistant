@@ -25,6 +25,7 @@ _S2_API_KEY = os.getenv("S2_API_KEY", "")
 _S2_TIMEOUT = 5.0  # seconds
 _S2_SEMAPHORE = asyncio.Semaphore(2)  # max 2 concurrent requests
 
+
 class AsyncRateLimiter:
     def __init__(self, requests_per_second: float):
         self.delay = 1.0 / requests_per_second
@@ -40,11 +41,12 @@ class AsyncRateLimiter:
                 await asyncio.sleep(sleep_time)
             self.last_request_time = time.time()
 
+
 _S2_RATE_LIMITER = AsyncRateLimiter(requests_per_second=9.0 if _S2_API_KEY else 0.3)
 
-import time
-_S2_CACHE = {}
+_S2_CACHE: Dict[str, Any] = {}
 _S2_CACHE_TTL = 43200  # 12 hours
+
 
 def _get_s2_cache(key: str):
     entry = _S2_CACHE.get(key)
@@ -52,25 +54,29 @@ def _get_s2_cache(key: str):
         return entry[0]
     return None
 
+
 def _set_s2_cache(key: str, val):
     _S2_CACHE[key] = (val, time.time())
 
+
 # Fields we want per paper — balances richness vs. payload size
-_PAPER_FIELDS = ",".join([
-    "title",
-    "authors",
-    "year",
-    "abstract",
-    "citationCount",
-    "influentialCitationCount",
-    "openAccessPdf",
-    "externalIds",
-    "tldr",
-    "venue",
-    "publicationVenue",
-    "fieldsOfStudy",
-    "publicationTypes",
-])
+_PAPER_FIELDS = ",".join(
+    [
+        "title",
+        "authors",
+        "year",
+        "abstract",
+        "citationCount",
+        "influentialCitationCount",
+        "openAccessPdf",
+        "externalIds",
+        "tldr",
+        "venue",
+        "publicationVenue",
+        "fieldsOfStudy",
+        "publicationTypes",
+    ]
+)
 
 _REF_FIELDS = "title,authors,year,citationCount,externalIds,openAccessPdf"
 
@@ -133,7 +139,7 @@ async def search_papers_s2(query: str, limit: int = 8) -> List[Dict]:
         log.debug(f"S2 search cache hit for {query}")
         return cached
 
-    params = {
+    params: Dict[str, Any] = {
         "query": query,
         "fields": _PAPER_FIELDS,
         "limit": min(limit, 10),
@@ -148,7 +154,9 @@ async def search_papers_s2(query: str, limit: int = 8) -> List[Dict]:
                 resp = await client.get(f"{_S2_BASE}/paper/search", params=params)
 
             if resp.status_code == 429:
-                log.warning("Semantic Scholar rate limited (429) — failing fast to prevent timeout.")
+                log.warning(
+                    "Semantic Scholar rate limited (429) — failing fast to prevent timeout."
+                )
                 return []
             if resp.status_code != 200:
                 log.warning(f"Semantic Scholar search returned {resp.status_code}")
@@ -174,7 +182,8 @@ async def get_paper_by_arxiv_id_s2(arxiv_id: str) -> Optional[Dict]:
         return None
 
     import re
-    clean_arxiv_id = re.sub(r'v\d+$', '', arxiv_id)
+
+    clean_arxiv_id = re.sub(r"v\d+$", "", arxiv_id)
 
     cache_key = f"paper_{clean_arxiv_id}"
     cached = _get_s2_cache(cache_key)
@@ -198,7 +207,9 @@ async def get_paper_by_arxiv_id_s2(arxiv_id: str) -> Optional[Dict]:
             if resp.status_code == 404:
                 return None
             if resp.status_code == 429:
-                log.warning("Semantic Scholar rate limited (429) — failing fast to prevent timeout.")
+                log.warning(
+                    "Semantic Scholar rate limited (429) — failing fast to prevent timeout."
+                )
                 return None
             if resp.status_code != 200:
                 log.warning(f"S2 paper lookup returned {resp.status_code}")
@@ -213,9 +224,7 @@ async def get_paper_by_arxiv_id_s2(arxiv_id: str) -> Optional[Dict]:
             return None
 
 
-async def get_paper_references_s2(
-    s2_paper_id: str, limit: int = 10
-) -> List[Dict]:
+async def get_paper_references_s2(s2_paper_id: str, limit: int = 10) -> List[Dict]:
     """
     Get the top references (papers cited by) a given S2 paper.
     Returns list of lightweight paper dicts.
@@ -239,24 +248,23 @@ async def get_paper_references_s2(
 
             data = resp.json()
             refs = []
-            for item in (data.get("data") or []):
+            for item in data.get("data") or []:
                 cited = item.get("citedPaper") or {}
                 if cited.get("title"):
                     ext = cited.get("externalIds") or {}
-                    refs.append({
-                        "title": cited.get("title", ""),
-                        "year": cited.get("year"),
-                        "citation_count": cited.get("citationCount", 0),
-                        "arxiv_id": ext.get("ArXiv", ""),
-                        "doi": ext.get("DOI", ""),
-                        "authors": [
-                            a.get("name", "")
-                            for a in (cited.get("authors") or [])
-                        ][:3],
-                        "pdf_url": (
-                            (cited.get("openAccessPdf") or {}).get("url", "")
-                        ),
-                    })
+                    refs.append(
+                        {
+                            "title": cited.get("title", ""),
+                            "year": cited.get("year"),
+                            "citation_count": cited.get("citationCount", 0),
+                            "arxiv_id": ext.get("ArXiv", ""),
+                            "doi": ext.get("DOI", ""),
+                            "authors": [a.get("name", "") for a in (cited.get("authors") or [])][
+                                :3
+                            ],
+                            "pdf_url": ((cited.get("openAccessPdf") or {}).get("url", "")),
+                        }
+                    )
             return refs
 
         except Exception as e:
@@ -309,10 +317,7 @@ async def enrich_arxiv_papers_with_s2(
     # Run all lookups concurrently (semaphore guards rate limit)
     tasks = [_enrich_one_safe(p) for p in arxiv_papers]
     try:
-        enriched = await asyncio.wait_for(
-            asyncio.gather(*tasks),
-            timeout=8.0
-        )
+        enriched = await asyncio.wait_for(asyncio.gather(*tasks), timeout=8.0)
         return enriched
     except asyncio.TimeoutError:
         log.warning("Semantic Scholar batch enrichment timed out — returning original papers.")

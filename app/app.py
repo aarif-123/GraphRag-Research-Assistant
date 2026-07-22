@@ -1,6 +1,3 @@
-
-
-
 """
 GraphRAG Research API v4.0 — Aether Intelligence Edition
 
@@ -45,15 +42,17 @@ NEW ENDPOINTS
 ─────────────────────────────────────────────────────────────────────────────
 """
 
-import os
-import re
-import json
-import time
-import platform
 import collections
+import json
+import os
+import platform
+import re
+import time
 
 # Bypass Windows WMI service hang by mocking platform uname
-_UnameResult = collections.namedtuple("uname_result", ["system", "node", "release", "version", "machine", "processor"])
+_UnameResult = collections.namedtuple(
+    "uname_result", ["system", "node", "release", "version", "machine", "processor"]
+)
 platform.uname = lambda: _UnameResult("Windows", "localhost", "10", "10.0.19045", "AMD64", "Intel")
 platform.win32_ver = lambda *args, **kwargs: ("10", "10.0.19045", "", "")
 
@@ -62,33 +61,34 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 
 # Bypass Python SSL verification for local dev behind proxies/VPNs
 import ssl
+
 ssl._create_default_https_context = ssl._create_unverified_context
 
-import uuid
-import hashlib
 import asyncio
+import hashlib
 import logging
-from typing import Optional, List, Dict, Any, Tuple
+import uuid
 from contextlib import asynccontextmanager
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException, Request, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
-
-import httpx
-import fitz
-import numpy as np
-import jwt
 import bcrypt
-from pymongo import MongoClient
-
-from supabase import create_client
-from neo4j import GraphDatabase, exceptions as neo4j_exceptions
+import fitz
+import httpx
+import jwt
+import numpy as np
 from dotenv import load_dotenv
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from neo4j import GraphDatabase
+from neo4j import exceptions as neo4j_exceptions
+from pydantic import BaseModel, Field, field_validator
+from pymongo import MongoClient
+from supabase import create_client
+
 try:
     from sentence_transformers import SentenceTransformer
 except ImportError:
@@ -98,43 +98,66 @@ import threading
 
 # External source connectors (Semantic Scholar, Papers with Code, OpenAlex)
 try:
-    from app.sources.semantic_scholar import (
-        enrich_arxiv_papers_with_s2,
-        search_papers_s2,
+    from app.sources.core import (
+        search_core_papers,
+    )
+    from app.sources.kaggle import (
+        enrich_datasets_with_kaggle,
+        search_kaggle_dataset,
+    )
+    from app.sources.openalex import (
+        enrich_arxiv_papers_with_openalex,
+        search_openalex,
     )
     from app.sources.papers_with_code import (
         enrich_arxiv_papers_with_pwc,
     )
+    from app.sources.semantic_scholar import (
+        enrich_arxiv_papers_with_s2,
+        search_papers_s2,
+    )
     from app.sources.wikipedia import (
-        search_wikipedia_summary,
         enrich_datasets_with_wikipedia,
+        search_wikipedia_summary,
     )
-    from app.sources.kaggle import (
-        search_kaggle_dataset,
-        enrich_datasets_with_kaggle,
-    )
-    from app.sources.core import (
-        search_core_papers,
-    )
-    from app.sources.openalex import (
-        search_openalex,
-        enrich_arxiv_papers_with_openalex,
-    )
+
     _SOURCES_AVAILABLE = True
 except ImportError as e:
     _SOURCES_AVAILABLE = False
     log = logging.getLogger("aether")
-    log.warning(f"External source connectors not found — S2/PwC/Wikipedia/Kaggle/CORE/OpenAlex disabled (error: {e})")
-    async def enrich_arxiv_papers_with_s2(papers, **kw): return papers
-    async def search_papers_s2(query, **kw): return []
-    async def enrich_arxiv_papers_with_pwc(papers, **kw): return papers
-    async def search_wikipedia_summary(query, **kw): return None
-    async def enrich_datasets_with_wikipedia(datasets, **kw): return datasets
-    async def search_kaggle_dataset(query, **kw): return None
-    async def enrich_datasets_with_kaggle(datasets, **kw): return datasets
-    async def search_core_papers(query, **kw): return []
-    async def search_openalex(query, **kw): return None
-    async def enrich_arxiv_papers_with_openalex(papers, **kw): return papers
+    log.warning(
+        f"External source connectors not found — S2/PwC/Wikipedia/Kaggle/CORE/OpenAlex disabled (error: {e})"
+    )
+
+    async def enrich_arxiv_papers_with_s2(papers, **kw):
+        return papers
+
+    async def search_papers_s2(query, **kw):
+        return []
+
+    async def enrich_arxiv_papers_with_pwc(papers, **kw):
+        return papers
+
+    async def search_wikipedia_summary(query, **kw):
+        return None
+
+    async def enrich_datasets_with_wikipedia(datasets, **kw):
+        return datasets
+
+    async def search_kaggle_dataset(query, **kw):
+        return None
+
+    async def enrich_datasets_with_kaggle(datasets, **kw):
+        return datasets
+
+    async def search_core_papers(query, **kw):
+        return []
+
+    async def search_openalex(query, **kw):
+        return None
+
+    async def enrich_arxiv_papers_with_openalex(papers, **kw):
+        return papers
 
 # ================================================================
 # THREAD-LOCAL SUPABASE CLIENT
@@ -179,17 +202,21 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_API_KEYS = [k.strip() for k in GROQ_API_KEY.split(",") if k.strip()] if GROQ_API_KEY else []
 groq_key_index = 0
 
+
 def get_current_groq_key() -> str:
     global groq_key_index
     if not GROQ_API_KEYS:
         return GROQ_API_KEY or ""
     return GROQ_API_KEYS[groq_key_index % len(GROQ_API_KEYS)]
 
+
 def rotate_groq_key():
     global groq_key_index
     if GROQ_API_KEYS:
         groq_key_index = (groq_key_index + 1) % len(GROQ_API_KEYS)
         log.info(f"Rotated to Groq API Key index {groq_key_index}")
+
+
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-base-en")
@@ -268,8 +295,11 @@ class PlanError(Exception):
 # ================================================================
 
 import contextvars
+
 # ContextVar to isolate caches and user personal documents/conversations
-current_user_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("current_user_id", default=None)
+current_user_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "current_user_id", default=None
+)
 
 
 def cache_key(*args) -> str:
@@ -296,7 +326,7 @@ def get_cache(bucket: str, key: str):
     entry = CACHE[bucket].get(key)
     if not entry:
         return None
-        
+
     # Custom TTL for public API queries: 12 hours (43200s), default is CACHE_TTL
     ttl = 43200 if bucket == "api" else CACHE_TTL
     if time.time() - entry["ts"] > ttl:
@@ -335,11 +365,11 @@ PRO_TOP_K_MAX = 20
 
 # Credit costs per action
 CREDIT_COSTS: Dict[str, int] = {
-    "query": 1,        # /api/research
-    "chat": 1,         # /api/chat
-    "timeline": 3,     # /api/research/timeline
-    "compare": 3,      # /api/graph/compare
-    "pdf": 5,          # PDF upload
+    "query": 1,  # /api/research
+    "chat": 1,  # /api/chat
+    "timeline": 3,  # /api/research/timeline
+    "compare": 3,  # /api/graph/compare
+    "pdf": 5,  # PDF upload
 }
 
 
@@ -369,10 +399,10 @@ async def get_user_plan(request: Request) -> Dict[str, Any]:
             reset_at_naive = reset_at.astimezone(timezone.utc).replace(tzinfo=None)
 
         # Reset daily credits if the reset time has passed
-        if reset_at is None or (isinstance(reset_at_naive, datetime) and now_naive >= reset_at_naive):
-            new_reset = (now + timedelta(days=1)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
+        if reset_at is None or (
+            isinstance(reset_at_naive, datetime) and now_naive >= reset_at_naive
+        ):
+            new_reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
             new_reset_naive = new_reset.replace(tzinfo=None)
             await asyncio.to_thread(
                 db.users.update_one,
@@ -411,7 +441,7 @@ async def check_and_deduct_credit(request: Request, action: str) -> None:
             detail={
                 "error": "credit_exhausted",
                 "message": f"You have used all {FREE_CREDITS_PER_DAY} daily credits. "
-                           f"Upgrade to Pro for unlimited access, or wait until {reset_at}.",
+                f"Upgrade to Pro for unlimited access, or wait until {reset_at}.",
                 "credits_used": credits_used,
                 "credits_limit": FREE_CREDITS_PER_DAY,
                 "reset_at": reset_at,
@@ -438,7 +468,9 @@ async def append_credits_snapshot(res: Any, request: Request) -> Any:
             res["credits"] = {
                 "plan": _plan,
                 "credits_used": _used,
-                "credits_remaining": None if _plan == "pro" else max(0, FREE_CREDITS_PER_DAY - _used),
+                "credits_remaining": None
+                if _plan == "pro"
+                else max(0, FREE_CREDITS_PER_DAY - _used),
                 "credits_limit": None if _plan == "pro" else FREE_CREDITS_PER_DAY,
                 "is_unlimited": _plan == "pro",
             }
@@ -456,7 +488,7 @@ async def require_pro(request: Request, feature_name: str = "This feature") -> N
             detail={
                 "error": "pro_required",
                 "message": f"{feature_name} is available on the Pro plan. "
-                           "Upgrade to unlock unlimited surveys, bulk research, heavy models, and more.",
+                "Upgrade to unlock unlimited surveys, bulk research, heavy models, and more.",
                 "upgrade_url": "/upgrade",
             },
         )
@@ -516,13 +548,9 @@ class Pool:
 
         try:
             self.neo4j = GraphDatabase.driver(
-                NEO4J_URI,
-                auth=(NEO4J_USER, NEO4J_PASSWORD),
-                notifications_min_severity='OFF'
+                NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD), notifications_min_severity="OFF"
             )
-            await asyncio.wait_for(
-                asyncio.to_thread(self.neo4j.verify_connectivity), timeout=10.0
-            )
+            await asyncio.wait_for(asyncio.to_thread(self.neo4j.verify_connectivity), timeout=10.0)
             self.neo4j_ok = True
             log.info("Neo4j connected")
         except asyncio.TimeoutError:
@@ -564,9 +592,7 @@ pool = Pool()
 
 embed_model = None
 if SentenceTransformer is None:
-    log.warning(
-        "sentence-transformers not installed; falling back to HuggingFace API embeddings"
-    )
+    log.warning("sentence-transformers not installed; falling back to HuggingFace API embeddings")
 else:
     try:
         log.info("Loading embedding model...")
@@ -591,6 +617,7 @@ local_embeddings_cache = {}  # Fallback in-memory cache: {url_hash: [[embeddings
 if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
     try:
         from upstash_redis import Redis as UpstashRedis
+
         upstash_redis = UpstashRedis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN)
         log.info("Upstash Redis client initialized successfully for PDF caching.")
     except Exception as e:
@@ -650,9 +677,7 @@ class BulkRequest(BaseModel):
 class CompareRequest(BaseModel):
     paper_a: str = Field(..., description="Title or ID of first paper")
     paper_b: str = Field(..., description="Title or ID of second paper")
-    aspects: Optional[List[str]] = Field(
-        None, description="Specific aspects to compare"
-    )
+    aspects: Optional[List[str]] = Field(None, description="Specific aspects to compare")
     temperature: float = Field(0.0, ge=0.0, le=2.0)
 
 
@@ -739,11 +764,13 @@ app.add_middleware(
 
 
 # ── Local ArXiv MCP Server Definition ───────────────────────────
-from mcp.server.fastmcp import FastMCP
 import urllib.parse
 import xml.etree.ElementTree as ET
 
+from mcp.server.fastmcp import FastMCP
+
 mcp_server = FastMCP("Aether ArXiv MCP Server")
+
 
 @mcp_server.tool()
 async def search_arxiv(query: str, limit: int = 5) -> list:
@@ -754,56 +781,73 @@ async def search_arxiv(query: str, limit: int = 5) -> list:
     log.info(f"[MCP Server] search_arxiv called with query: '{query}', limit: {limit}")
     if not query.strip():
         return []
-    
-    clean_query = query.replace('"', '').replace("'", "")
-    encoded_query = urllib.parse.quote(f'all:"{clean_query}"' if " " in clean_query else f"all:{clean_query}")
+
+    clean_query = query.replace('"', "").replace("'", "")
+    encoded_query = urllib.parse.quote(
+        f'all:"{clean_query}"' if " " in clean_query else f"all:{clean_query}"
+    )
     url = f"https://export.arxiv.org/api/query?search_query={encoded_query}&max_results={limit}&sortBy=relevance"
-    
+
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.get(url)
             if response.status_code != 200:
                 log.warning(f"[MCP Server] arXiv API returned status code {response.status_code}")
                 return []
-                
+
             root = ET.fromstring(response.content)
-            ns = {'atom': 'http://www.w3.org/2005/Atom'}
-            
+            ns = {"atom": "http://www.w3.org/2005/Atom"}
+
             papers = []
-            for entry in root.findall('atom:entry', ns):
-                title_node = entry.find('atom:title', ns)
-                summary_node = entry.find('atom:summary', ns)
-                id_node = entry.find('atom:id', ns)
-                published_node = entry.find('atom:published', ns)
-                
-                title = title_node.text.strip().replace("\n", " ") if title_node is not None and title_node.text else "Unknown Title"
-                summary = summary_node.text.strip().replace("\n", " ") if summary_node is not None and summary_node.text else "No Abstract Available"
-                
+            for entry in root.findall("atom:entry", ns):
+                title_node = entry.find("atom:title", ns)
+                summary_node = entry.find("atom:summary", ns)
+                id_node = entry.find("atom:id", ns)
+                published_node = entry.find("atom:published", ns)
+
+                title = (
+                    title_node.text.strip().replace("\n", " ")
+                    if title_node is not None and title_node.text
+                    else "Unknown Title"
+                )
+                summary = (
+                    summary_node.text.strip().replace("\n", " ")
+                    if summary_node is not None and summary_node.text
+                    else "No Abstract Available"
+                )
+
                 arxiv_url = id_node.text.strip() if id_node is not None and id_node.text else ""
-                arxiv_id = arxiv_url.split('/abs/')[-1] if '/abs/' in arxiv_url else ""
-                
-                published = published_node.text.strip() if published_node is not None and published_node.text else ""
-                
+                arxiv_id = arxiv_url.split("/abs/")[-1] if "/abs/" in arxiv_url else ""
+
+                published = (
+                    published_node.text.strip()
+                    if published_node is not None and published_node.text
+                    else ""
+                )
+
                 authors = []
-                for author_node in entry.findall('atom:author', ns):
-                    name_node = author_node.find('atom:name', ns)
+                for author_node in entry.findall("atom:author", ns):
+                    name_node = author_node.find("atom:name", ns)
                     if name_node is not None and name_node.text:
                         authors.append(name_node.text.strip())
-                        
+
                 pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id else ""
-                
-                papers.append({
-                    "title": title,
-                    "summary": summary,
-                    "authors": authors,
-                    "published": published,
-                    "arxiv_id": arxiv_id,
-                    "pdf_url": pdf_url
-                })
+
+                papers.append(
+                    {
+                        "title": title,
+                        "summary": summary,
+                        "authors": authors,
+                        "published": published,
+                        "arxiv_id": arxiv_id,
+                        "pdf_url": pdf_url,
+                    }
+                )
             return papers
     except Exception as e:
         log.error(f"[MCP Server] Error in search_arxiv tool: {e}", exc_info=True)
         return []
+
 
 # Mount the MCP server's SSE application on Aether's /sse endpoint
 app.mount("/sse", mcp_server.sse_app())
@@ -812,28 +856,30 @@ app.mount("/sse", mcp_server.sse_app())
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     import traceback
+
     rid = getattr(request.state, "request_id", "unknown")
     log.exception(f"[{rid}] Unhandled {type(exc).__name__}: {exc}")
-    
+
     status_code = exc.status_code if isinstance(exc, HTTPException) else 500
     err_msg = str(exc)
     err_type = type(exc).__name__
     tb = traceback.format_exc()
-    
+
     return JSONResponse(
         status_code=status_code,
         content={
             "detail": f"{err_type}: {err_msg}",
             "request_id": rid,
             "error_type": err_type,
-            "traceback": tb.split("\n")
-        }
+            "traceback": tb.split("\n"),
+        },
     )
 
 
 # ================================================================
 # GROQ LLM  (retry + backoff + deterministic cache)
 # ================================================================
+
 
 def compress_rag_prompt(content: str) -> str:
     """
@@ -850,7 +896,7 @@ def compress_rag_prompt(content: str) -> str:
             continue
         if in_chunks and (line.startswith("━━━") or line.startswith("═══") or "QUERY" in line):
             in_chunks = False
-        
+
         if in_chunks:
             # If it's a chunk header line (like [1] Title | sim=0.85)
             if line.strip().startswith("[") and " | " in line:
@@ -906,7 +952,7 @@ def truncate_messages(messages: List[Dict], max_total_chars: int = 12000) -> Lis
 
     # 1. Try smart RAG prompt compression
     compressed_content = compress_rag_prompt(content)
-    
+
     # 2. If smart compression reduced the size, use it
     if len(compressed_content) < len(content):
         truncated_messages[longest_idx]["content"] = compressed_content
@@ -925,8 +971,6 @@ def truncate_messages(messages: List[Dict], max_total_chars: int = 12000) -> Lis
     target_len = max(0, longest_len - excess)
     truncated_messages[longest_idx]["content"] = content[:target_len] + suffix
     return truncated_messages
-
-
 
 
 async def groq_chat(
@@ -957,13 +1001,14 @@ async def groq_chat(
 
     last_err = None
     max_attempts = max(retries + 1, len(GROQ_API_KEYS))
-    
+
     start_idx = 0
     if GROQ_API_KEYS:
         # Determine purpose statelessly
         if not purpose:
             try:
                 import inspect
+
                 frame = inspect.currentframe()
                 while frame:
                     func_name = frame.f_code.co_name
@@ -980,7 +1025,7 @@ async def groq_chat(
                     frame = frame.f_back
             except Exception:
                 pass
-        
+
         if purpose == "plan":
             start_idx = 0
         elif purpose == "reason":
@@ -1000,7 +1045,7 @@ async def groq_chat(
         if GROQ_API_KEYS:
             key_idx = (start_idx + attempt) % len(GROQ_API_KEYS)
             current_key = GROQ_API_KEYS[key_idx]
-            
+
         headers = {
             "Authorization": f"Bearer {current_key}",
             "Content-Type": "application/json",
@@ -1011,18 +1056,24 @@ async def groq_chat(
                 headers=headers,
                 json=payload,
             )
-            
-            is_too_large = (r.status_code == 413) or (r.status_code == 400 and "request too large" in r.text.lower())
-            
+
+            is_too_large = (r.status_code == 413) or (
+                r.status_code == 400 and "request too large" in r.text.lower()
+            )
+
             if is_too_large:
                 if len(GROQ_API_KEYS) > 1 and attempt < len(GROQ_API_KEYS) - 1:
-                    log.warning(f"Groq API returned too large error. Retrying with next key ({attempt + 1}/{len(GROQ_API_KEYS)})...")
+                    log.warning(
+                        f"Groq API returned too large error. Retrying with next key ({attempt + 1}/{len(GROQ_API_KEYS)})..."
+                    )
                     await asyncio.sleep(1.0)
                     continue
-                
+
                 # If only 1 key or all keys failed, fall back to HEAVY_MODEL or truncate context
                 if model != HEAVY_MODEL:
-                    log.warning(f"Request too large for model {model}. Cascading fallback to heavy model {HEAVY_MODEL}...")
+                    log.warning(
+                        f"Request too large for model {model}. Cascading fallback to heavy model {HEAVY_MODEL}..."
+                    )
                     return await groq_chat(
                         messages=messages,
                         model=HEAVY_MODEL,
@@ -1034,8 +1085,12 @@ async def groq_chat(
                     )
                 else:
                     truncated_messages = truncate_messages(messages, max_total_chars=12000)
-                    if sum(len(m.get("content", "")) for m in truncated_messages) < sum(len(m.get("content", "")) for m in messages):
-                        log.warning("Request too large for heavy model. Truncating context and retrying...")
+                    if sum(len(m.get("content", "")) for m in truncated_messages) < sum(
+                        len(m.get("content", "")) for m in messages
+                    ):
+                        log.warning(
+                            "Request too large for heavy model. Truncating context and retrying..."
+                        )
                         return await groq_chat(
                             messages=truncated_messages,
                             model=model,
@@ -1046,11 +1101,13 @@ async def groq_chat(
                             purpose="heavy",
                         )
                     else:
-                        raise LLMError(f"Groq HTTP 413: Request too large (already truncated). Response: {r.text[:200]}")
+                        raise LLMError(
+                            f"Groq HTTP 413: Request too large (already truncated). Response: {r.text[:200]}"
+                        )
 
             if r.status_code == 429:
                 if len(GROQ_API_KEYS) > 1 and attempt < len(GROQ_API_KEYS) - 1:
-                    log.warning(f"Groq API returned 429. Retrying with next key...")
+                    log.warning("Groq API returned 429. Retrying with next key...")
                     await asyncio.sleep(1.0)
                     continue
                 else:
@@ -1058,7 +1115,7 @@ async def groq_chat(
                     log.warning(f"Groq 429 — wait {wait}s")
                     await asyncio.sleep(wait)
                     continue
-            
+
             if r.status_code in (500, 503):
                 await asyncio.sleep(2**attempt)
                 continue
@@ -1079,7 +1136,9 @@ async def groq_chat(
                 log.warning(f"Network error on current key: {e}. Retrying with next key...")
             await asyncio.sleep(1.5**attempt)
     if model == "openai/gpt-oss-20b":
-        log.warning(f"gpt-oss-20b failed after all attempts. Cascading fallback to llama-3.3-70b-versatile...")
+        log.warning(
+            "gpt-oss-20b failed after all attempts. Cascading fallback to llama-3.3-70b-versatile..."
+        )
         return await groq_chat(
             messages=messages,
             model="llama-3.3-70b-versatile",
@@ -1096,7 +1155,7 @@ async def groq_chat(
 # SUPER-MASTER STRATEGIC PLANNING BRAIN
 # ================================================================
 
-SUPER_MASTER_PROMPT ="""
+SUPER_MASTER_PROMPT = """
 You are the Strategic Planning Brain for Aether, an evidence-only GraphRAG Research Assistant.
 Decompose the user query into a precise execution plan.
 
@@ -1207,8 +1266,6 @@ Input: "overview of reinforcement learning from human feedback"
 
 
 """
- 
-
 
 
 async def plan_query(query: str, context: str = "") -> QueryPlan:
@@ -1244,9 +1301,7 @@ async def plan_query(query: str, context: str = "") -> QueryPlan:
         raw=data,
     )
     set_cache("plan", ck, plan)
-    log.info(
-        f"Plan: route={plan.route} anchors={plan.graph_anchors} kw={plan.vector_keywords}"
-    )
+    log.info(f"Plan: route={plan.route} anchors={plan.graph_anchors} kw={plan.vector_keywords}")
     return plan
 
 
@@ -1258,9 +1313,14 @@ async def plan_query(query: str, context: str = "") -> QueryPlan:
 def rank_papers(papers: List[Dict], anchors: List[str]) -> List[Dict]:
     """Score and sort papers by relevance to the search anchors."""
     import math
+
     if not anchors:
         # If no anchors, we should still sort by citation count to surface the most important papers
-        return sorted(papers, key=lambda p: float(p.get("in_citations") or p.get("n_citation") or 0), reverse=True)
+        return sorted(
+            papers,
+            key=lambda p: float(p.get("in_citations") or p.get("n_citation") or 0),
+            reverse=True,
+        )
 
     def score(p: Dict) -> float:
         title = (p.get("title") or "").lower()
@@ -1461,6 +1521,7 @@ async def retrieve_graph_papers(
         top_ids = [r["research_id"] for r in result if r.get("research_id")]
         if top_ids:
             try:
+
                 def _fetch_links():
                     cypher = """
                     MATCH (p1:Publication)-[:CITES]->(p2:Publication)
@@ -1471,7 +1532,7 @@ async def retrieve_graph_papers(
                         return [dict(r) for r in session.run(cypher, {"ids": top_ids})]
 
                 links = await asyncio.to_thread(_fetch_links)
-                
+
                 # Map links back to the papers
                 id_to_paper = {p["research_id"]: p for p in result}
                 for link in links:
@@ -1480,12 +1541,12 @@ async def retrieve_graph_papers(
                     if src_id in id_to_paper and tgt_id in id_to_paper:
                         src_paper = id_to_paper[src_id]
                         tgt_paper = id_to_paper[tgt_id]
-                        
+
                         if "cites_retrieved_papers" not in src_paper:
                             src_paper["cites_retrieved_papers"] = []
                         if "cited_by_retrieved_papers" not in tgt_paper:
                             tgt_paper["cited_by_retrieved_papers"] = []
-                            
+
                         src_paper["cites_retrieved_papers"].append(tgt_paper["title"])
                         tgt_paper["cited_by_retrieved_papers"].append(src_paper["title"])
             except Exception as e:
@@ -1620,19 +1681,13 @@ async def get_citation_path(from_title: str, to_title: str, max_depth: int = 4) 
     RETURN [node IN nodes(path) | node.title] AS path_titles,
            length(path) AS path_length
     LIMIT 1
-    """.replace(
-        "{max_depth}", str(max_depth)
-    )
+    """.replace("{max_depth}", str(max_depth))
 
     try:
 
         def _run():
             with pool.neo4j.session() as session:
-                rows = list(
-                    session.run(
-                        cypher, {"from_title": from_title, "to_title": to_title}
-                    )
-                )
+                rows = list(session.run(cypher, {"from_title": from_title, "to_title": to_title}))
                 return dict(rows[0]) if rows else {"path_titles": [], "path_length": -1}
 
         result = await asyncio.to_thread(_run)
@@ -1746,10 +1801,7 @@ async def get_co_citation_cluster(paper_ids: List[str], limit: int = 10) -> List
 
         def _run():
             with pool.neo4j.session() as session:
-                return [
-                    dict(r)
-                    for r in session.run(cypher, {"ids": paper_ids, "limit": limit})
-                ]
+                return [dict(r) for r in session.run(cypher, {"ids": paper_ids, "limit": limit})]
 
         return await asyncio.to_thread(_run)
     except Exception as e:
@@ -1900,9 +1952,7 @@ async def create_embedding(text: str, bypass_freeze: bool = False) -> List[float
         headers = {"Authorization": f"Bearer {HF_TOKEN}"}
         payload = {"inputs": query_text}
 
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(EMBED_TIMEOUT, connect=5.0)
-        ) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(EMBED_TIMEOUT, connect=5.0)) as client:
             resp = await client.post(url, headers=headers, json=payload)
 
             if resp.status_code == 503:
@@ -1911,9 +1961,7 @@ async def create_embedding(text: str, bypass_freeze: bool = False) -> List[float
                 resp = await client.post(url, headers=headers, json=payload)
 
             if resp.status_code != 200:
-                raise EmbeddingError(
-                    f"HF embedding HTTP {resp.status_code}: {resp.text[:300]}"
-                )
+                raise EmbeddingError(f"HF embedding HTTP {resp.status_code}: {resp.text[:300]}")
 
             data = resp.json()
 
@@ -1937,7 +1985,9 @@ async def create_embedding(text: str, bypass_freeze: bool = False) -> List[float
         raise EmbeddingError(f"BAAI/bge-base-en HF API embedding failed: {exc}")
 
 
-async def create_embeddings_batch(texts: List[str], bypass_freeze: bool = False) -> List[List[float]]:
+async def create_embeddings_batch(
+    texts: List[str], bypass_freeze: bool = False
+) -> List[List[float]]:
     """
     Convert a list of texts to BAAI/bge-base-en embedding vectors.
     Resolves cached embeddings first, then processes missing embeddings:
@@ -1973,10 +2023,7 @@ async def create_embeddings_batch(texts: List[str], bypass_freeze: bool = False)
         try:
             raw_texts = [item[0] for item in missing_query_texts]
             embs = await asyncio.to_thread(
-                embed_model.encode,
-                raw_texts,
-                normalize_embeddings=True,
-                show_progress_bar=False
+                embed_model.encode, raw_texts, normalize_embeddings=True, show_progress_bar=False
             )
             for idx, raw_idx in enumerate(missing_indices):
                 emb_list = embs[idx].tolist()
@@ -2010,17 +2057,19 @@ async def create_embeddings_batch(texts: List[str], bypass_freeze: bool = False)
                     resp = await client.post(url, headers=headers, json=payload)
 
                 if resp.status_code != 200:
-                    raise EmbeddingError(
-                        f"HF embedding HTTP {resp.status_code}: {resp.text[:300]}"
-                    )
+                    raise EmbeddingError(f"HF embedding HTTP {resp.status_code}: {resp.text[:300]}")
 
                 data = resp.json()
-                
+
                 if isinstance(data, list) and len(data) > 0:
                     # HF returns [[[...], [...]]] or [[...], [...]]
-                    if isinstance(data[0], list) and len(data[0]) > 0 and isinstance(data[0][0], list):
+                    if (
+                        isinstance(data[0], list)
+                        and len(data[0]) > 0
+                        and isinstance(data[0][0], list)
+                    ):
                         data = [item[0] for item in data]
-                    
+
                     for idx, emb in enumerate(data):
                         norm_emb = _bge_normalize(emb)
                         raw_idx = missing_indices[offset + idx]
@@ -2052,14 +2101,11 @@ def reciprocal_rank_fusion(result_lists: List[List[Dict]], k: int = 60) -> List[
     for lst in result_lists:
         for rank, chunk in enumerate(lst):
             cid = str(
-                chunk.get("id")
-                or f"{chunk.get('research_id','')}_{chunk.get('chunk_number','')}"
+                chunk.get("id") or f"{chunk.get('research_id', '')}_{chunk.get('chunk_number', '')}"
             )
             scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)
             chunks[cid] = chunk
-    return [
-        chunks[cid] for cid in sorted(scores, key=lambda x: scores[x], reverse=True)
-    ]
+    return [chunks[cid] for cid in sorted(scores, key=lambda x: scores[x], reverse=True)]
 
 
 # ================================================================
@@ -2142,7 +2188,7 @@ def merge_adjacent_chunks(chunks: List[Dict]) -> List[Dict]:
     """
     if not chunks:
         return []
-        
+
     paper_order = []
     by_paper = {}
     for c in chunks:
@@ -2163,14 +2209,14 @@ def merge_adjacent_chunks(chunks: List[Dict]) -> List[Dict]:
         if len(paper_chunks) <= 1:
             merged_chunks.extend(paper_chunks)
             continue
-            
+
         paper_chunks = sorted(paper_chunks, key=lambda c: c.get("chunk_index", 0))
-        
+
         current = paper_chunks[0].copy()
         for next_chunk in paper_chunks[1:]:
             curr_idx = current.get("chunk_index")
             next_idx = next_chunk.get("chunk_index")
-            
+
             if curr_idx is not None and next_idx is not None and next_idx - curr_idx <= 1:
                 next_text = next_chunk.get("chunk", "")
                 if next_text:
@@ -2185,7 +2231,7 @@ def merge_adjacent_chunks(chunks: List[Dict]) -> List[Dict]:
                 merged_chunks.append(current)
                 current = next_chunk.copy()
         merged_chunks.append(current)
-        
+
     return merged_chunks
 
 
@@ -2197,7 +2243,7 @@ def pack_context_within_budget(chunks: List[Dict], limit_tokens: int = 5000) -> 
     packed = []
     current_chars = 0
     max_chars = int(limit_tokens * 4.2)
-    
+
     for c in chunks:
         chunk_text = c.get("chunk", "")
         char_len = len(chunk_text) + len(c.get("title", "")) + 50
@@ -2209,15 +2255,11 @@ def pack_context_within_budget(chunks: List[Dict], limit_tokens: int = 5000) -> 
     return packed
 
 
-def filter_relevant_chunks(
-    chunks: List[Dict], floor: float = RELEVANCE_FLOOR
-) -> List[Dict]:
+def filter_relevant_chunks(chunks: List[Dict], floor: float = RELEVANCE_FLOOR) -> List[Dict]:
     filtered = [c for c in chunks if get_chunk_similarity(c) >= floor]
     dropped = len(chunks) - len(filtered)
     if dropped:
-        log.info(
-            f"Relevance filter: dropped {dropped}/{len(chunks)} chunks below {floor}"
-        )
+        log.info(f"Relevance filter: dropped {dropped}/{len(chunks)} chunks below {floor}")
     return filtered
 
 
@@ -2260,30 +2302,26 @@ def build_relationship_context(graph_nodes: List[Dict]) -> str:
     if seeds:
         lines.append(f"\nDIRECTLY MATCHED PAPERS ({len(seeds)}):")
         for n in seeds[:5]:
-            authors_str = (
-                ", ".join(a for a in (n.get("authors") or []) if a) or "Unknown"
-            )
+            authors_str = ", ".join(a for a in (n.get("authors") or []) if a) or "Unknown"
             venue = n.get("venue") or "Unknown venue"
             cites_in = n.get("in_citations", 0)
             topics_str = ", ".join(n.get("topics") or []) or "N/A"
             abstract = (n.get("abstract") or "")[:200]
             lines.append(
-                f"  • {n.get('title','?')} ({n.get('year','?')})\n"
+                f"  • {n.get('title', '?')} ({n.get('year', '?')})\n"
                 f"    Authors: {authors_str}\n"
                 f"    Venue: {venue} | Citations received: {cites_in}\n"
                 f"    Topics: {topics_str}\n"
-                f"    Abstract: {abstract}{'...' if len(n.get('abstract') or '')>200 else ''}"
+                f"    Abstract: {abstract}{'...' if len(n.get('abstract') or '') > 200 else ''}"
             )
 
     if expanded:
         lines.append(f"\nRELATED PAPERS VIA GRAPH TRAVERSAL ({len(expanded)}):")
         for n in expanded[:8]:
-            authors_str = (
-                ", ".join(a for a in (n.get("authors") or []) if a) or "Unknown"
-            )
+            authors_str = ", ".join(a for a in (n.get("authors") or []) if a) or "Unknown"
             lines.append(
-                f"  • {n.get('title','?')} ({n.get('year','?')}) — "
-                f"by {authors_str} — {n.get('in_citations',0)} citations"
+                f"  • {n.get('title', '?')} ({n.get('year', '?')}) — "
+                f"by {authors_str} — {n.get('in_citations', 0)} citations"
             )
 
     # Append direct citation lineage among retrieved papers
@@ -2305,8 +2343,6 @@ def build_relationship_context(graph_nodes: List[Dict]) -> str:
 # REAL-TIME ARXIV RETRIEVAL & CONTEXT FORMATTER
 # ================================================================
 
-import xml.etree.ElementTree as ET
-import urllib.parse
 
 async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, Any]]:
     """Retrieve relevant paper abstracts from arXiv API in real-time."""
@@ -2319,36 +2355,83 @@ async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, A
         log.info(f"Cache HIT for arXiv context query: {query} (limit={limit})")
         return cached
 
-    
     # Try ArXiv MCP Server if configured in env
     mcp_url = os.getenv("ARXIV_MCP_URL")
     is_self = False
     if mcp_url:
         parsed = urllib.parse.urlparse(mcp_url)
         # Avoid calling ourselves via HTTP to prevent single-worker deadlocks
-        if "graphrag-research-assistant.onrender.com" in parsed.netloc or "localhost:8000" in parsed.netloc or "127.0.0.1:8000" in parsed.netloc:
+        if (
+            "graphrag-research-assistant.onrender.com" in parsed.netloc
+            or "localhost:8000" in parsed.netloc
+            or "127.0.0.1:8000" in parsed.netloc
+        ):
             is_self = True
 
     if mcp_url and not is_self:
         try:
             from app.sources.arxiv_mcp import query_arxiv_mcp
+
             mcp_papers = await query_arxiv_mcp(query, limit=limit)
             if mcp_papers:
                 return mcp_papers
         except Exception as e:
             log.warning(f"ArXiv MCP query failed: {e}. Falling back to standard XML feed.")
-    
+
     # ── Smart query extraction: strip NL question filler words, keep domain terms ──
     _NL_STOPWORDS = {
-        "what", "how", "does", "do", "show", "explain", "describe", "tell",
-        "find", "give", "list", "can", "you", "me", "my", "please",
-        "is", "are", "a", "an", "the", "to", "for", "with", "about",
-        "from", "by", "at", "on", "it", "its", "this", "that",
-        "which", "where", "when", "who", "why",
-        "some", "any", "more", "recent", "related", "information",
-        "paper", "papers", "work", "works", "reference", "references",
+        "what",
+        "how",
+        "does",
+        "do",
+        "show",
+        "explain",
+        "describe",
+        "tell",
+        "find",
+        "give",
+        "list",
+        "can",
+        "you",
+        "me",
+        "my",
+        "please",
+        "is",
+        "are",
+        "a",
+        "an",
+        "the",
+        "to",
+        "for",
+        "with",
+        "about",
+        "from",
+        "by",
+        "at",
+        "on",
+        "it",
+        "its",
+        "this",
+        "that",
+        "which",
+        "where",
+        "when",
+        "who",
+        "why",
+        "some",
+        "any",
+        "more",
+        "recent",
+        "related",
+        "information",
+        "paper",
+        "papers",
+        "work",
+        "works",
+        "reference",
+        "references",
     }
-    clean_query = query.replace('"', '').replace("'", "").replace("?", "").strip()
+    clean_query = query.replace('"', "").replace("'", "").replace("?", "").strip()
     words = clean_query.split()
     # If it looks like a NL question (>5 words), extract meaningful keywords
     if len(words) > 5:
@@ -2364,110 +2447,127 @@ async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, A
         if '"' in search_term or "'" in search_term:
             encoded_query = urllib.parse.quote(f'all:"{search_term}"')
         else:
-            encoded_query = urllib.parse.quote(f'all:({search_term})')
+            encoded_query = urllib.parse.quote(f"all:({search_term})")
     else:
         # Title + abstract keyword search for longer keyword sets
-        encoded_query = urllib.parse.quote(f'ti:{search_term} OR abs:{search_term}')
+        encoded_query = urllib.parse.quote(f"ti:{search_term} OR abs:{search_term}")
     url = f"https://export.arxiv.org/api/query?search_query={encoded_query}&max_results={limit}&sortBy=relevance"
-    
+
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.get(url)
             if response.status_code != 200:
                 log.warning(f"arXiv API returned status code {response.status_code}")
                 return []
-            
+
             # Parse Atom feed XML
             root = ET.fromstring(response.content)
-            ns = {'atom': 'http://www.w3.org/2005/Atom'}
-            
+            ns = {"atom": "http://www.w3.org/2005/Atom"}
+
             papers = []
-            for entry in root.findall('atom:entry', ns):
-                title_node = entry.find('atom:title', ns)
-                summary_node = entry.find('atom:summary', ns)
-                id_node = entry.find('atom:id', ns)
-                published_node = entry.find('atom:published', ns)
-                
-                title = title_node.text.strip().replace("\n", " ") if title_node is not None and title_node.text else "Unknown Title"
-                summary = summary_node.text.strip().replace("\n", " ") if summary_node is not None and summary_node.text else "No Abstract Available"
+            for entry in root.findall("atom:entry", ns):
+                title_node = entry.find("atom:title", ns)
+                summary_node = entry.find("atom:summary", ns)
+                id_node = entry.find("atom:id", ns)
+                published_node = entry.find("atom:published", ns)
+
+                title = (
+                    title_node.text.strip().replace("\n", " ")
+                    if title_node is not None and title_node.text
+                    else "Unknown Title"
+                )
+                summary = (
+                    summary_node.text.strip().replace("\n", " ")
+                    if summary_node is not None and summary_node.text
+                    else "No Abstract Available"
+                )
                 if len(summary) > 600:
                     summary = summary[:600] + "..."
-                
+
                 # Extract arXiv ID and pdf link
                 arxiv_url = id_node.text.strip() if id_node is not None and id_node.text else ""
-                arxiv_id = arxiv_url.split('/abs/')[-1] if '/abs/' in arxiv_url else ""
-                
+                arxiv_id = arxiv_url.split("/abs/")[-1] if "/abs/" in arxiv_url else ""
+
                 pdf_url = ""
                 doi = ""
                 journal_ref = ""
-                for link in entry.findall('atom:link', ns):
-                    if link.attrib.get('title') == 'pdf' or link.attrib.get('type') == 'application/pdf':
-                        pdf_url = link.attrib.get('href', '')
+                for link in entry.findall("atom:link", ns):
+                    if (
+                        link.attrib.get("title") == "pdf"
+                        or link.attrib.get("type") == "application/pdf"
+                    ):
+                        pdf_url = link.attrib.get("href", "")
                         break
                 if not pdf_url and arxiv_id:
                     pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-                
+
                 # ── Enhanced: extra fields ──
                 # DOI
-                arxiv_ns = 'http://arxiv.org/schemas/atom'
-                doi_node = entry.find(f'{{{arxiv_ns}}}doi')
+                arxiv_ns = "http://arxiv.org/schemas/atom"
+                doi_node = entry.find(f"{{{arxiv_ns}}}doi")
                 if doi_node is not None and doi_node.text:
                     doi = doi_node.text.strip()
-                
+
                 # Journal reference
-                jref_node = entry.find(f'{{{arxiv_ns}}}journal_ref')
+                jref_node = entry.find(f"{{{arxiv_ns}}}journal_ref")
                 if jref_node is not None and jref_node.text:
                     journal_ref = jref_node.text.strip()
-                
+
                 # Comment field (often contains GitHub links)
-                comment_node = entry.find(f'{{{arxiv_ns}}}comment')
+                comment_node = entry.find(f"{{{arxiv_ns}}}comment")
                 comment = ""
                 if comment_node is not None and comment_node.text:
                     comment = comment_node.text.strip()
-                
+
                 # Categories (e.g. cs.LG, cs.CL)
                 categories = []
-                primary_cat_node = entry.find(f'{{{arxiv_ns}}}primary_category')
+                primary_cat_node = entry.find(f"{{{arxiv_ns}}}primary_category")
                 if primary_cat_node is not None:
-                    categories.append(primary_cat_node.attrib.get('term', ''))
-                for cat_node in entry.findall('atom:category', ns):
-                    term = cat_node.attrib.get('term', '')
+                    categories.append(primary_cat_node.attrib.get("term", ""))
+                for cat_node in entry.findall("atom:category", ns):
+                    term = cat_node.attrib.get("term", "")
                     if term and term not in categories:
                         categories.append(term)
-                
+
                 # Extract year
-                published_date = published_node.text.strip() if published_node is not None and published_node.text else ""
-                year = published_date.split('-')[0] if published_date else "Unknown"
-                
+                published_date = (
+                    published_node.text.strip()
+                    if published_node is not None and published_node.text
+                    else ""
+                )
+                year = published_date.split("-")[0] if published_date else "Unknown"
+
                 # Extract authors
                 authors = []
-                for author_node in entry.findall('atom:author', ns):
-                    name_node = author_node.find('atom:name', ns)
+                for author_node in entry.findall("atom:author", ns):
+                    name_node = author_node.find("atom:name", ns)
                     if name_node is not None and name_node.text:
                         authors.append(name_node.text.strip())
-                
-                papers.append({
-                    "title": title,
-                    "abstract": summary,
-                    "authors": authors,
-                    "year": year,
-                    "url": arxiv_url,
-                    "pdf_url": pdf_url,
-                    "id": arxiv_id,
-                    # Enhanced fields
-                    "doi": doi,
-                    "doi_url": f"https://doi.org/{doi}" if doi else "",
-                    "journal_ref": journal_ref,
-                    "comment": comment,
-                    "categories": categories,
-                    # These will be filled by S2/PwC enrichment
-                    "citation_count": None,
-                    "tldr": "",
-                    "code_repos": [],
-                    "datasets": [],
-                    "has_code": False,
-                })
-            
+
+                papers.append(
+                    {
+                        "title": title,
+                        "abstract": summary,
+                        "authors": authors,
+                        "year": year,
+                        "url": arxiv_url,
+                        "pdf_url": pdf_url,
+                        "id": arxiv_id,
+                        # Enhanced fields
+                        "doi": doi,
+                        "doi_url": f"https://doi.org/{doi}" if doi else "",
+                        "journal_ref": journal_ref,
+                        "comment": comment,
+                        "categories": categories,
+                        # These will be filled by S2/PwC enrichment
+                        "citation_count": None,
+                        "tldr": "",
+                        "code_repos": [],
+                        "datasets": [],
+                        "has_code": False,
+                    }
+                )
+
             set_cache("api", ck, papers)
             return papers
     except Exception as e:
@@ -2480,14 +2580,14 @@ def format_arxiv_context(arxiv_papers: List[Dict]) -> str:
         return ""
     lines = ["=== LIVE ARXIV CROSS-REFERENCE EVIDENCE ==="]
     for i, p in enumerate(arxiv_papers):
-        authors_str = ", ".join(p['authors'][:4]) if p['authors'] else "Unknown"
-        cite_str = f" | Cited {p['citation_count']:,}×" if p.get('citation_count') else ""
-        tldr_str = f"\n  TL;DR: {p['tldr']}" if p.get('tldr') else ""
-        cats_str = f" | {', '.join(p['categories'][:3])}" if p.get('categories') else ""
-        doi_str = f"\n  DOI: {p['doi_url']}" if p.get('doi_url') else ""
-        jref_str = f" | Published in: {p['journal_ref']}" if p.get('journal_ref') else ""
+        authors_str = ", ".join(p["authors"][:4]) if p["authors"] else "Unknown"
+        cite_str = f" | Cited {p['citation_count']:,}×" if p.get("citation_count") else ""
+        tldr_str = f"\n  TL;DR: {p['tldr']}" if p.get("tldr") else ""
+        cats_str = f" | {', '.join(p['categories'][:3])}" if p.get("categories") else ""
+        doi_str = f"\n  DOI: {p['doi_url']}" if p.get("doi_url") else ""
+        jref_str = f" | Published in: {p['journal_ref']}" if p.get("journal_ref") else ""
         lines.append(
-            f"[ArXiv-{i+1}] {p['title']} ({p['year']}){cite_str}\n"
+            f"[ArXiv-{i + 1}] {p['title']} ({p['year']}){cite_str}\n"
             f"  Authors: {authors_str} | ID: {p['id']}{cats_str}{jref_str}\n"
             f"  Abstract: {p['abstract']}{tldr_str}{doi_str}\n"
             f"  PDF: {p['pdf_url']}"
@@ -2501,15 +2601,17 @@ def format_s2_context(s2_papers: List[Dict]) -> str:
         return ""
     lines = ["=== SEMANTIC SCHOLAR EVIDENCE ==="]
     for i, p in enumerate(s2_papers):
-        authors_str = ", ".join((p.get('authors') or [])[:4]) or "Unknown"
-        cite_str = f" | Cited {p['citation_count']:,}×" if p.get('citation_count') else ""
-        tldr_str = f"\n  TL;DR: {p['tldr']}" if p.get('tldr') else ""
-        fields_str = f" | Fields: {', '.join(p['fields_of_study'][:3])}" if p.get('fields_of_study') else ""
-        pdf_str = f"\n  PDF: {p['pdf_url']}" if p.get('pdf_url') else ""
-        s2_link = p.get('s2_url', '')
-        doi_str = f" | DOI: {p.get('doi_url', '')}" if p.get('doi_url') else ""
+        authors_str = ", ".join((p.get("authors") or [])[:4]) or "Unknown"
+        cite_str = f" | Cited {p['citation_count']:,}×" if p.get("citation_count") else ""
+        tldr_str = f"\n  TL;DR: {p['tldr']}" if p.get("tldr") else ""
+        fields_str = (
+            f" | Fields: {', '.join(p['fields_of_study'][:3])}" if p.get("fields_of_study") else ""
+        )
+        pdf_str = f"\n  PDF: {p['pdf_url']}" if p.get("pdf_url") else ""
+        s2_link = p.get("s2_url", "")
+        doi_str = f" | DOI: {p.get('doi_url', '')}" if p.get("doi_url") else ""
         lines.append(
-            f"[S2-{i+1}] {p['title']} ({p.get('year', '?')}){cite_str}\n"
+            f"[S2-{i + 1}] {p['title']} ({p.get('year', '?')}){cite_str}\n"
             f"  Authors: {authors_str}{fields_str}\n"
             f"  Abstract: {p.get('abstract', '')}{tldr_str}{doi_str}\n"
             f"  S2 Link: {s2_link}{pdf_str}"
@@ -2521,17 +2623,25 @@ def format_pwc_context(arxiv_papers: List[Dict]) -> str:
     """Format Papers with Code & Hugging Face enrichment (repos, datasets, metrics, models, spaces) as LLM context."""
     entries = []
     for p in arxiv_papers:
-        repos = p.get('code_repos') or []
-        datasets = p.get('datasets') or []
-        metrics = p.get('metrics') or []
-        models = p.get('linked_models') or []
-        spaces = p.get('linked_spaces') or []
-        upvotes = p.get('hf_upvotes', 0)
-        ai_summary = p.get('hf_ai_summary') or ""
-        
-        if not repos and not datasets and not metrics and not models and not spaces and not upvotes and not ai_summary:
+        repos = p.get("code_repos") or []
+        datasets = p.get("datasets") or []
+        metrics = p.get("metrics") or []
+        models = p.get("linked_models") or []
+        spaces = p.get("linked_spaces") or []
+        upvotes = p.get("hf_upvotes", 0)
+        ai_summary = p.get("hf_ai_summary") or ""
+
+        if (
+            not repos
+            and not datasets
+            and not metrics
+            and not models
+            and not spaces
+            and not upvotes
+            and not ai_summary
+        ):
             continue
-            
+
         parts = [f"[{p.get('title', '?')}]"]
         if upvotes:
             parts.append(f"  Hugging Face Paper Upvotes: {upvotes}")
@@ -2540,48 +2650,51 @@ def format_pwc_context(arxiv_papers: List[Dict]) -> str:
         if repos:
             repo_strs = []
             for r in repos[:3]:
-                star_str = f" ⭐{r['stars']:,}" if r.get('stars') else ""
-                official_str = " (official)" if r.get('is_official') else ""
+                star_str = f" ⭐{r['stars']:,}" if r.get("stars") else ""
+                official_str = " (official)" if r.get("is_official") else ""
                 repo_strs.append(f"{r['url']}{star_str}{official_str}")
             parts.append(f"  Code Repos: {' | '.join(repo_strs)}")
         if datasets:
             ds_strs = []
             for d in datasets[:5]:
-                d_url = d.get('url')
+                d_url = d.get("url")
                 if d_url:
                     ds_strs.append(f"{d.get('name', '?')} ({d_url})")
                 else:
-                    ds_strs.append(d.get('name', '?'))
+                    ds_strs.append(d.get("name", "?"))
             parts.append(f"  Datasets: {' | '.join(ds_strs)}")
         if metrics:
             metric_strs = []
             for m in metrics[:5]:
-                metric_strs.append(m['metric_string'])
+                metric_strs.append(m["metric_string"])
             parts.append(f"  Extracted Benchmarks/Metrics: {' | '.join(metric_strs)}")
         if models:
             model_strs = []
             for m in models[:3]:
-                m_url = m.get('url')
+                m_url = m.get("url")
                 if m_url:
                     model_strs.append(f"{m.get('id', '?')} ({m_url})")
                 else:
-                    model_strs.append(m.get('id', '?'))
+                    model_strs.append(m.get("id", "?"))
             parts.append(f"  Linked HF Models: {' | '.join(model_strs)}")
         if spaces:
             space_strs = []
             for s in spaces[:3]:
-                s_url = s.get('url')
-                emoji = s.get('emoji', '🚀')
+                s_url = s.get("url")
+                emoji = s.get("emoji", "🚀")
                 if s_url:
                     space_strs.append(f"{emoji} {s.get('id', '?')} ({s_url})")
                 else:
                     space_strs.append(f"{emoji} {s.get('id', '?')}")
             parts.append(f"  Linked HF Spaces: {' | '.join(space_strs)}")
         entries.append("\n".join(parts))
-        
+
     if not entries:
         return ""
-    return "=== CODE, DATASETS, MODELS & SPACES (Papers with Code & Hugging Face) ===\n" + "\n\n".join(entries)
+    return (
+        "=== CODE, DATASETS, MODELS & SPACES (Papers with Code & Hugging Face) ===\n"
+        + "\n\n".join(entries)
+    )
 
 
 # ================================================================
@@ -2591,11 +2704,11 @@ def format_pwc_context(arxiv_papers: List[Dict]) -> str:
 
 def extract_paper_urls(text: str) -> List[str]:
     # Regex to match URLs
-    urls = re.findall(r'https?://[^\s]+', text)
+    urls = re.findall(r"https?://[^\s]+", text)
     paper_urls = []
     for url in urls:
         # Strip trailing punctuation
-        url = url.rstrip('.,;()[]{}')
+        url = url.rstrip(".,;()[]{}")
         # Check if it's a PDF or ArXiv link
         is_arxiv = "arxiv.org" in url
         is_pdf = url.lower().endswith(".pdf") or "/pdf/" in url.lower()
@@ -2609,15 +2722,32 @@ def is_simple_link_paste(text: str, urls: List[str]) -> bool:
     for url in urls:
         cleaned = cleaned.replace(url, "")
     # Remove non-alphanumeric characters
-    cleaned = re.sub(r'[^a-zA-Z0-9\s]', '', cleaned).strip().lower()
+    cleaned = re.sub(r"[^a-zA-Z0-9\s]", "", cleaned).strip().lower()
     if len(cleaned) < 10:
         return True
-    
+
     words = cleaned.split()
-    summary_words = {"summarize", "summarise", "summary", "parse", "read", "pdf", "paper", "analyze", "analyse", "this", "explain", "about", "what", "is", "intro", "introduction"}
+    summary_words = {
+        "summarize",
+        "summarise",
+        "summary",
+        "parse",
+        "read",
+        "pdf",
+        "paper",
+        "analyze",
+        "analyse",
+        "this",
+        "explain",
+        "about",
+        "what",
+        "is",
+        "intro",
+        "introduction",
+    }
     if all(w in summary_words for w in words):
         return True
-        
+
     return False
 
 
@@ -2641,17 +2771,17 @@ async def parse_pdf_from_url(url: str) -> Tuple[str, List[str]]:
         pdf_url = url.replace("arxiv.org/abs/", "arxiv.org/pdf/")
         if not pdf_url.endswith(".pdf"):
             pdf_url += ".pdf"
-    
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
-    
+
     async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=60.0) as client:
         r = await client.get(pdf_url)
         if r.status_code != 200:
             raise Exception(f"Failed to download PDF: HTTP {r.status_code}")
         pdf_bytes = r.content
-        
+
     def _parse():
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         text_content = []
@@ -2663,7 +2793,7 @@ async def parse_pdf_from_url(url: str) -> Tuple[str, List[str]]:
                 if uri and uri.startswith("http"):
                     extracted_links.append(uri)
         return "\n".join(text_content), list(set(extracted_links))
-        
+
     return await asyncio.to_thread(_parse)
 
 
@@ -2692,6 +2822,7 @@ def chunk_document_text(text: str) -> List[str]:
     if not text:
         return []
     from langchain_text_splitters import RecursiveCharacterTextSplitter
+
     # 1000 characters per chunk, with 200 characters overlap
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     return splitter.split_text(text)
@@ -2708,10 +2839,11 @@ async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
     if not url:
         return []
 
+    import base64
     import hashlib
     import json
     import zlib
-    import base64
+
     import numpy as np
 
     url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()
@@ -2751,7 +2883,7 @@ async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
         doc_text, doc_links = await get_or_parse_pdf_safe(url, raise_on_error=False)
         if not doc_text:
             return []
-        
+
         chunks = chunk_document_text(doc_text)
         if not chunks:
             return []
@@ -2778,7 +2910,7 @@ async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
             embeddings = await create_embeddings_batch(chunks, bypass_freeze=True)
             if not embeddings:
                 return []
-            
+
             # Save generated embeddings to Redis and in-memory cache
             if upstash_redis:
                 try:
@@ -2786,10 +2918,12 @@ async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
                     compressed_emb = zlib.compress(serialized_emb)
                     b64_emb_str = base64.b64encode(compressed_emb).decode("utf-8")
                     upstash_redis.set(redis_emb_key, b64_emb_str, ex=24 * 3600)  # 24 hour TTL
-                    log.info(f"Cached {len(embeddings)} chunk embeddings for PDF {url} in Upstash Redis.")
+                    log.info(
+                        f"Cached {len(embeddings)} chunk embeddings for PDF {url} in Upstash Redis."
+                    )
                 except Exception as e:
                     log.warning(f"Failed to cache PDF embeddings in Upstash Redis: {e}")
-            
+
             local_embeddings_cache[url_hash] = embeddings
 
         vectors = np.array(embeddings, dtype=np.float32)
@@ -2814,7 +2948,9 @@ async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
         top_indices = np.argsort(scores)[::-1][:k].tolist()
 
         relevant_chunks = [chunks[idx] for idx in top_indices]
-        log.info(f"Retrieved top {len(relevant_chunks)} relevant PDF chunks via numpy cosine similarity.")
+        log.info(
+            f"Retrieved top {len(relevant_chunks)} relevant PDF chunks via numpy cosine similarity."
+        )
         return relevant_chunks
 
     except Exception as e:
@@ -2862,7 +2998,11 @@ Base your response ONLY on the provided text. Do not invent facts. Write a thoro
 
 
 def document_summary_user_content(target_url: str, doc_text: str, doc_links: List[str]) -> str:
-    links_str = "\n".join(f"- {link}" for link in doc_links[:15]) if doc_links else "(No external links found in document.)"
+    links_str = (
+        "\n".join(f"- {link}" for link in doc_links[:15])
+        if doc_links
+        else "(No external links found in document.)"
+    )
     return f"""Please summarize the document at {target_url} based on the parsed content below.
 
 ━━━ PARSED DOCUMENT TEXT ━━━
@@ -2999,7 +3139,7 @@ Before producing the final answer, internally verify: exactly one root node, eve
 15. OUTPUT FORMAT
 Return exactly one Mermaid code block using either ```mermaid\ngraph TD\n...\n``` or ```mermaid\ngraph LR\n...\n```. Do not generate multiple disconnected diagrams.
 """
-"""
+        """
 ═══ SMART GRAPH + VECTOR SYNTHESIS ═══
 - INTEGRATE KNOWLEDGE: Combine granular textual evidence from "RETRIEVED CHUNK EVIDENCE" with the structural metadata (venues, authors, year, direct links) from "GRAPH RELATIONSHIP CONTEXT".
 - TRACE RESEARCH LINEAGE: Highlight if key papers share authors, are co-cited, or publish in the same venue/domain to show how the research is connected.
@@ -3015,11 +3155,11 @@ Return exactly one Mermaid code block using either ```mermaid\ngraph TD\n...\n``
     )
 
 
-
 def parse_year(val) -> int:
     if not val:
         return 0
     import re
+
     if isinstance(val, int):
         return val
     match = re.search(r"\b(19\d{2}|20\d{2})\b", str(val))
@@ -3037,16 +3177,17 @@ def build_chronological_flow(
     and returns a clean chronological list for RAG context synthesis.
     """
     import re
+
     all_papers = []
     seen_titles = set()
 
     def clean_title(t):
-        return re.sub(r'[^a-z0-9]', '', t.lower()) if t else ""
+        return re.sub(r"[^a-z0-9]", "", t.lower()) if t else ""
 
     sources_list = [
         ("Graph", graph_nodes or []),
         ("arXiv/CORE", arxiv_papers or []),
-        ("Semantic Scholar", s2_papers or [])
+        ("Semantic Scholar", s2_papers or []),
     ]
 
     for source_label, papers in sources_list:
@@ -3059,18 +3200,20 @@ def build_chronological_flow(
             c_title = clean_title(title)
             if c_title and c_title not in seen_titles:
                 seen_titles.add(c_title)
-                
+
                 yr_val = p.get("year")
                 if not yr_val and p.get("published"):
                     yr_val = p.get("published")
                 year = parse_year(yr_val)
-                
-                citations = p.get("citation_count") or p.get("citations") or p.get("in_citations") or 0
+
+                citations = (
+                    p.get("citation_count") or p.get("citations") or p.get("in_citations") or 0
+                )
                 try:
                     citations = int(citations)
                 except (ValueError, TypeError):
                     citations = 0
-                
+
                 authors = p.get("authors") or []
                 if isinstance(authors, list):
                     clean_authors = [a for a in authors if a]
@@ -3079,17 +3222,19 @@ def build_chronological_flow(
                         authors_str += " et al."
                 else:
                     authors_str = str(authors)
-                
+
                 src = p.get("source") or source_label
-                
-                all_papers.append({
-                    "title": title.strip(),
-                    "year": year,
-                    "year_str": str(year) if year > 0 else "?",
-                    "authors": authors_str.strip() or "Unknown",
-                    "citations": citations,
-                    "source": src,
-                })
+
+                all_papers.append(
+                    {
+                        "title": title.strip(),
+                        "year": year,
+                        "year_str": str(year) if year > 0 else "?",
+                        "authors": authors_str.strip() or "Unknown",
+                        "citations": citations,
+                        "source": src,
+                    }
+                )
 
     if not all_papers:
         return "(No paper lineage available.)"
@@ -3098,9 +3243,11 @@ def build_chronological_flow(
 
     lines = ["=== CHRONOLOGICAL LITERATURE ROADMAP ==="]
     for idx, p in enumerate(all_papers):
-        cite_str = f" [Cited {p['citations']}×]" if p['citations'] > 0 else ""
-        lines.append(f"  {idx+1}. [{p['year_str']}] \"{p['title']}\" — {p['authors']}{cite_str} ({p['source']})")
-    
+        cite_str = f" [Cited {p['citations']}×]" if p["citations"] > 0 else ""
+        lines.append(
+            f'  {idx + 1}. [{p["year_str"]}] "{p["title"]}" — {p["authors"]}{cite_str} ({p["source"]})'
+        )
+
     return "\n".join(lines)
 
 
@@ -3113,7 +3260,7 @@ def grounded_prompt(
 ) -> str:
     chunk_text = (
         "\n\n".join(
-            f"[{i+1}] {c.get('title','?')} | {c.get('section') or 'N/A'} | sim={c.get('similarity',0):.2f}\n{c.get('chunk','')}"
+            f"[{i + 1}] {c.get('title', '?')} | {c.get('section') or 'N/A'} | sim={c.get('similarity', 0):.2f}\n{c.get('chunk', '')}"
             for i, c in enumerate(chunks)
         )
         if chunks
@@ -3179,7 +3326,7 @@ def compare_prompt(
 ) -> str:
     chunk_text = (
         "\n\n".join(
-            f"[{i+1}] {c.get('title','?')} | {c.get('section') or 'N/A'}\n{c.get('chunk','')}"
+            f"[{i + 1}] {c.get('title', '?')} | {c.get('section') or 'N/A'}\n{c.get('chunk', '')}"
             for i, c in enumerate(chunks)
         )
         if chunks
@@ -3240,7 +3387,7 @@ def survey_prompt(
 ) -> str:
     chunk_text = (
         "\n\n".join(
-            f"[{i+1}] {c.get('title','?')} ({c.get('year','?')}) | {c.get('section') or 'N/A'}\n{c.get('chunk','')}"
+            f"[{i + 1}] {c.get('title', '?')} ({c.get('year', '?')}) | {c.get('section') or 'N/A'}\n{c.get('chunk', '')}"
             for i, c in enumerate(chunks)
         )
         if chunks
@@ -3308,13 +3455,12 @@ def timeline_prompt(
         papers_by_year.setdefault(yr, []).append(n.get("title", "?"))
 
     timeline_text = "\n".join(
-        f"  {yr}: " + " | ".join(titles)
-        for yr, titles in sorted(papers_by_year.items())
+        f"  {yr}: " + " | ".join(titles) for yr, titles in sorted(papers_by_year.items())
     )
 
     chunk_text = (
         "\n\n".join(
-            f"[{i+1}] {c.get('title','?')} ({c.get('year','?')}) | {c.get('section') or 'N/A'}\n{c.get('chunk','')}"
+            f"[{i + 1}] {c.get('title', '?')} ({c.get('year', '?')}) | {c.get('section') or 'N/A'}\n{c.get('chunk', '')}"
             for i, c in enumerate(chunks)
         )
         if chunks
@@ -3333,7 +3479,7 @@ def timeline_prompt(
 {query}
 
 PAPERS ORDERED BY YEAR:
-{timeline_text if timeline_text else '(insufficient timeline data)'}
+{timeline_text if timeline_text else "(insufficient timeline data)"}
 ━━━━━━━━━━━━
 
 {arxiv_ctx}
@@ -3371,7 +3517,7 @@ def conceptual_prompt(
 ) -> str:
     chunk_text = (
         "\n\n".join(
-            f"[{i+1}] {c.get('title','?')} ({c.get('year','?')}) | {c.get('section') or 'N/A'}\n{c.get('chunk','')}"
+            f"[{i + 1}] {c.get('title', '?')} ({c.get('year', '?')}) | {c.get('section') or 'N/A'}\n{c.get('chunk', '')}"
             for i, c in enumerate(chunks)
         )
         if chunks
@@ -3465,40 +3611,38 @@ def mask_credentials_and_secrets(text: str) -> str:
         return text
 
     # 1. Mask JWTs and long tokens (including Supabase JWT keys starting with eyJhbGciOi)
-    text = re.sub(r'\beyJhbGciOi[a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9_\-\.]+\b', '[MASKED_TOKEN]', text)
-    text = re.sub(r'\beyJhbGciOi[a-zA-Z0-9_\-\.]{50,}\b', '[MASKED_TOKEN]', text)
+    text = re.sub(
+        r"\beyJhbGciOi[a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9_\-\.]+\b",
+        "[MASKED_TOKEN]",
+        text,
+    )
+    text = re.sub(r"\beyJhbGciOi[a-zA-Z0-9_\-\.]{50,}\b", "[MASKED_TOKEN]", text)
 
     # 2. Mask specific API Keys
-    text = re.sub(r'\bgsk_[a-zA-Z0-9_\-]{30,}\b', '[MASKED_GROQ_KEY]', text)
-    text = re.sub(r'\bhf_[a-zA-Z0-9_\-]{30,}\b', '[MASKED_HF_TOKEN]', text)
-    text = re.sub(r'\brzp_[a-zA-Z0-9_\-]{10,}\b', '[MASKED_RAZORPAY_KEY]', text)
+    text = re.sub(r"\bgsk_[a-zA-Z0-9_\-]{30,}\b", "[MASKED_GROQ_KEY]", text)
+    text = re.sub(r"\bhf_[a-zA-Z0-9_\-]{30,}\b", "[MASKED_HF_TOKEN]", text)
+    text = re.sub(r"\brzp_[a-zA-Z0-9_\-]{10,}\b", "[MASKED_RAZORPAY_KEY]", text)
 
     # 3. Mask database URI passwords (e.g. mongodb+srv://username:password@host)
     text = re.sub(
-        r'(\b[a-zA-Z0-9\+\-]+:\/\/)([^:\s]+):([^@\/\s]+)(@[^\s]+)',
+        r"(\b[a-zA-Z0-9\+\-]+:\/\/)([^:\s]+):([^@\/\s]+)(@[^\s]+)",
         lambda m: f"{m.group(1)}{m.group(2)}:[MASKED_PASSWORD]{m.group(4)}",
-        text
+        text,
     )
 
     # 4. Mask key-value patterns (e.g. api_key="value", password=value)
     pattern = r'(?i)\b(api[-_]?key|client[-_]?secret|password|access[-_]?token|auth[-_]?token|rest[-_]?token|secret[-_]?key)\b(\s*[:=]\s*["\']?)([a-zA-Z0-9_\-]{12,})(["\']?)'
-    text = re.sub(
-        pattern,
-        lambda m: f"{m.group(1)}{m.group(2)}[MASKED_SECRET]{m.group(4)}",
-        text
-    )
+    text = re.sub(pattern, lambda m: f"{m.group(1)}{m.group(2)}[MASKED_SECRET]{m.group(4)}", text)
 
     # 5. Mask markdown links to local uploaded PDFs (replaces [Text](url) with [Text])
     text = re.sub(
-        r'\[([^\]]+)\]\((?:https?://[a-zA-Z0-9\.\-]+:\d+)?/api/pdf/[a-zA-Z0-9\-]+\.pdf\)',
-        r'[\1]',
-        text
+        r"\[([^\]]+)\]\((?:https?://[a-zA-Z0-9\.\-]+:\d+)?/api/pdf/[a-zA-Z0-9\-]+\.pdf\)",
+        r"[\1]",
+        text,
     )
     # Also mask raw unlinked URLs
     text = re.sub(
-        r'(?:https?://[a-zA-Z0-9\.\-]+:\d+)?/api/pdf/[a-zA-Z0-9\-]+\.pdf',
-        '[Uploaded PDF]',
-        text
+        r"(?:https?://[a-zA-Z0-9\.\-]+:\d+)?/api/pdf/[a-zA-Z0-9\-]+\.pdf", "[Uploaded PDF]", text
     )
 
     return text
@@ -3521,11 +3665,7 @@ def clean_and_resolve_links(
     arxiv_map = {}
     if arxiv_papers:
         for idx, p in enumerate(arxiv_papers):
-            pdf_url = (
-                p.get("pdf_url")
-                or p.get("url")
-                or f"https://arxiv.org/abs/{p.get('id', '')}"
-            )
+            pdf_url = p.get("pdf_url") or p.get("url") or f"https://arxiv.org/abs/{p.get('id', '')}"
             url = p.get("url") or pdf_url
             arxiv_map[idx + 1] = {
                 "pdf_url": pdf_url,
@@ -3541,9 +3681,7 @@ def clean_and_resolve_links(
             title = c.get("title") or c.get("paper_title") or ""
             if title:
                 encoded_title = urllib.parse.quote_plus(title)
-                scholar_url = (
-                    f"https://scholar.google.com/scholar?q={encoded_title}"
-                )
+                scholar_url = f"https://scholar.google.com/scholar?q={encoded_title}"
                 chunk_map[idx + 1] = {"url": scholar_url, "title": title}
 
     # 3. Build a title-to-Scholar URL map for direct text matches
@@ -3553,9 +3691,7 @@ def clean_and_resolve_links(
             title = n.get("title")
             if title:
                 encoded_title = urllib.parse.quote_plus(title)
-                scholar_url = (
-                    f"https://scholar.google.com/scholar?q={encoded_title}"
-                )
+                scholar_url = f"https://scholar.google.com/scholar?q={encoded_title}"
                 graph_map[title.lower()] = scholar_url
 
     # 4. Resolve/replace markdown links
@@ -3610,11 +3746,7 @@ def clean_and_resolve_links(
         if is_placeholder:
             # Try matching title substrings
             for num, p in arxiv_map.items():
-                if (
-                    p["title"]
-                    and len(p["title"]) > 10
-                    and p["title"].lower()[:25] in text.lower()
-                ):
+                if p["title"] and len(p["title"]) > 10 and p["title"].lower()[:25] in text.lower():
                     return f"[{text}]({p['pdf_url']})"
             for t_lower, s_url in graph_map.items():
                 if len(t_lower) > 10 and t_lower[:25] in text.lower():
@@ -3688,7 +3820,6 @@ def clean_and_resolve_links(
 # ================================================================
 
 
-
 def extract_verifiable_claims(answer: str) -> List[str]:
     years = re.findall(r"\b(19|20)\d{2}\b", answer)
     numbers = re.findall(r"\b\d+(?:\.\d+)?%?\b", answer)
@@ -3744,8 +3875,7 @@ async def verify_answer(
 ) -> Dict[str, Any]:
     flagged_hard = hard_verify(extract_verifiable_claims(answer), chunks, arxiv_papers, s2_papers)
     chunk_text = "\n\n".join(
-        f"[{i+1}] {c.get('title','?')}: {c.get('chunk','')}"
-        for i, c in enumerate(chunks)
+        f"[{i + 1}] {c.get('title', '?')}: {c.get('chunk', '')}" for i, c in enumerate(chunks)
     )
     focus = (
         ("Pay special attention:\n" + "\n".join(f"  - {c}" for c in flagged_hard))
@@ -3835,14 +3965,10 @@ async def run_vector_pipeline(
     rid: str,
 ) -> List[Dict]:
     seed_ids = [
-        g["research_id"]
-        for g in graph_nodes
-        if g.get("score", 1) == 2 and g.get("research_id")
+        g["research_id"] for g in graph_nodes if g.get("score", 1) == 2 and g.get("research_id")
     ]
     expanded_ids = [
-        g["research_id"]
-        for g in graph_nodes
-        if g.get("score", 1) == 1 and g.get("research_id")
+        g["research_id"] for g in graph_nodes if g.get("score", 1) == 1 and g.get("research_id")
     ]
 
     tasks = []
@@ -3851,9 +3977,7 @@ async def run_vector_pipeline(
         tasks.append(hybrid_search(query, embedding, top_k * 5, seed_ids))
     if expanded_ids:
         tasks.append(
-            vector_search(
-                embedding, max(min_similarity - 0.05, 0.0), top_k * 4, expanded_ids
-            )
+            vector_search(embedding, max(min_similarity - 0.05, 0.0), top_k * 4, expanded_ids)
         )
     if not tasks:
         tasks.append(vector_search(embedding, min_similarity, top_k * 6))
@@ -3910,10 +4034,10 @@ async def apply_verification(
         conf_pct = f"{conf:.0%}" if conf is not None else "N/A"
         if conf is not None and conf < 0.5:
             answer = f"{answer}\n\n---\n⚠️ **Verification Alert (High Hallucination Risk - {conf_pct} confidence)**:\nUnverified claims:\n{suffix}"
-            warning = (warning or "") + f" Verification failed (confidence < 50%)."
+            warning = (warning or "") + " Verification failed (confidence < 50%)."
         else:
             answer = f"{answer}\n\n---\n⚠️ **Verification Warning ({conf_pct} confidence)**:\nUnverified claims:\n{suffix}"
-            warning = (warning or "") + f" Verification warning (confidence < 70%)."
+            warning = (warning or "") + " Verification warning (confidence < 70%)."
 
     return answer, verification, warning
 
@@ -3927,10 +4051,10 @@ async def summarize_conversation(messages: List[Dict]) -> str:
     """Generate a highly concise summary of the conversation history (topics discussed, key questions answered)."""
     if not messages:
         return ""
-    
+
     # Format messages as text
     history_text = "\n".join(f"{m['role'].upper()}: {m['content'][:1000]}" for m in messages)
-    
+
     summary_prompt = [
         {
             "role": "system",
@@ -3938,14 +4062,14 @@ async def summarize_conversation(messages: List[Dict]) -> str:
                 "You are an expert AI context compressor. Summarize the following conversation history between a User and an AI Assistant "
                 "into a single concise paragraph. Focus ONLY on: 1) What topics/questions the user asked, and 2) Key decisions, conclusions, or answers "
                 "provided by the assistant. Avoid general fluff. Do not exceed 150 words."
-            )
+            ),
         },
         {
             "role": "user",
-            "content": f"Here is the conversation history to summarize:\n\n{history_text}"
-        }
+            "content": f"Here is the conversation history to summarize:\n\n{history_text}",
+        },
     ]
-    
+
     try:
         # Use PLAN_MODEL for fast, low-cost summarization
         summary = await groq_chat(summary_prompt, PLAN_MODEL, temperature=0.0, max_tokens=200)
@@ -3964,28 +4088,24 @@ async def compile_chat_messages(system_prompt: str, chat_messages: List[ChatMess
     """
     if not chat_messages:
         return [{"role": "system", "content": system_prompt}]
-        
+
     last_msg = {"role": chat_messages[-1].role, "content": chat_messages[-1].content}
-    
+
     history = chat_messages[:-1]
     if len(history) <= 2:
         return [{"role": "system", "content": system_prompt}] + [
             {"role": m.role, "content": m.content} for m in chat_messages
         ]
-        
-    recent_history = [
-        {"role": m.role, "content": m.content} for m in history[-2:]
-    ]
-    older_history = [
-        {"role": m.role, "content": m.content} for m in history[:-2]
-    ]
-    
+
+    recent_history = [{"role": m.role, "content": m.content} for m in history[-2:]]
+    older_history = [{"role": m.role, "content": m.content} for m in history[:-2]]
+
     older_summary = await summarize_conversation(older_history)
-    
+
     enriched_system_prompt = system_prompt
     if older_summary:
         enriched_system_prompt += f"\n\n[Summary of earlier conversation history]\n{older_summary}"
-        
+
     return [{"role": "system", "content": enriched_system_prompt}] + recent_history + [last_msg]
 
 
@@ -4007,9 +4127,7 @@ async def search_huggingface_datasets(query: str, limit: int = 5) -> List[Dict[s
 
     url = "https://huggingface.co/api/datasets"
     params = {"search": query, "limit": limit}
-    headers = {
-        "User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"
-    }
+    headers = {"User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"}
     try:
         async with httpx.AsyncClient(headers=headers, timeout=3.5) as client:
             resp = await client.get(url, params=params)
@@ -4020,14 +4138,16 @@ async def search_huggingface_datasets(query: str, limit: int = 5) -> List[Dict[s
             for item in data[:limit]:
                 dataset_id = item.get("id")
                 if dataset_id:
-                    results.append({
-                        "name": dataset_id,
-                        "full_name": dataset_id,
-                        "url": f"https://huggingface.co/datasets/{dataset_id}",
-                        "description": f"Hugging Face dataset: {item.get('downloads', 0)} downloads, {item.get('likes', 0)} likes.",
-                        "modalities": [],
-                        "source": "huggingface_search"
-                    })
+                    results.append(
+                        {
+                            "name": dataset_id,
+                            "full_name": dataset_id,
+                            "url": f"https://huggingface.co/datasets/{dataset_id}",
+                            "description": f"Hugging Face dataset: {item.get('downloads', 0)} downloads, {item.get('likes', 0)} likes.",
+                            "modalities": [],
+                            "source": "huggingface_search",
+                        }
+                    )
             set_cache("api", ck, results)
             return results
     except Exception as e:
@@ -4051,7 +4171,7 @@ async def suggest_datasets_for_query(query: str) -> List[str]:
         "widely-used benchmark datasets that are highly relevant to the topic. "
         "Respond ONLY with a valid JSON object containing a 'datasets' key with a list of dataset name strings. "
         "Do NOT include any explanations, introduction, markdown blocks, or extra text. "
-        "Example output: {\"datasets\": [\"Cora\", \"CiteSeer\", \"PubMed\"]}"
+        'Example output: {"datasets": ["Cora", "CiteSeer", "PubMed"]}'
     )
     try:
         raw = await groq_chat(
@@ -4060,9 +4180,10 @@ async def suggest_datasets_for_query(query: str) -> List[str]:
             temperature=0.0,
             max_tokens=100,
             json_mode=True,
-            purpose="plan"
+            purpose="plan",
         )
         import json
+
         data = json.loads(raw.strip())
         suggested = data.get("datasets", [])
         if isinstance(suggested, list):
@@ -4090,7 +4211,9 @@ async def retrieve_datasets_and_repos(
         try:
             from sources.kaggle import search_kaggle_datasets_bulk
         except ImportError:
-            async def search_kaggle_datasets_bulk(q, **kw): return []
+
+            async def search_kaggle_datasets_bulk(q, **kw):
+                return []
 
     # 1. Parallel PwC enrichment for all paper lists
     tasks = []
@@ -4140,10 +4263,12 @@ async def retrieve_datasets_and_repos(
     # 2. Search Kaggle & HF in parallel for LLM-suggested + top mentioned datasets
     llm_suggested = await suggest_datasets_for_query(query)
     log.info(f"LLM suggested benchmark datasets for query '{query}': {llm_suggested}")
-    
+
     search_queries = list(llm_suggested)
     for ds_name in list(mentioned_ds_names)[:2]:
-        if not any(ds_name.lower() in sq.lower() or sq.lower() in ds_name.lower() for sq in search_queries):
+        if not any(
+            ds_name.lower() in sq.lower() or sq.lower() in ds_name.lower() for sq in search_queries
+        ):
             search_queries.append(ds_name)
 
     search_tasks = []
@@ -4170,14 +4295,17 @@ async def retrieve_datasets_and_repos(
             slug = name.lower().strip()
             if slug not in seen_ds:
                 seen_ds.add(slug)
-                unique_datasets.append({
-                    "name": name,
-                    "full_name": d.get("full_name") or name,
-                    "url": d.get("url") or f"https://paperswithcode.com/dataset/{slug.replace(' ', '-')}",
-                    "description": d.get("description") or "",
-                    "modalities": d.get("modalities") or [],
-                    "source": d.get("source") or "paper_extracted",
-                })
+                unique_datasets.append(
+                    {
+                        "name": name,
+                        "full_name": d.get("full_name") or name,
+                        "url": d.get("url")
+                        or f"https://paperswithcode.com/dataset/{slug.replace(' ', '-')}",
+                        "description": d.get("description") or "",
+                        "modalities": d.get("modalities") or [],
+                        "source": d.get("source") or "paper_extracted",
+                    }
+                )
 
     # Deduplicate repos by URL
     seen_repos = set()
@@ -4200,9 +4328,7 @@ async def research(req: ResearchRequest, request: Request):
     rid = str(uuid.uuid4())
     request.state.request_id = rid
     try:
-        res = await asyncio.wait_for(
-            _research_impl(req, request), timeout=REQUEST_TIMEOUT
-        )
+        res = await asyncio.wait_for(_research_impl(req, request), timeout=REQUEST_TIMEOUT)
         return await append_credits_snapshot(res, request)
     except asyncio.TimeoutError:
         raise HTTPException(504, f"Timed out after {REQUEST_TIMEOUT}s.")
@@ -4234,22 +4360,22 @@ async def _research_impl(req: ResearchRequest, request: Request):
     is_wiki_prefix = False
     prefix_query = raw_query.strip()
     if prefix_query.lower().startswith("wikipedia:"):
-        prefix_query = prefix_query[len("wikipedia:"):].strip()
+        prefix_query = prefix_query[len("wikipedia:") :].strip()
         is_wiki_prefix = True
     elif prefix_query.lower().startswith("wiki:"):
-        prefix_query = prefix_query[len("wiki:"):].strip()
+        prefix_query = prefix_query[len("wiki:") :].strip()
         is_wiki_prefix = True
 
     if is_wiki_prefix:
         req.mode = "wikipedia"
         raw_query = prefix_query
 
-    log.info(f"\n{'='*70}\n[{rid}] QUERY: {raw_query} (mode: {req.mode})\n{'='*70}")
+    log.info(f"\n{'=' * 70}\n[{rid}] QUERY: {raw_query} (mode: {req.mode})\n{'=' * 70}")
 
     # ── PDF/arXiv URLs processing in Research ──
     latest_urls = extract_paper_urls(raw_query)
     all_urls = list(dict.fromkeys(latest_urls))
-    
+
     new_docs = []
     if all_urls:
         for url in all_urls:
@@ -4266,19 +4392,21 @@ async def _research_impl(req: ResearchRequest, request: Request):
             target_text, target_links = await get_or_parse_pdf_safe(target_url, raise_on_error=True)
         except Exception as e:
             raise HTTPException(400, f"Failed to download/parse PDF from {target_url}: {str(e)}")
-            
+
         system_instruction = document_summary_system_instruction()
         user_content = document_summary_user_content(target_url, target_text, target_links)
-        
+
         msgs = [
             {"role": "system", "content": system_instruction},
-            {"role": "user", "content": user_content}
+            {"role": "user", "content": user_content},
         ]
         try:
-            answer = await groq_chat(msgs, HEAVY_MODEL, temperature=req.temperature, max_tokens=2500)
+            answer = await groq_chat(
+                msgs, HEAVY_MODEL, temperature=req.temperature, max_tokens=2500
+            )
         except LLMError as e:
             raise HTTPException(502, f"LLM error while generating summary: {str(e)}")
-            
+
         latency = int((time.time() - t0) * 1000)
         return {
             "request_id": rid,
@@ -4321,9 +4449,9 @@ async def _research_impl(req: ResearchRequest, request: Request):
         if not pdf_context:
             answer = "The uploaded PDF document(s) could not be read or parsed. Please ensure the PDF is not password-protected, corrupt, or scanned as images without OCR."
             return _empty_response(rid, answer, "pdf_qa", t0)
-            
+
         log.info(f"[{rid}] Processing query via Uploaded PDF QA route (bypassing external APIs)")
-        
+
         sys_p = (
             "You are Aether, a precise research assistant.\n"
             "Use the provided uploaded PDF context to answer the user's query.\n"
@@ -4338,18 +4466,18 @@ async def _research_impl(req: ResearchRequest, request: Request):
             answer = await groq_chat(msgs, model, temperature=req.temperature, max_tokens=2000)
         except LLMError as e:
             raise HTTPException(502, f"LLM error while answering from PDF: {str(e)}")
-            
+
         # Format the retrieved chunks for rendering in the frontend sources panel
         formatted_chunks = [
             {
                 "text": chunk,
                 "title": "Uploaded PDF Source",
                 "page": "PDF Content",
-                "similarity": 0.95
+                "similarity": 0.95,
             }
             for chunk in pdf_chunks_raw
         ]
-            
+
         latency = int((time.time() - t0) * 1000)
         return {
             "request_id": rid,
@@ -4357,7 +4485,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
             "route": "pdf_qa",
             "plan": {
                 "standalone_query": raw_query,
-                "reasoning_path": f"Answered directly using retrieved chunks from the uploaded PDF(s).",
+                "reasoning_path": "Answered directly using retrieved chunks from the uploaded PDF(s).",
             },
             "papers": [],
             "chunks": formatted_chunks,
@@ -4437,14 +4565,16 @@ async def _research_impl(req: ResearchRequest, request: Request):
             "chunks": [],
             "arxiv_papers": [],
             "s2_papers": [],
-            "datasets": [{
-                "name": wiki_res["title"],
-                "full_name": wiki_res["title"],
-                "url": wiki_res["url"],
-                "wikipedia_url": wiki_res["url"],
-                "description": wiki_res["extract"],
-                "source": "wikipedia"
-            }],
+            "datasets": [
+                {
+                    "name": wiki_res["title"],
+                    "full_name": wiki_res["title"],
+                    "url": wiki_res["url"],
+                    "wikipedia_url": wiki_res["url"],
+                    "description": wiki_res["extract"],
+                    "source": "wikipedia",
+                }
+            ],
             "code_repos": [],
             "verification": None,
             "latency_ms": latency,
@@ -4460,9 +4590,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
     if plan.route == "entity_lookup":
         anchors = plan.graph_anchors or [query]
         try:
-            papers = await retrieve_graph_papers(
-                keywords=anchors, anchors=anchors, limit=3
-            )
+            papers = await retrieve_graph_papers(keywords=anchors, anchors=anchors, limit=3)
         except GraphRetrievalError as e:
             raise HTTPException(502, str(e))
         if not papers:
@@ -4473,7 +4601,10 @@ async def _research_impl(req: ResearchRequest, request: Request):
                 "If you are not 100% confident or if the topic is highly obscure, decline to answer by stating that no matching records were found in the index."
             )
             answer = await groq_chat(
-                [{"role": "system", "content": sys_p}, {"role": "user", "content": f"Entity lookup query: {query}"}],
+                [
+                    {"role": "system", "content": sys_p},
+                    {"role": "user", "content": f"Entity lookup query: {query}"},
+                ],
                 REASON_MODEL,
                 temperature=req.temperature,
             )
@@ -4481,10 +4612,10 @@ async def _research_impl(req: ResearchRequest, request: Request):
         p = papers[0]
         authors_str = ", ".join(a for a in (p.get("authors") or []) if a) or "Unknown"
         answer = (
-            f"**{p.get('title','?')}** ({p.get('year','?')})\n\n"
+            f"**{p.get('title', '?')}** ({p.get('year', '?')})\n\n"
             f"Authors: {authors_str}\n"
             f"Venue: {p.get('venue') or 'Unknown'}\n"
-            f"Domain: {p.get('domain','Unknown')}\n"
+            f"Domain: {p.get('domain', 'Unknown')}\n"
             f"Citations: {p.get('in_citations', 'N/A')}"
         )
         return _direct_response(rid, answer, "entity_lookup", papers, t0)
@@ -4510,7 +4641,10 @@ async def _research_impl(req: ResearchRequest, request: Request):
                 "If you are not 100% confident, decline to explain that no matching records were found in the database."
             )
             answer = await groq_chat(
-                [{"role": "system", "content": sys_p}, {"role": "user", "content": f"List papers/contributions related to: {query}"}],
+                [
+                    {"role": "system", "content": sys_p},
+                    {"role": "user", "content": f"List papers/contributions related to: {query}"},
+                ],
                 REASON_MODEL,
                 temperature=req.temperature,
             )
@@ -4518,16 +4652,14 @@ async def _research_impl(req: ResearchRequest, request: Request):
         lines = [f"Found **{len(papers)}** papers:\n"]
         for p in papers:
             auths = ", ".join(a for a in (p.get("authors") or []) if a) or "Unknown"
-            lines.append(f"- **{p.get('title','?')}** ({p.get('year','?')}) — {auths}")
+            lines.append(f"- **{p.get('title', '?')}** ({p.get('year', '?')}) — {auths}")
         return _direct_response(rid, "\n".join(lines), "structured", papers, t0)
 
     # ── 4. Route: title_lookup ────────────────────────────────────────
     if plan.route == "title_lookup":
         anchors = plan.graph_anchors or [query]
         try:
-            papers = await retrieve_graph_papers(
-                keywords=anchors, anchors=anchors, limit=5
-            )
+            papers = await retrieve_graph_papers(keywords=anchors, anchors=anchors, limit=5)
         except GraphRetrievalError as e:
             raise HTTPException(502, str(e))
         if not papers:
@@ -4538,7 +4670,10 @@ async def _research_impl(req: ResearchRequest, request: Request):
                 "If you are not 100% confident, decline by explaining that the paper is not in the database."
             )
             answer = await groq_chat(
-                [{"role": "system", "content": sys_p}, {"role": "user", "content": f"Provide information on the paper: {query}"}],
+                [
+                    {"role": "system", "content": sys_p},
+                    {"role": "user", "content": f"Provide information on the paper: {query}"},
+                ],
                 REASON_MODEL,
                 temperature=req.temperature,
             )
@@ -4547,12 +4682,12 @@ async def _research_impl(req: ResearchRequest, request: Request):
         auths = ", ".join(a for a in (p.get("authors") or []) if a) or "Unknown"
         abstract = (p.get("abstract") or "")[:400]
         answer = (
-            f"**{p.get('title','?')}** ({p.get('year','?')})\n\n"
+            f"**{p.get('title', '?')}** ({p.get('year', '?')})\n\n"
             f"Authors: {auths}\n"
             f"Venue: {p.get('venue') or 'Unknown'}\n"
-            f"Domain: {p.get('domain','Unknown')}\n"
-            f"Citations: {p.get('in_citations','N/A')}\n\n"
-            f"Abstract: {abstract}{'...' if len(p.get('abstract',''))>400 else ''}"
+            f"Domain: {p.get('domain', 'Unknown')}\n"
+            f"Citations: {p.get('in_citations', 'N/A')}\n\n"
+            f"Abstract: {abstract}{'...' if len(p.get('abstract', '')) > 400 else ''}"
         )
         return _direct_response(rid, answer, "title_lookup", papers, t0)
 
@@ -4612,9 +4747,9 @@ async def _research_impl(req: ResearchRequest, request: Request):
             merged: List[Dict] = []
 
             # Build sub-queries: one per vector keyword + one general query
-            sub_queries: List[str] = list(dict.fromkeys(
-                [query] + [f"{kw} transformer" for kw in plan.vector_keywords[:4]]
-            ))
+            sub_queries: List[str] = list(
+                dict.fromkeys([query] + [f"{kw} transformer" for kw in plan.vector_keywords[:4]])
+            )
 
             sub_results = await asyncio.gather(
                 *[retrieve_arxiv_context(sq, limit=4) for sq in sub_queries],
@@ -4630,12 +4765,13 @@ async def _research_impl(req: ResearchRequest, request: Request):
                         seen_ids.add(dedup_key)
                         merged.append(paper)
 
-            log.info(f"[{rid}] Survey ArXiv multi-query: {len(sub_queries)} sub-queries → {len(merged)} unique papers")
+            log.info(
+                f"[{rid}] Survey ArXiv multi-query: {len(sub_queries)} sub-queries → {len(merged)} unique papers"
+            )
             return merged[:14]  # cap at 14 to keep prompt within token budget
 
         # Default: single query for non-survey routes
         return await retrieve_arxiv_context(query, limit=10)
-
 
     async def fetch_s2():
         ck = cache_key("s2", query)
@@ -4665,7 +4801,6 @@ async def _research_impl(req: ResearchRequest, request: Request):
             log.warning(f"Failed to fetch CORE papers: {e}")
             return []
 
-
     graph_nodes, chunks, arxiv_papers, s2_papers, core_papers = await asyncio.gather(
         fetch_graph(), fetch_supabase(), fetch_arxiv(), fetch_s2(), fetch_core()
     )
@@ -4675,7 +4810,8 @@ async def _research_impl(req: ResearchRequest, request: Request):
     # ── Deduplicate and Enrich papers with S2 data ──
     def get_clean_title(title: str) -> str:
         import re
-        return re.sub(r'[^a-z0-9]', '', title.lower())
+
+        return re.sub(r"[^a-z0-9]", "", title.lower())
 
     s2_by_title = {}
     for p in s2_papers:
@@ -4686,7 +4822,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
     # Deduplicate ArXiv papers and reuse S2 data if available
     arxiv_to_enrich = []
     enriched_arxiv = []
-    
+
     for p in arxiv_papers:
         c_title = get_clean_title(p.get("title", ""))
         matched_s2 = s2_by_title.get(c_title)
@@ -4782,6 +4918,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
 
     # Rank candidates by hybrid significance score (relevance rank + citation count + recency bonus)
     import math
+
     for p in all_candidates:
         rank_score = max(0, 10 - p.get("_rank", 0))
         citations = p.get("citation_count") or 0
@@ -4818,7 +4955,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
             )
         except LLMError as e:
             raise HTTPException(502, str(e))
-        
+
         latency = int((time.time() - t0) * 1000)
         return {
             "request_id": rid,
@@ -4891,7 +5028,9 @@ async def _research_impl(req: ResearchRequest, request: Request):
         answer,
         chunks,
         graph_nodes,
-        arxiv_papers if plan.route not in ("chitchat", "structured", "title_lookup", "entity_lookup") else []
+        arxiv_papers
+        if plan.route not in ("chitchat", "structured", "title_lookup", "entity_lookup")
+        else [],
     )
 
     latency = int((time.time() - t0) * 1000)
@@ -4964,9 +5103,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     await check_and_deduct_credit(request, "chat")
     # ─────────────────────────────────────────────────────────────────
 
-    last_user_msg = next(
-        (m.content for m in reversed(req.messages) if m.role == "user"), None
-    )
+    last_user_msg = next((m.content for m in reversed(req.messages) if m.role == "user"), None)
     if not last_user_msg:
         raise HTTPException(400, "No user message found.")
 
@@ -4974,10 +5111,10 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     is_wiki_prefix = False
     prefix_query = last_user_msg.strip()
     if prefix_query.lower().startswith("wikipedia:"):
-        prefix_query = prefix_query[len("wikipedia:"):].strip()
+        prefix_query = prefix_query[len("wikipedia:") :].strip()
         is_wiki_prefix = True
     elif prefix_query.lower().startswith("wiki:"):
-        prefix_query = prefix_query[len("wiki:"):].strip()
+        prefix_query = prefix_query[len("wiki:") :].strip()
         is_wiki_prefix = True
 
     if is_wiki_prefix:
@@ -4994,7 +5131,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     if req.mode == "wikipedia":
         log.info(f"[{rid}] Multi-turn query in Wikipedia Mode: {last_user_msg}")
         wiki_res = await search_wikipedia_summary(last_user_msg)
-        
+
         wiki_context = ""
         unique_datasets = []
         if wiki_res:
@@ -5004,29 +5141,31 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 f"Summary: {wiki_res['extract']}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             )
-            unique_datasets = [{
-                "name": wiki_res["title"],
-                "full_name": wiki_res["title"],
-                "url": wiki_res["url"],
-                "wikipedia_url": wiki_res["url"],
-                "description": wiki_res["extract"],
-                "source": "wikipedia"
-            }]
-            
+            unique_datasets = [
+                {
+                    "name": wiki_res["title"],
+                    "full_name": wiki_res["title"],
+                    "url": wiki_res["url"],
+                    "wikipedia_url": wiki_res["url"],
+                    "description": wiki_res["extract"],
+                    "source": "wikipedia",
+                }
+            ]
+
         sys_p = (
             "You are Aether, an academic research assistant. "
             "Use the provided Wikipedia context (if any) to address the user's query. "
             "Cite Wikipedia and provide links where appropriate."
         )
         sys_p += wiki_context
-        
+
         # Compile messages
         chat_msgs = []
         chat_msgs.append({"role": "system", "content": sys_p})
         for msg in req.messages:
             if msg.role != "system":
                 chat_msgs.append({"role": msg.role, "content": msg.content})
-                
+
         try:
             answer = await groq_chat(
                 chat_msgs,
@@ -5074,9 +5213,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             history_urls.extend(extract_paper_urls(m.content))
     # Deduplicate history URLs while preserving order
     history_urls = list(dict.fromkeys(history_urls))
-    
+
     new_urls = [u for u in latest_urls if u not in history_urls]
-    
+
     new_docs = []
     if new_urls:
         for url in new_urls:
@@ -5085,7 +5224,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 new_docs.append((url, doc_text, doc_links))
             except Exception as e:
                 raise HTTPException(400, f"Failed to download/parse PDF from {url}: {str(e)}")
-                
+
     # If the user pasted a URL as a simple paste, return the structured summary immediately
     if latest_urls and is_simple_link_paste(last_user_msg, latest_urls):
         target_url = latest_urls[0]
@@ -5093,19 +5232,21 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             target_text, target_links = await get_or_parse_pdf_safe(target_url, raise_on_error=True)
         except Exception as e:
             raise HTTPException(400, f"Failed to download/parse PDF from {target_url}: {str(e)}")
-            
+
         system_instruction = document_summary_system_instruction()
         user_content = document_summary_user_content(target_url, target_text, target_links)
-        
+
         msgs = [
             {"role": "system", "content": system_instruction},
-            {"role": "user", "content": user_content}
+            {"role": "user", "content": user_content},
         ]
         try:
-            answer = await groq_chat(msgs, HEAVY_MODEL, temperature=req.temperature, max_tokens=2500)
+            answer = await groq_chat(
+                msgs, HEAVY_MODEL, temperature=req.temperature, max_tokens=2500
+            )
         except LLMError as e:
             raise HTTPException(502, f"LLM error while generating summary: {str(e)}")
-            
+
         latency = int((time.time() - t0) * 1000)
         return {
             "request_id": rid,
@@ -5123,7 +5264,6 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             "model_used": HEAVY_MODEL,
             "warning": None,
         }
-
 
     # Build context string for pronoun resolution
     ctx = build_conversation_context(req.messages[:-1])
@@ -5154,9 +5294,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         if not pdf_context:
             answer = "The uploaded PDF document(s) could not be read or parsed. Please ensure the PDF is not password-protected, corrupt, or scanned as images without OCR."
             return _empty_response(rid, answer, "pdf_qa", t0)
-            
+
         log.info(f"[{rid}] Processing query via Uploaded PDF QA route (bypassing external APIs)")
-        
+
         sys_p = (
             "You are Aether, a precise research assistant.\n"
             "Use the provided uploaded PDF context to answer the user's query.\n"
@@ -5171,18 +5311,18 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             answer = await groq_chat(msgs, model, temperature=req.temperature, max_tokens=2000)
         except LLMError as e:
             raise HTTPException(502, f"LLM error while answering from PDF: {str(e)}")
-            
+
         # Format the retrieved chunks for rendering in the frontend sources panel
         formatted_chunks = [
             {
                 "text": chunk,
                 "title": "Uploaded PDF Source",
                 "page": "PDF Content",
-                "similarity": 0.95
+                "similarity": 0.95,
             }
             for chunk in pdf_chunks_raw
         ]
-            
+
         latency = int((time.time() - t0) * 1000)
         return {
             "request_id": rid,
@@ -5190,7 +5330,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             "route": "pdf_qa",
             "plan": {
                 "standalone_query": query,
-                "reasoning_path": f"Answered directly using retrieved chunks from the uploaded PDF(s).",
+                "reasoning_path": "Answered directly using retrieved chunks from the uploaded PDF(s).",
             },
             "papers": [],
             "chunks": formatted_chunks,
@@ -5208,9 +5348,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     if plan.route == "entity_lookup":
         anchors = plan.graph_anchors or [query]
         try:
-            papers = await retrieve_graph_papers(
-                keywords=anchors, anchors=anchors, limit=3
-            )
+            papers = await retrieve_graph_papers(keywords=anchors, anchors=anchors, limit=3)
         except GraphRetrievalError as e:
             raise HTTPException(502, str(e))
         if not papers:
@@ -5231,14 +5369,19 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                     fb_prompt = grounded_prompt(query, [], [], arxiv_fb, s2_fb)
                     msgs = await compile_chat_messages(fb_prompt, req.messages)
                     try:
-                        answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature, max_tokens=1500)
+                        answer = await groq_chat(
+                            msgs, REASON_MODEL, temperature=req.temperature, max_tokens=1500
+                        )
                     except LLMError as e:
                         raise HTTPException(502, str(e))
                     return {
                         "request_id": rid,
                         "answer": answer,
                         "route": "entity_lookup",
-                        "plan": {"standalone_query": plan.standalone_query, "reasoning_path": plan.reasoning_path},
+                        "plan": {
+                            "standalone_query": plan.standalone_query,
+                            "reasoning_path": plan.reasoning_path,
+                        },
                         "papers": [],
                         "chunks": [],
                         "arxiv_papers": arxiv_fb,
@@ -5262,10 +5405,10 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         p = papers[0]
         auths = ", ".join(a for a in (p.get("authors") or []) if a) or "Unknown"
         answer = (
-            f"**{p.get('title','?')}** ({p.get('year','?')})\n\n"
+            f"**{p.get('title', '?')}** ({p.get('year', '?')})\n\n"
             f"Authors: {auths}\n"
             f"Venue: {p.get('venue') or 'Unknown'}\n"
-            f"Domain: {p.get('domain','Unknown')}"
+            f"Domain: {p.get('domain', 'Unknown')}"
         )
         return _direct_response(rid, answer, "entity_lookup", papers, t0)
 
@@ -5296,7 +5439,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 s2_fb = await search_papers_s2(arxiv_search, limit=10)
                 if arxiv_fb or s2_fb:
                     all_fb = arxiv_fb + s2_fb
-                    lines = [f"Found **{len(all_fb)}** papers (sourced from arXiv/Semantic Scholar):\n"]
+                    lines = [
+                        f"Found **{len(all_fb)}** papers (sourced from arXiv/Semantic Scholar):\n"
+                    ]
                     seen_titles = set()
                     for p in all_fb:
                         title = p.get("title") or p.get("name") or "?"
@@ -5310,7 +5455,10 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                         "request_id": rid,
                         "answer": "\n".join(lines),
                         "route": "structured",
-                        "plan": {"standalone_query": plan.standalone_query, "reasoning_path": plan.reasoning_path},
+                        "plan": {
+                            "standalone_query": plan.standalone_query,
+                            "reasoning_path": plan.reasoning_path,
+                        },
                         "papers": [],
                         "chunks": [],
                         "arxiv_papers": arxiv_fb,
@@ -5334,7 +5482,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         lines = [f"Found **{len(papers)}** papers:\n"]
         for p in papers:
             auths = ", ".join(a for a in (p.get("authors") or []) if a) or "Unknown"
-            lines.append(f"• **{p.get('title','?')}** ({p.get('year','?')}) — {auths}")
+            lines.append(f"• **{p.get('title', '?')}** ({p.get('year', '?')}) — {auths}")
         return _direct_response(rid, "\n".join(lines), "structured", papers, t0)
 
     # ── Route: chitchat ───────────────────────────────────────────────
@@ -5351,9 +5499,11 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 "Respond to the chitchat using the provided document context if relevant, otherwise reply briefly. Keep the output complete."
             )
             sys_p += f"\n\n{pdf_context}"
-            
+
         msgs = await compile_chat_messages(sys_p, req.messages)
-        answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature, max_tokens=350 if pdf_context else 250)
+        answer = await groq_chat(
+            msgs, REASON_MODEL, temperature=req.temperature, max_tokens=350 if pdf_context else 250
+        )
         return _empty_response(rid, answer, "chitchat", t0)
 
     # ── Route: context_only ───────────────────────────────────────────
@@ -5365,7 +5515,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         )
         if pdf_context:
             sys_p += f"\n\n{pdf_context}"
-            
+
         msgs = await compile_chat_messages(sys_p, req.messages)
         answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature, max_tokens=1500)
         return _empty_response(rid, answer, "context_only", t0)
@@ -5430,7 +5580,8 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     # ── Deduplicate and Enrich papers with S2 data ──
     def get_clean_title(title: str) -> str:
         import re
-        return re.sub(r'[^a-z0-9]', '', title.lower())
+
+        return re.sub(r"[^a-z0-9]", "", title.lower())
 
     s2_by_title = {}
     for p in s2_papers:
@@ -5441,7 +5592,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     # Deduplicate ArXiv papers and reuse S2 data if available
     arxiv_to_enrich = []
     enriched_arxiv = []
-    
+
     for p in arxiv_papers:
         c_title = get_clean_title(p.get("title", ""))
         # Check if we already have it in S2 search results
@@ -5517,14 +5668,15 @@ async def _chat_impl(req: ConversationRequest, request: Request):
 
     # Rank candidates by hybrid significance score (relevance rank + citation count + recency bonus)
     import math
+
     for p in all_candidates:
         # Base rank score (lower rank in search is better: 10 - rank)
         rank_score = max(0, 10 - p.get("_rank", 0))
-        
+
         # Citation bonus: 2.5 * ln(1 + citation_count)
         citations = p.get("citation_count") or 0
         citation_bonus = 2.5 * math.log(1 + citations)
-        
+
         # Recency bonus: ensure recent papers (e.g. 2025/2026) are highly competitive
         year = p.get("year")
         recency_bonus = 0.0
@@ -5535,7 +5687,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 recency_bonus = 1.5
         except ValueError:
             pass
-            
+
         p["_significance_score"] = rank_score + citation_bonus + recency_bonus
 
     # Sort candidates by significance score in descending order
@@ -5560,7 +5712,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     #         answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
     #     except LLMError as e:
     #         raise HTTPException(502, str(e))
-    #     
+    #
     #     latency = int((time.time() - t0) * 1000)
     #     return {
     #         "request_id": rid,
@@ -5596,7 +5748,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
         except LLMError as e:
             raise HTTPException(502, str(e))
-        
+
         latency = int((time.time() - t0) * 1000)
         return {
             "request_id": rid,
@@ -5664,10 +5816,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
 
     show_external = plan.route not in ("chitchat", "structured", "title_lookup", "entity_lookup")
     answer = clean_and_resolve_links(
-        answer,
-        chunks,
-        graph_nodes,
-        arxiv_papers if show_external else []
+        answer, chunks, graph_nodes, arxiv_papers if show_external else []
     )
 
     latency = int((time.time() - t0) * 1000)
@@ -5692,7 +5841,14 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         "credits": {
             "plan": user_plan,
             "credits_used": plan_info.get("credits_used", 0) + CREDIT_COSTS.get("chat", 1),
-            "credits_remaining": None if user_plan == "pro" else max(0, FREE_CREDITS_PER_DAY - plan_info.get("credits_used", 0) - CREDIT_COSTS.get("chat", 1)),
+            "credits_remaining": None
+            if user_plan == "pro"
+            else max(
+                0,
+                FREE_CREDITS_PER_DAY
+                - plan_info.get("credits_used", 0)
+                - CREDIT_COSTS.get("chat", 1),
+            ),
             "credits_limit": None if user_plan == "pro" else FREE_CREDITS_PER_DAY,
             "is_unlimited": user_plan == "pro",
         },
@@ -5752,9 +5908,7 @@ async def compare_papers(req: CompareRequest, request: Request):
     t0 = time.time()
 
     aspects_str = (
-        ", ".join(req.aspects)
-        if req.aspects
-        else "methodology, results, datasets, contributions"
+        ", ".join(req.aspects) if req.aspects else "methodology, results, datasets, contributions"
     )
     query = f"Compare {req.paper_a} and {req.paper_b} in terms of: {aspects_str}"
 
@@ -5899,9 +6053,7 @@ async def research_survey(req: SurveyRequest, request: Request):
             nodes = await retrieve_graph_papers(keywords=[req.topic], limit=req.top_k)
             # Enrich with co-citation cluster
             seed_ids = [
-                g["research_id"]
-                for g in nodes
-                if g.get("research_id") and g.get("score") == 2
+                g["research_id"] for g in nodes if g.get("research_id") and g.get("score") == 2
             ]
             if seed_ids:
                 co_cited = await get_co_citation_cluster(seed_ids, limit=8)
@@ -6071,6 +6223,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 # AUTH & HISTORY ENDPOINTS
 # ================================================================
 
+
 def hash_password(password: str) -> str:
     pw_bytes = password.encode("utf-8")
     salt = bcrypt.gensalt()
@@ -6086,6 +6239,7 @@ def verify_password(password: str, hashed_password: str) -> bool:
 
 from datetime import datetime, timedelta, timezone
 
+
 def create_access_token(user_id: str, email: str) -> str:
     payload = {
         "sub": user_id,
@@ -6100,6 +6254,7 @@ def decode_access_token(token: str) -> Optional[dict]:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.PyJWTError:
         return None
+
 
 async def set_user_context(request: Request) -> Optional[str]:
     try:
@@ -6138,7 +6293,7 @@ async def get_authenticated_user(token: str) -> Optional[Dict[str, Any]]:
         return {
             "id": user["_id"],
             "email": user["email"],
-            "user_metadata": user.get("user_metadata", {})
+            "user_metadata": user.get("user_metadata", {}),
         }
     except Exception as e:
         log.error(f"Error validating MongoDB user token: {e}")
@@ -6153,10 +6308,12 @@ SMTP_FROM = os.getenv("SMTP_FROM", "Aether Intelligence <no-reply@aether.com>")
 REQUIRE_EMAIL_VERIFICATION = os.getenv("REQUIRE_EMAIL_VERIFICATION", "true").lower() == "true"
 
 
-async def send_auth_email(to_email: str, subject: str, text_content: str, html_content: str) -> bool:
+async def send_auth_email(
+    to_email: str, subject: str, text_content: str, html_content: str
+) -> bool:
     import smtplib
-    from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
 
     if not SMTP_HOST or not SMTP_USER or not SMTP_PASSWORD:
         # Development / local mock mode
@@ -6171,6 +6328,7 @@ async def send_auth_email(to_email: str, subject: str, text_content: str, html_c
         return True
 
     try:
+
         def send_sync():
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
@@ -6199,7 +6357,7 @@ async def validate_email_mailboxlayer(email: str) -> Tuple[bool, Optional[str]]:
     api_key = os.getenv("MAILBOXLAYER_API_KEY")
     if not api_key:
         return True, None
-        
+
     try:
         url = "http://apilayer.net/api/check"
         params = {"access_key": api_key, "email": email}
@@ -6208,19 +6366,19 @@ async def validate_email_mailboxlayer(email: str) -> Tuple[bool, Optional[str]]:
             if res.status_code != 200:
                 log.warning(f"Mailboxlayer API returned status code {res.status_code}")
                 return True, None
-                
+
             data = res.json()
             if "error" in data:
                 log.warning(f"Mailboxlayer API error: {data['error']}")
                 return True, None
-                
+
             if not data.get("format_valid", True):
                 return False, "Invalid email address format."
             if not data.get("mx_found", True):
                 return False, "This email domain does not exist or cannot receive emails."
             if data.get("disposable", False):
                 return False, "Disposable or temporary email addresses are not allowed."
-                
+
             return True, None
     except Exception as e:
         log.error(f"Error calling Mailboxlayer API: {e}")
@@ -6229,29 +6387,27 @@ async def validate_email_mailboxlayer(email: str) -> Tuple[bool, Optional[str]]:
 
 async def send_verification_email(email: str, user_id: str, request: Request = None) -> None:
     import random
+
     code = f"{random.randint(100000, 999999)}"
     expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
     expires_at_naive = expires_at.replace(tzinfo=None)
-    
+
     # Save verification code to MongoDB
     await asyncio.to_thread(
         db.users.update_one,
         {"_id": user_id},
-        {"$set": {
-            "verification_code": code,
-            "verification_expires_at": expires_at_naive
-        }}
+        {"$set": {"verification_code": code, "verification_expires_at": expires_at_naive}},
     )
-    
+
     base_url = "http://localhost:8000/"
     if request:
         base_url = str(request.base_url)
-        
+
     verify_link = f"{base_url}api/auth/verify-link?email={email}&code={code}"
-    
+
     subject = "Verify your Aether account"
     text_content = f"Welcome to Aether! Please verify your email by clicking the following link:\n{verify_link}\nThis link is valid for 24 hours."
-    
+
     html_content = f"""
     <html>
     <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f8fafc; padding: 40px; text-align: center;">
@@ -6274,23 +6430,21 @@ async def send_verification_email(email: str, user_id: str, request: Request = N
 
 async def send_reset_email(email: str, user_id: str) -> None:
     import random
+
     token = f"{random.randint(100000, 999999)}"
     expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
     expires_at_naive = expires_at.replace(tzinfo=None)
-    
+
     # Save reset token to MongoDB
     await asyncio.to_thread(
         db.users.update_one,
         {"_id": user_id},
-        {"$set": {
-            "password_reset_token": token,
-            "password_reset_expires_at": expires_at_naive
-        }}
+        {"$set": {"password_reset_token": token, "password_reset_expires_at": expires_at_naive}},
     )
-    
+
     subject = "Reset your Aether password"
     text_content = f"We received a request to reset your Aether password.\nYour reset code is: {token}\nThis code is valid for 1 hour."
-    
+
     html_content = f"""
     <html>
     <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f8fafc; padding: 40px; text-align: center;">
@@ -6352,25 +6506,25 @@ async def auth_signup(req: SignUpRequest, request: Request):
     email = req.email.strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="Invalid email address")
-        
+
     # Validate email via Mailboxlayer API
     is_valid, err_msg = await validate_email_mailboxlayer(email)
     if not is_valid:
         raise HTTPException(status_code=400, detail=err_msg)
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
-    
+
     # Check if user exists
     existing = await asyncio.to_thread(db.users.find_one, {"email": email})
     if existing:
         raise HTTPException(status_code=400, detail="An account with this email already exists")
-    
+
     # Create user
     uid = str(uuid.uuid4())
     password_hash = hash_password(req.password)
     now = datetime.now(timezone.utc)
     credits_reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    
+
     is_verified_init = not REQUIRE_EMAIL_VERIFICATION
     user_doc = {
         "_id": uid,
@@ -6379,11 +6533,11 @@ async def auth_signup(req: SignUpRequest, request: Request):
         "user_metadata": {
             "full_name": email.split("@")[0].capitalize(),
             "institution": "",
-            "role": ""
+            "role": "",
         },
         # --- Plan & credit fields ---
-        "plan": "free",              # "free" | "pro"
-        "credits_used": 0,           # resets daily
+        "plan": "free",  # "free" | "pro"
+        "credits_used": 0,  # resets daily
         "credits_reset_at": credits_reset,
         "stripe_customer_id": None,  # set on first Stripe checkout
         "stripe_subscription_id": None,
@@ -6393,24 +6547,20 @@ async def auth_signup(req: SignUpRequest, request: Request):
         "updated_at": now,
     }
     await asyncio.to_thread(db.users.insert_one, user_doc)
-    
+
     if REQUIRE_EMAIL_VERIFICATION:
         await send_verification_email(email, uid, request)
         return {
             "status": "verification_pending",
             "email": email,
-            "msg": "Please verify your email address via the link sent to you."
+            "msg": "Please verify your email address via the link sent to you.",
         }
-    
+
     token = create_access_token(uid, email)
     return {
         "access_token": token,
         "token_type": "bearer",
-        "user": {
-            "id": uid,
-            "email": email,
-            "user_metadata": user_doc["user_metadata"]
-        }
+        "user": {"id": uid, "email": email, "user_metadata": user_doc["user_metadata"]},
     }
 
 
@@ -6420,15 +6570,15 @@ async def auth_login(req: LoginRequest, request: Request):
     user = await asyncio.to_thread(db.users.find_one, {"email": email})
     if not user or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=400, detail="Invalid email or password")
-    
+
     if REQUIRE_EMAIL_VERIFICATION and not user.get("is_verified", False):
         await send_verification_email(email, user["_id"], request)
         return {
             "status": "verification_pending",
             "email": email,
-            "msg": "Please verify your email address to log in."
+            "msg": "Please verify your email address to log in.",
         }
-        
+
     token = create_access_token(user["_id"], user["email"])
     return {
         "access_token": token,
@@ -6436,8 +6586,8 @@ async def auth_login(req: LoginRequest, request: Request):
         "user": {
             "id": user["_id"],
             "email": user["email"],
-            "user_metadata": user.get("user_metadata", {})
-        }
+            "user_metadata": user.get("user_metadata", {}),
+        },
     }
 
 
@@ -6447,23 +6597,26 @@ async def verify_email(req: VerifyEmailRequest):
     user = await asyncio.to_thread(db.users.find_one, {"email": email})
     if not user:
         raise HTTPException(status_code=400, detail="User not found")
-        
+
     stored_code = user.get("verification_code")
     expires_at = user.get("verification_expires_at")
-    
+
     if not stored_code or stored_code != req.code.strip():
         raise HTTPException(status_code=400, detail="Invalid verification code")
-        
+
     if expires_at and datetime.utcnow() > expires_at:
         raise HTTPException(status_code=400, detail="Verification code has expired")
-        
+
     # Mark verified
     await asyncio.to_thread(
         db.users.update_one,
         {"_id": user["_id"]},
-        {"$set": {"is_verified": True}, "$unset": {"verification_code": "", "verification_expires_at": ""}}
+        {
+            "$set": {"is_verified": True},
+            "$unset": {"verification_code": "", "verification_expires_at": ""},
+        },
     )
-    
+
     # Return access token
     token = create_access_token(user["_id"], user["email"])
     return {
@@ -6472,8 +6625,8 @@ async def verify_email(req: VerifyEmailRequest):
         "user": {
             "id": user["_id"],
             "email": user["email"],
-            "user_metadata": user.get("user_metadata", {})
-        }
+            "user_metadata": user.get("user_metadata", {}),
+        },
     }
 
 
@@ -6492,12 +6645,12 @@ async def verify_email_link(email: str, code: str):
                 <p><a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Landing Page</a></p>
             </body>
             </html>
-            """
+            """,
         )
-        
+
     stored_code = user.get("verification_code")
     expires_at = user.get("verification_expires_at")
-    
+
     if not stored_code or stored_code != code.strip():
         return HTMLResponse(
             status_code=400,
@@ -6509,9 +6662,9 @@ async def verify_email_link(email: str, code: str):
                 <p><a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Landing Page</a></p>
             </body>
             </html>
-            """
+            """,
         )
-        
+
     if expires_at and datetime.utcnow() > expires_at:
         return HTMLResponse(
             status_code=400,
@@ -6523,16 +6676,19 @@ async def verify_email_link(email: str, code: str):
                 <p><a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Landing Page</a></p>
             </body>
             </html>
-            """
+            """,
         )
-        
+
     # Mark verified
     await asyncio.to_thread(
         db.users.update_one,
         {"_id": user["_id"]},
-        {"$set": {"is_verified": True}, "$unset": {"verification_code": "", "verification_expires_at": ""}}
+        {
+            "$set": {"is_verified": True},
+            "$unset": {"verification_code": "", "verification_expires_at": ""},
+        },
     )
-    
+
     # Redirect to landing page with verification success query param
     return RedirectResponse(url="/?verified=true")
 
@@ -6543,7 +6699,7 @@ async def resend_verification(req: ResendVerificationRequest, request: Request):
     user = await asyncio.to_thread(db.users.find_one, {"email": email})
     if not user:
         raise HTTPException(status_code=400, detail="User not found")
-        
+
     await send_verification_email(email, user["_id"], request)
     return {"msg": "Verification link resent successfully"}
 
@@ -6554,7 +6710,7 @@ async def forgot_password(req: ForgotPasswordRequest):
     user = await asyncio.to_thread(db.users.find_one, {"email": email})
     if not user:
         return {"msg": "If this email exists, a reset code has been sent."}
-        
+
     await send_reset_email(email, user["_id"])
     return {"msg": "Password reset code sent successfully"}
 
@@ -6565,27 +6721,30 @@ async def reset_password(req: ResetPasswordRequest):
     user = await asyncio.to_thread(db.users.find_one, {"email": email})
     if not user:
         raise HTTPException(status_code=400, detail="User not found")
-        
+
     stored_token = user.get("password_reset_token")
     expires_at = user.get("password_reset_expires_at")
-    
+
     if not stored_token or stored_token != req.token.strip():
         raise HTTPException(status_code=400, detail="Invalid or missing reset token")
-        
+
     if expires_at and datetime.utcnow() > expires_at:
         raise HTTPException(status_code=400, detail="Reset token has expired")
-        
+
     if len(req.new_password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
-        
+
     password_hash = hash_password(req.new_password)
-    
+
     await asyncio.to_thread(
         db.users.update_one,
         {"_id": user["_id"]},
-        {"$set": {"password_hash": password_hash}, "$unset": {"password_reset_token": "", "password_reset_expires_at": ""}}
+        {
+            "$set": {"password_hash": password_hash},
+            "$unset": {"password_reset_token": "", "password_reset_expires_at": ""},
+        },
     )
-    
+
     return {"msg": "Password reset successful"}
 
 
@@ -6596,12 +6755,12 @@ async def auth_update_profile(req: ProfileUpdateRequest, request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
     uid = user["id"]
-    
+
     # Fetch from DB to ensure it exists
     user_db = await asyncio.to_thread(db.users.find_one, {"_id": uid})
     if not user_db:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     # Update fields
     meta = user_db.get("user_metadata", {})
     if req.full_name is not None:
@@ -6610,18 +6769,14 @@ async def auth_update_profile(req: ProfileUpdateRequest, request: Request):
         meta["institution"] = req.institution
     if req.role is not None:
         meta["role"] = req.role
-        
+
     await asyncio.to_thread(
         db.users.update_one,
         {"_id": uid},
-        {"$set": {"user_metadata": meta, "updated_at": datetime.now(timezone.utc)}}
+        {"$set": {"user_metadata": meta, "updated_at": datetime.now(timezone.utc)}},
     )
-    
-    return {
-        "id": uid,
-        "email": user_db["email"],
-        "user_metadata": meta
-    }
+
+    return {"id": uid, "email": user_db["email"], "user_metadata": meta}
 
 
 @app.put("/api/auth/password")
@@ -6631,19 +6786,19 @@ async def auth_update_password(req: PasswordUpdateRequest, request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
     uid = user["id"]
-    
+
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
-        
+
     user_db = await asyncio.to_thread(db.users.find_one, {"_id": uid})
     if not user_db:
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     password_hash = hash_password(req.password)
     await asyncio.to_thread(
         db.users.update_one,
         {"_id": uid},
-        {"$set": {"password_hash": password_hash, "updated_at": datetime.now(timezone.utc)}}
+        {"$set": {"password_hash": password_hash, "updated_at": datetime.now(timezone.utc)}},
     )
     return {"status": "success"}
 
@@ -6657,7 +6812,7 @@ async def auth_me(request: Request):
     return {
         "id": user.get("id"),
         "email": user.get("email"),
-        "user_metadata": user.get("user_metadata", {})
+        "user_metadata": user.get("user_metadata", {}),
     }
 
 
@@ -6689,15 +6844,15 @@ async def create_history(request: Request):
     user = await get_authenticated_user(token)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
-    
+
     try:
         body = await request.json()
     except Exception:
         body = {}
-        
+
     title = body.get("title", "New Chat")
     messages = body.get("messages", [])
-    
+
     try:
         session_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
@@ -6707,10 +6862,10 @@ async def create_history(request: Request):
             "title": title,
             "messages": messages,
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         await asyncio.to_thread(db.chat_sessions.insert_one, session_doc)
-        
+
         session_doc["id"] = session_doc.pop("_id")
         session_doc["created_at"] = session_doc["created_at"].isoformat()
         session_doc["updated_at"] = session_doc["updated_at"].isoformat()
@@ -6730,26 +6885,27 @@ async def update_history(session_id: str, request: Request):
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-        
+
     update_data = {}
     if "title" in body:
         update_data["title"] = body["title"]
     if "messages" in body:
         update_data["messages"] = body["messages"]
-    
+
     update_data["updated_at"] = datetime.now(timezone.utc)
-    
+
     try:
         from pymongo import ReturnDocument
+
         res = await asyncio.to_thread(
             db.chat_sessions.find_one_and_update,
             {"_id": session_id, "user_id": user["id"]},
             {"$set": update_data},
-            return_document=ReturnDocument.AFTER
+            return_document=ReturnDocument.AFTER,
         )
         if not res:
             raise HTTPException(status_code=404, detail="Chat session not found")
-            
+
         res["id"] = res.pop("_id")
         if isinstance(res.get("created_at"), datetime):
             res["created_at"] = res["created_at"].isoformat()
@@ -6785,8 +6941,7 @@ async def delete_history(session_id: str, request: Request):
         raise HTTPException(status_code=401, detail="Invalid token")
     try:
         res = await asyncio.to_thread(
-            db.chat_sessions.delete_one,
-            {"_id": session_id, "user_id": user["id"]}
+            db.chat_sessions.delete_one, {"_id": session_id, "user_id": user["id"]}
         )
         if res.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Chat session not found")
@@ -6855,8 +7010,8 @@ async def stripe_webhook(request: Request):
     Set this URL as your Stripe webhook endpoint.
     Events handled: checkout.session.completed, customer.subscription.deleted
     """
-    import hmac
     import hashlib
+    import hmac
 
     STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
@@ -6901,12 +7056,14 @@ async def stripe_webhook(request: Request):
             await asyncio.to_thread(
                 db.users.update_one,
                 {"email": customer_email.lower()},
-                {"$set": {
-                    "plan": "pro",
-                    "stripe_customer_id": customer_id,
-                    "stripe_subscription_id": subscription_id,
-                    "updated_at": datetime.now(timezone.utc),
-                }},
+                {
+                    "$set": {
+                        "plan": "pro",
+                        "stripe_customer_id": customer_id,
+                        "stripe_subscription_id": subscription_id,
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
             )
             log.info(f"[Stripe] Upgraded {customer_email} to Pro (sub: {subscription_id})")
 
@@ -6917,11 +7074,13 @@ async def stripe_webhook(request: Request):
             await asyncio.to_thread(
                 db.users.update_one,
                 {"stripe_customer_id": customer_id},
-                {"$set": {
-                    "plan": "free",
-                    "stripe_subscription_id": None,
-                    "updated_at": datetime.now(timezone.utc),
-                }},
+                {
+                    "$set": {
+                        "plan": "free",
+                        "stripe_subscription_id": None,
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
             )
             log.info(f"[Stripe] Downgraded customer {customer_id} to Free")
 
@@ -6952,24 +7111,22 @@ async def razorpay_create_order(request: Request):
             response = await client.post(
                 "https://api.razorpay.com/v1/orders",
                 auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
-                json={
-                    "amount": amount,
-                    "currency": "INR",
-                    "receipt": receipt_id
-                },
-                timeout=10.0
+                json={"amount": amount, "currency": "INR", "receipt": receipt_id},
+                timeout=10.0,
             )
-            
+
             if response.status_code != 200:
                 log.error(f"Razorpay order creation failed: {response.text}")
-                raise HTTPException(status_code=response.status_code, detail="Failed to create order with Razorpay")
-                
+                raise HTTPException(
+                    status_code=response.status_code, detail="Failed to create order with Razorpay"
+                )
+
             order_data = response.json()
             return {
                 "order_id": order_data["id"],
                 "amount": order_data["amount"],
                 "currency": order_data["currency"],
-                "key_id": RAZORPAY_KEY_ID
+                "key_id": RAZORPAY_KEY_ID,
             }
     except httpx.RequestError as e:
         log.error(f"HTTP request to Razorpay failed: {e}")
@@ -6987,17 +7144,15 @@ async def razorpay_verify_payment(req: RazorpayVerifyRequest, request: Request):
         raise HTTPException(status_code=401, detail="Invalid token")
 
     if not RAZORPAY_KEY_SECRET:
-        raise HTTPException(status_code=500, detail="Razorpay secret is not configured on the server")
+        raise HTTPException(
+            status_code=500, detail="Razorpay secret is not configured on the server"
+        )
 
-    import hmac
     import hashlib
+    import hmac
 
     msg = f"{req.razorpay_order_id}|{req.razorpay_payment_id}"
-    expected = hmac.new(
-        RAZORPAY_KEY_SECRET.encode(),
-        msg.encode(),
-        hashlib.sha256
-    ).hexdigest()
+    expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(expected, req.razorpay_signature):
         log.warning(f"Razorpay signature mismatch for user {user['email']}")
@@ -7006,19 +7161,22 @@ async def razorpay_verify_payment(req: RazorpayVerifyRequest, request: Request):
     # Upgrade the user's plan to pro in MongoDB and record the payment
     try:
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
-        
+
         await asyncio.to_thread(
             db.users.update_one,
             {"_id": user["id"]},
-            {"$set": {
-                "plan": "pro",
-                "razorpay_order_id": req.razorpay_order_id,
-                "razorpay_payment_id": req.razorpay_payment_id,
-                "updated_at": now,
-            }}
+            {
+                "$set": {
+                    "plan": "pro",
+                    "razorpay_order_id": req.razorpay_order_id,
+                    "razorpay_payment_id": req.razorpay_payment_id,
+                    "updated_at": now,
+                }
+            },
         )
-        
+
         # Save detailed payment record in payments collection
         payment_record = {
             "user_id": user["id"],
@@ -7030,14 +7188,13 @@ async def razorpay_verify_payment(req: RazorpayVerifyRequest, request: Request):
             "currency": "INR",
             "plan": "pro",
             "status": "completed",
-            "created_at": now
+            "created_at": now,
         }
-        await asyncio.to_thread(
-            db.payments.insert_one,
-            payment_record
+        await asyncio.to_thread(db.payments.insert_one, payment_record)
+
+        log.info(
+            f"[Razorpay] Successfully upgraded user {user['email']} to Pro and saved payment record."
         )
-        
-        log.info(f"[Razorpay] Successfully upgraded user {user['email']} to Pro and saved payment record.")
         return {"status": "success", "message": "Successfully upgraded to Pro"}
     except Exception as e:
         log.error(f"Error upgrading user plan/saving payment in MongoDB: {e}")
@@ -7055,20 +7212,24 @@ async def get_payment_history(request: Request):
         # Find all payments for this user, sorted by created_at descending
         cursor = db.payments.find({"user_id": user["id"]}).sort("created_at", -1)
         payments = await asyncio.to_thread(list, cursor)
-        
+
         formatted_payments = []
         for p in payments:
-            formatted_payments.append({
-                "id": str(p.get("_id")),
-                "razorpay_order_id": p.get("razorpay_order_id"),
-                "razorpay_payment_id": p.get("razorpay_payment_id"),
-                "amount": p.get("amount", 0) / 100.0,  # Convert paise to Rs
-                "currency": p.get("currency", "INR"),
-                "plan": p.get("plan", "pro"),
-                "status": p.get("status", "completed"),
-                "created_at": p.get("created_at").isoformat() if isinstance(p.get("created_at"), datetime) else None
-            })
-            
+            formatted_payments.append(
+                {
+                    "id": str(p.get("_id")),
+                    "razorpay_order_id": p.get("razorpay_order_id"),
+                    "razorpay_payment_id": p.get("razorpay_payment_id"),
+                    "amount": p.get("amount", 0) / 100.0,  # Convert paise to Rs
+                    "currency": p.get("currency", "INR"),
+                    "plan": p.get("plan", "pro"),
+                    "status": p.get("status", "completed"),
+                    "created_at": p.get("created_at").isoformat()
+                    if isinstance(p.get("created_at"), datetime)
+                    else None,
+                }
+            )
+
         return formatted_payments
     except Exception as e:
         log.error(f"Error fetching payment history: {e}")
@@ -7109,41 +7270,43 @@ def health():
 @app.get("/")
 def root():
     from fastapi.responses import FileResponse
+
     return FileResponse("frontend/landing.html")
 
 
 @app.get("/styles.css")
 def read_styles():
     from fastapi.responses import FileResponse
+
     return FileResponse("frontend/styles.css")
 
 
 @app.post("/api/upload/pdf")
 async def upload_pdf(request: Request, file: UploadFile = File(...)):
     await set_user_context(request)
-    
+
     filename = file.filename or "document.pdf"
     if not filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-        
+
     try:
         content = await file.read()
         if not content:
             raise HTTPException(status_code=400, detail="Empty PDF file.")
-            
+
         def _extract():
             doc = fitz.open(stream=content, filetype="pdf")
             text_content = []
             for page in doc:
                 text_content.append(page.get_text())
             return "\n".join(text_content).strip()
-            
+
         extracted_text = await asyncio.to_thread(_extract)
         if not extracted_text:
             raise HTTPException(status_code=400, detail="The PDF contains no readable text.")
-            
+
         pdf_id = f"pdf-{uuid.uuid4()}"
-        
+
         # Save to MongoDB
         await asyncio.to_thread(
             db.uploaded_pdfs.insert_one,
@@ -7151,17 +7314,17 @@ async def upload_pdf(request: Request, file: UploadFile = File(...)):
                 "_id": pdf_id,
                 "name": filename,
                 "text": extracted_text,
-                "created_at": datetime.now(timezone.utc)
-            }
+                "created_at": datetime.now(timezone.utc),
+            },
         )
-        
+
         pdf_url = f"/api/pdf/{pdf_id}.pdf"
-        
+
         return {
             "file_id": pdf_id,
             "url": pdf_url,
             "name": filename,
-            "text_length": len(extracted_text)
+            "text_length": len(extracted_text),
         }
     except HTTPException as he:
         raise he
@@ -7186,8 +7349,16 @@ def is_whisper_hallucination(text: str) -> bool:
     # Strip punctuation and lowercase
     cleaned = "".join(c for c in text if c.isalnum()).lower().strip()
     hallucinations = {
-        "", "you", "thankyou", "thankyouforwatching", "pleaselikeandsubscribe", 
-        "subscribe", "watching", "bye", "thankyoubye", "thankyousomuch"
+        "",
+        "you",
+        "thankyou",
+        "thankyouforwatching",
+        "pleaselikeandsubscribe",
+        "subscribe",
+        "watching",
+        "bye",
+        "thankyoubye",
+        "thankyousomuch",
     }
     return cleaned in hallucinations
 
@@ -7195,54 +7366,42 @@ def is_whisper_hallucination(text: str) -> bool:
 @app.post("/api/audio/transcribe")
 async def transcribe_audio(request: Request, file: UploadFile = File(...)):
     await set_user_context(request)
-    
+
     if not GROQ_API_KEY and not GROQ_API_KEYS:
-        raise HTTPException(
-            status_code=503,
-            detail="Groq API key not configured on the server."
-        )
-        
+        raise HTTPException(status_code=503, detail="Groq API key not configured on the server.")
+
     content = await file.read()
     if not content:
-        raise HTTPException(
-            status_code=400,
-            detail="Empty audio file."
-        )
-        
+        raise HTTPException(status_code=400, detail="Empty audio file.")
+
     max_attempts = len(GROQ_API_KEYS) if GROQ_API_KEYS else 1
     last_err = None
-    
+
     for attempt in range(max_attempts):
         current_key = GROQ_API_KEY or ""
         if GROQ_API_KEYS:
             key_idx = (groq_key_index + attempt) % len(GROQ_API_KEYS)
             current_key = GROQ_API_KEYS[key_idx]
-            
-        headers = {
-            "Authorization": f"Bearer {current_key}"
-        }
-        
+
+        headers = {"Authorization": f"Bearer {current_key}"}
+
         # Normalize content type by stripping parameters (e.g. codecs=opus)
         content_type = file.content_type or "audio/webm"
         if ";" in content_type:
             content_type = content_type.split(";")[0].strip()
-            
-        files = {
-            "file": (file.filename or "speech.webm", content, content_type)
-        }
-        data = {
-            "model": "whisper-large-v3"
-        }
-        
+
+        files = {"file": (file.filename or "speech.webm", content, content_type)}
+        data = {"model": "whisper-large-v3"}
+
         try:
             r = await pool.groq_http.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
                 headers=headers,
                 files=files,
                 data=data,
-                timeout=60.0
+                timeout=60.0,
             )
-            
+
             if r.status_code == 200:
                 resp_json = r.json()
                 text = resp_json.get("text", "")
@@ -7261,19 +7420,13 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...)):
             last_err = str(e)
             rotate_groq_key()
             continue
-            
-    raise HTTPException(
-        status_code=500,
-        detail=f"Failed to transcribe audio. Error: {last_err}"
-    )
+
+    raise HTTPException(status_code=500, detail=f"Failed to transcribe audio. Error: {last_err}")
 
 
 @app.get("/api/config")
 def get_config():
-    return {
-        "supabase_url": SUPABASE_URL,
-        "supabase_anon_key": SUPABASE_KEY
-    }
+    return {"supabase_url": SUPABASE_URL, "supabase_anon_key": SUPABASE_KEY}
 
 
 @app.get("/api/health/full")
@@ -7281,11 +7434,7 @@ async def full_health():
     checks: Dict[str, str] = {}
     try:
         await asyncio.to_thread(
-            lambda: get_supabase_client()
-            .table("papers")
-            .select("id")
-            .limit(1)
-            .execute()
+            lambda: get_supabase_client().table("papers").select("id").limit(1).execute()
         )
         checks["supabase"] = "ok"
     except Exception as e:
@@ -7304,9 +7453,7 @@ async def full_health():
     except Exception as e:
         checks["neo4j"] = f"error: {e}"
     try:
-        await groq_chat(
-            [{"role": "user", "content": "ping"}], REASON_MODEL, max_tokens=1
-        )
+        await groq_chat([{"role": "user", "content": "ping"}], REASON_MODEL, max_tokens=1)
         checks["groq"] = "ok"
     except Exception as e:
         checks["groq"] = f"error: {e}"
@@ -7341,9 +7488,7 @@ def _empty_response(rid: str, answer: str, route: str, t0: float) -> Dict:
     }
 
 
-def _direct_response(
-    rid: str, answer: str, route: str, papers: List[Dict], t0: float
-) -> Dict:
+def _direct_response(rid: str, answer: str, route: str, papers: List[Dict], t0: float) -> Dict:
     return {
         "request_id": rid,
         "answer": answer,
@@ -7363,9 +7508,7 @@ def _direct_response(
 
 _frontend_dir = Path("frontend")
 if _frontend_dir.exists():
-    app.mount(
-        "/app", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend"
-    )
+    app.mount("/app", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend")
     log.info(f"Frontend at /app → {_frontend_dir}")
 else:
     log.warning(f"No frontend dir at {_frontend_dir}")
@@ -7377,6 +7520,7 @@ else:
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app.app:app",
         host="0.0.0.0",

@@ -1,36 +1,34 @@
-import pandas as pd
 import ast
+import logging
 import time
 import uuid
-import logging
-import os
+
+import pandas as pd
 from supabase import create_client
 
 # =========================================================
 # 🔐 CONFIG
 # =========================================================
 
-SUPABASE_URL="https://kexzlhgcurpvlssvergg.supabase.co"
-SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtleHpsaGdjdXJwdmxzc3ZlcmdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2ODE4NjUsImV4cCI6MjA4NTI1Nzg2NX0.hOdElG3U9tZEeGHPF5A_t8g_KeH9k_-1P_GDTchNqak"
+SUPABASE_URL = "https://kexzlhgcurpvlssvergg.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtleHpsaGdjdXJwdmxzc3ZlcmdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2ODE4NjUsImV4cCI6MjA4NTI1Nzg2NX0.hOdElG3U9tZEeGHPF5A_t8g_KeH9k_-1P_GDTchNqak"
 
 
-CSV_FILE = "ingestion/paper_chunks_rows.csv"   # ✅ fixed path
+CSV_FILE = "ingestion/paper_chunks_rows.csv"  # ✅ fixed path
 BATCH_SIZE = 500
 CHECKPOINT_FILE = "ingestion/upload_checkpoint.txt"
-START_FROM = 1   # ✅ your requirement
+START_FROM = 1  # ✅ your requirement
 
 # =========================================================
 # 🧾 LOGGING
 # =========================================================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
 # =========================================================
 # 🔌 INIT
 # =========================================================
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 
 # =========================================================
 # 🧠 HELPERS
@@ -83,7 +81,6 @@ buffer = []
 seen = set()
 
 for idx, row in enumerate(df.to_dict("records")):
-
     if idx < start_idx:
         continue
 
@@ -115,7 +112,7 @@ for idx, row in enumerate(df.to_dict("records")):
             "chunk_index": chunk_index,
             "embedding": embedding,
             "section": row.get("section", "general"),
-            "token_count": int(row.get("token_count", len(chunk.split())))
+            "token_count": int(row.get("token_count", len(chunk.split()))),
         }
 
         buffer.append(record)
