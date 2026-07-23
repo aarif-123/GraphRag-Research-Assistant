@@ -52,7 +52,7 @@
 
 ```bash
 # 1. Clone
-git clone https://github.com/<your-username>/GraphRag-Research-Assistant.git
+git clone https://github.com/your-username/GraphRag-Research-Assistant.git
 cd GraphRag-Research-Assistant
 
 # 2. Create and activate a virtual environment
@@ -73,7 +73,7 @@ cp .env.example .env.local
 python scripts/validate_env.py --env-file .env.local
 
 # 6. Start the development server
-uvicorn app.app:app --reload --host 0.0.0.0 --port 8000
+uvicorn app._server:app --reload --host 0.0.0.0 --port 8000
 ```
 
 > [!IMPORTANT]
@@ -115,6 +115,7 @@ pytest tests/ -v
 | Unit | `test_rate_limiter.py` | Sliding window, 429, cleanup |
 | Unit | `test_text_processing.py` | Prompt compression, message truncation |
 | Unit | `test_credit_system.py` | Free/Pro limits, daily reset, cost table |
+| Unit | `test_audio.py` | Audio transcription endpoint unit coverage |
 | Unit | `sources/test_core_normalize.py` | Author formats, year extraction, URL construction |
 | Unit | `sources/test_openalex_normalize.py` | Unicode normalisation, BibTeX type inference |
 | Unit | `sources/test_s2_normalize.py` | Field mapping, cache hit/miss/expiry |
@@ -128,20 +129,15 @@ pytest tests/ -v
 
 ## 🔄 CI/CD
 
-[![CI](https://github.com/<your-username>/GraphRag-Research-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-username>/GraphRag-Research-Assistant/actions/workflows/ci.yml)
-
 Every push and pull request to `main` triggers the following pipeline:
 
 | Job | Tool | What it checks |
 |---|---|---|
-| **Lint & Format** | `ruff` | Code style and formatting |
+| **Lint & Format** | `ruff` | Code style and formatting (100-char line length) |
 | **Type Check** | `mypy` | Type annotations on `app/sources/` |
 | **Env Validation** | `scripts/validate_env.py` | Config format/range with stub values |
 | **Unit Tests** | `pytest tests/unit/` | Pure logic — no network needed |
 | **Integration Tests** | `pytest tests/integration/` | Mocked HTTP — no API keys needed |
-
-> [!NOTE]
-> Replace `<your-username>` in the CI badge URLs above with your actual GitHub username after pushing.
 
 ------
 
@@ -497,7 +493,7 @@ GraphRag-Research-Assistant/
 │   └── index.py                          # Vercel serverless entry point
 │
 ├── app/
-│   ├── app.py                            # Main FastAPI application (~7,400 lines)
+│   ├── _server.py                        # Main FastAPI application
 │   │                                     #  - Pool: Supabase + Neo4j + MongoDB + Groq
 │   │                                     #  - plan_query() Strategic Brain
 │   │                                     #  - retrieve_graph_papers() + Cypher traversal
@@ -537,26 +533,40 @@ GraphRag-Research-Assistant/
 │   └── scripttouploadpaperchunkstable.py # Paper chunks uploader utility
 │
 ├── tests/
+│   ├── conftest.py                       # Top-level test fixtures
 │   ├── test_connectivity.py              # Full database + API connectivity suite
 │   ├── test_embedding.py                 # Embedding pipeline tests
 │   ├── test_kaggle.py
 │   ├── test_wikipedia.py
-│   └── run.py
+│   ├── unit/                             # Pure-logic unit tests (no network)
+│   │   ├── test_audio.py
+│   │   ├── test_cache.py
+│   │   ├── test_credit_system.py
+│   │   ├── test_rate_limiter.py
+│   │   ├── test_text_processing.py
+│   │   └── sources/                      # Per-connector normalisation tests
+│   └── integration/                      # Mocked-HTTP integration tests
+│       ├── test_enrich_s2.py
+│       ├── test_search_core.py
+│       ├── test_search_s2.py
+│       └── test_search_wikipedia.py
 │
 ├── docs/
 │   └── vercel_bundle_size_resolution.md  # Deployment notes
 │
+├── pyproject.toml                        # Project metadata, ruff & pytest config
 ├── requirements.txt                      # Production Python dependencies
 ├── requirements-local.txt                # Local-only (sentence-transformers)
+├── requirements-dev.txt                  # Dev/test dependencies
 ├── vercel.json                           # Vercel routing configuration
-└── .env / .env.local                     # Environment variables (git-ignored)
+└── .env.example / .env.local            # Environment variables template / local config
 ```
 
 ---
 
 ## 📦 Prerequisites
 
-- Python **3.10+**
+- Python **3.11+**
 - **Neo4j Aura** instance loaded with publication graph data
 - **Supabase** project with `match_paper_chunks` and `hybrid_search` RPC functions
 - **MongoDB Atlas** cluster (free tier works)
@@ -574,6 +584,7 @@ GraphRag-Research-Assistant/
 ```bash
 git clone https://github.com/your-username/GraphRag-Research-Assistant.git
 cd GraphRag-Research-Assistant
+
 ```
 
 ### 2. Create a virtual environment
@@ -618,7 +629,6 @@ JWT_SECRET=your-jwt-signing-secret-256-bit
 # -- Supabase ------------------------------------------------------
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-SUPABASE_KEY=your-anon-public-key
 
 # -- Neo4j ---------------------------------------------------------
 NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
@@ -633,9 +643,13 @@ REASON_MODEL=openai/gpt-oss-20b
 HEAVY_MODEL=llama-3.3-70b-versatile
 PLAN_MODEL=openai/gpt-oss-20b
 
-# -- External Sources ----------------------------------------------
+# -- External Sources (optional) -----------------------------------
 ARXIV_MCP_URL=https://your-render-app.onrender.com/sse
 CORE_API_KEY=your-core-api-key
+S2_API_KEY=your-semantic-scholar-api-key
+OPENALEX_EMAIL=your-email@example.com      # raises rate limit to 10 req/s
+KAGGLE_USERNAME=your-kaggle-username
+KAGGLE_KEY=your-kaggle-api-key
 
 # -- Payments (Optional) -------------------------------------------
 RAZORPAY_KEY_ID=rzp_live_xxx
@@ -645,13 +659,23 @@ RAZORPAY_KEY_SECRET=your-razorpay-secret
 UPSTASH_REDIS_REST_URL=https://your-redis.upstash.io
 UPSTASH_REDIS_REST_TOKEN=your-upstash-token
 
+# -- CORS ----------------------------------------------------------
+CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+
 # -- Tuning --------------------------------------------------------
 MAX_GRAPH_NODES=25
 RELEVANCE_FLOOR=0.22
 MMR_LAMBDA=0.6
 CACHE_TTL=300
+CACHE_MAX=512
 FREE_CREDITS_PER_DAY=20
 GROQ_TIMEOUT=30
+EMBED_TIMEOUT=20
+RATE_LIMIT_PER_MIN=30
+REQUEST_TIMEOUT=60
+
+# -- Feature flags -------------------------------------------------
+FREEZE_RETRIEVAL=false   # set true to disable live DB/vector retrieval (offline mode)
 ENV=prod
 PORT=8000
 ```
@@ -663,7 +687,7 @@ PORT=8000
 ### Start locally
 
 ```bash
-python -m app.app
+python -m app._server
 ```
 
 Expected startup log:
