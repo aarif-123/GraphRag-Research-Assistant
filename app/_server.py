@@ -240,6 +240,17 @@ RELEVANCE_FLOOR = float(os.getenv("RELEVANCE_FLOOR", "0.22"))
 MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.6"))  # diversity weight
 CACHE_TTL = int(os.getenv("CACHE_TTL", "300"))  # 5 min
 CACHE_MAX = int(os.getenv("CACHE_MAX", "512"))
+# Maximum file sizes for uploads (bytes). Configurable via env vars.
+# PDF default: 20 MB — well under Vercel's 4.5 MB body limit when base64-encoded JSON
+# is not involved, but safe for self-hosted / Render deployments.
+# Audio default: 24 MB — Groq Whisper hard limit is 25 MB.
+_MB = 1024 * 1024
+MAX_PDF_BYTES = int(os.getenv("MAX_PDF_SIZE_MB", "20")) * _MB
+MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_SIZE_MB", "24")) * _MB
+# MongoDB BSON document limit is 16 MB; cap stored text to 10 MB of characters.
+_MAX_PDF_TEXT_CHARS = 10 * _MB
+# Skip Redis caching for payloads larger than 900 KB (safe margin below 1 MB free-tier limit).
+_REDIS_MAX_PAYLOAD_BYTES = 900 * 1024
 
 _REQUIRED_DEFAULTS = {
     "SUPABASE_URL": "https://dummy.supabase.co",
@@ -2786,7 +2797,20 @@ async def parse_pdf_from_url(url: str) -> Tuple[str, List[str]]:
         r = await client.get(pdf_url)
         if r.status_code != 200:
             raise Exception(f"Failed to download PDF: HTTP {r.status_code}")
+        # Reject oversized remote PDFs before buffering into memory.
+        content_length = int(r.headers.get("content-length", 0))
+        if content_length and content_length > MAX_PDF_BYTES:
+            raise Exception(
+                f"Remote PDF is too large ({content_length // _MB} MB). "
+                f"Maximum allowed is {MAX_PDF_BYTES // _MB} MB."
+            )
         pdf_bytes = r.content
+        # Guard against servers that omit Content-Length (chunked transfer).
+        if len(pdf_bytes) > MAX_PDF_BYTES:
+            raise Exception(
+                f"Remote PDF is too large ({len(pdf_bytes) // _MB} MB). "
+                f"Maximum allowed is {MAX_PDF_BYTES // _MB} MB."
+            )
 
     def _parse():
         if fitz is None:
@@ -2827,15 +2851,69 @@ async def get_or_parse_pdf_safe(url: str, raise_on_error: bool = False) -> Tuple
         return "", []
 
 
-def chunk_document_text(text: str) -> List[str]:
-    """Splits raw document text into semantic chunks using LangChain's text splitter."""
+def chunk_document_text(
+    text: str,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+) -> List[str]:
+    """Split raw document text into overlapping chunks.
+
+    Pure-Python equivalent of LangChain's
+    ``RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)``.
+    Uses the same separator hierarchy (double-newline -> newline -> space ->
+    character) with no third-party dependencies, making it safe on Vercel.
+    """
     if not text:
         return []
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-    # 1000 characters per chunk, with 200 characters overlap
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    return splitter.split_text(text)
+    # Separator hierarchy mirrors LangChain RecursiveCharacterTextSplitter
+    separators = ["\n\n", "\n", " ", ""]
+
+    def _split(t: str, seps: List[str]) -> List[str]:
+        if not t:
+            return []
+        sep = seps[0]
+        next_seps = seps[1:]
+
+        if sep:
+            parts = t.split(sep)
+        else:
+            # Character-level fallback: emit fixed-size slices
+            step = max(chunk_size - chunk_overlap, 1)
+            return [t[i : i + chunk_size] for i in range(0, len(t), step)]
+
+        chunks: List[str] = []
+        current = ""
+        for part in parts:
+            joined = (current + sep + part).lstrip(sep) if current else part
+            if len(joined) <= chunk_size:
+                current = joined
+            else:
+                if current:
+                    chunks.append(current)
+                if len(part) > chunk_size and next_seps:
+                    chunks.extend(_split(part, next_seps))
+                else:
+                    current = part
+        if current:
+            chunks.append(current)
+        return chunks
+
+    raw_chunks = _split(text, separators)
+
+    # Apply overlap window: prefix each chunk with the tail of the previous one.
+    if chunk_overlap <= 0 or len(raw_chunks) <= 1:
+        return [c for c in raw_chunks if c.strip()]
+
+    result: List[str] = [raw_chunks[0]]
+    for chunk in raw_chunks[1:]:
+        prev_tail = result[-1][-chunk_overlap:]
+        candidate = (prev_tail + " " + chunk) if prev_tail else chunk
+        # Guard: never let the overlap push a chunk wildly over budget
+        result.append(candidate if len(candidate) <= int(chunk_size * 1.5) else chunk)
+
+    return [c for c in result if c.strip()]
+
 
 
 async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
@@ -2898,14 +2976,21 @@ async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
         if not chunks:
             return []
 
-        # Save to Upstash Redis (base64 encoded)
+        # Save to Upstash Redis (base64 encoded) — skip if payload exceeds safe limit.
         if upstash_redis:
             try:
                 serialized = json.dumps(chunks).encode("utf-8")
                 compressed = zlib.compress(serialized)
                 b64_str = base64.b64encode(compressed).decode("utf-8")
-                upstash_redis.set(redis_key, b64_str, ex=24 * 3600)  # 24 hour TTL
-                log.info(f"Cached {len(chunks)} chunks for PDF {url} in Upstash Redis.")
+                if len(b64_str) <= _REDIS_MAX_PAYLOAD_BYTES:
+                    upstash_redis.set(redis_key, b64_str, ex=24 * 3600)  # 24 hour TTL
+                    log.info(f"Cached {len(chunks)} chunks for PDF {url} in Upstash Redis.")
+                else:
+                    log.warning(
+                        f"PDF chunk payload too large for Redis "
+                        f"({len(b64_str)} bytes > {_REDIS_MAX_PAYLOAD_BYTES} limit). "
+                        "Using in-memory cache only."
+                    )
             except Exception as e:
                 log.warning(f"Failed to cache PDF chunks in Upstash Redis: {e}")
 
@@ -2921,16 +3006,23 @@ async def get_relevant_pdf_chunks(url: str, query: str) -> List[str]:
             if not embeddings:
                 return []
 
-            # Save generated embeddings to Redis and in-memory cache
+            # Save generated embeddings to Redis and in-memory cache — skip if too large.
             if upstash_redis:
                 try:
                     serialized_emb = json.dumps(embeddings).encode("utf-8")
                     compressed_emb = zlib.compress(serialized_emb)
                     b64_emb_str = base64.b64encode(compressed_emb).decode("utf-8")
-                    upstash_redis.set(redis_emb_key, b64_emb_str, ex=24 * 3600)  # 24 hour TTL
-                    log.info(
-                        f"Cached {len(embeddings)} chunk embeddings for PDF {url} in Upstash Redis."
-                    )
+                    if len(b64_emb_str) <= _REDIS_MAX_PAYLOAD_BYTES:
+                        upstash_redis.set(redis_emb_key, b64_emb_str, ex=24 * 3600)  # 24 hour TTL
+                        log.info(
+                            f"Cached {len(embeddings)} chunk embeddings for PDF {url} in Upstash Redis."
+                        )
+                    else:
+                        log.warning(
+                            f"PDF embedding payload too large for Redis "
+                            f"({len(b64_emb_str)} bytes > {_REDIS_MAX_PAYLOAD_BYTES} limit). "
+                            "Using in-memory cache only."
+                        )
                 except Exception as e:
                     log.warning(f"Failed to cache PDF embeddings in Upstash Redis: {e}")
 
@@ -7299,10 +7391,33 @@ async def upload_pdf(request: Request, file: UploadFile = File(...)):
     if not filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
+    # Reject oversized uploads before reading the body into memory.
+    # This prevents OOM on serverless and avoids silent 413s from the platform.
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_PDF_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"File too large. Maximum allowed size is {MAX_PDF_BYTES // _MB} MB. "
+                f"Received approximately {int(content_length) // _MB} MB."
+            ),
+        )
+
     try:
         content = await file.read()
         if not content:
             raise HTTPException(status_code=400, detail="Empty PDF file.")
+
+        # Secondary guard: reject if actual body exceeds limit (handles chunked transfers
+        # where Content-Length is absent or incorrect).
+        if len(content) > MAX_PDF_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"File too large. Maximum allowed size is {MAX_PDF_BYTES // _MB} MB. "
+                    f"Received {len(content) // _MB} MB."
+                ),
+            )
 
         def _extract():
             if fitz is None:
@@ -7320,6 +7435,16 @@ async def upload_pdf(request: Request, file: UploadFile = File(...)):
         if not extracted_text:
             raise HTTPException(status_code=400, detail="The PDF contains no readable text.")
 
+        # Truncate extracted text to avoid hitting MongoDB's 16 MB per-document limit.
+        # _MAX_PDF_TEXT_CHARS is 10 MB of characters by default.
+        was_truncated = len(extracted_text) > _MAX_PDF_TEXT_CHARS
+        if was_truncated:
+            extracted_text = extracted_text[:_MAX_PDF_TEXT_CHARS]
+            log.warning(
+                f"PDF '{filename}' text truncated to {_MAX_PDF_TEXT_CHARS // _MB} MB "
+                "to stay within MongoDB document limit."
+            )
+
         pdf_id = f"pdf-{uuid.uuid4()}"
 
         # Save to MongoDB
@@ -7329,6 +7454,7 @@ async def upload_pdf(request: Request, file: UploadFile = File(...)):
                 "_id": pdf_id,
                 "name": filename,
                 "text": extracted_text,
+                "truncated": was_truncated,
                 "created_at": datetime.now(timezone.utc),
             },
         )
@@ -7340,6 +7466,7 @@ async def upload_pdf(request: Request, file: UploadFile = File(...)):
             "url": pdf_url,
             "name": filename,
             "text_length": len(extracted_text),
+            "truncated": was_truncated,
         }
     except HTTPException as he:
         raise he
@@ -7412,9 +7539,30 @@ async def transcribe_audio(
     if not GROQ_API_KEY and not GROQ_API_KEYS:
         raise HTTPException(status_code=503, detail="Groq API key not configured on the server.")
 
+    # Pre-check Content-Length before buffering — Groq Whisper hard limit is 25 MB.
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Audio file too large. Maximum allowed size is {MAX_AUDIO_BYTES // _MB} MB "
+                f"(Groq Whisper limit). Received approximately {int(content_length) // _MB} MB."
+            ),
+        )
+
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Empty audio file.")
+
+    # Secondary guard after buffering (handles chunked transfer encoding).
+    if len(content) > MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Audio file too large. Maximum allowed size is {MAX_AUDIO_BYTES // _MB} MB "
+                f"(Groq Whisper limit). Received {len(content) // _MB} MB."
+            ),
+        )
 
     max_attempts = len(GROQ_API_KEYS) if GROQ_API_KEYS else 1
     last_err = None
