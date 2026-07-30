@@ -36,7 +36,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 # CORS Middleware
 app.add_middleware(
@@ -58,8 +58,22 @@ app.include_router(chat_router)
 app.include_router(media_router)
 
 # Serve Frontend Static Files
-_frontend_dir = Path("frontend")
+_frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
+if not _frontend_dir.exists():
+    _frontend_dir = Path("frontend")
+
 if _frontend_dir.exists():
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    @app.get("/favicon.png", include_in_schema=False)
+    async def serve_favicon():
+        fav_ico = _frontend_dir / "favicon.ico"
+        if fav_ico.exists():
+            return FileResponse(fav_ico)
+        fav_png = _frontend_dir / "favicon.png"
+        if fav_png.exists():
+            return FileResponse(fav_png)
+        return Response(status_code=204)
 
     @app.get("/")
     async def serve_root():
@@ -73,6 +87,9 @@ if _frontend_dir.exists():
 
     @app.get("/app")
     async def serve_app_redirect():
+        index_file = _frontend_dir / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
         return RedirectResponse(url="/app/")
 
     app.mount("/app", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend_app")
