@@ -24,6 +24,7 @@ from app.config import (
     CACHE_TTL,
     CREDIT_COSTS,
     FREE_CREDITS_PER_DAY,
+    FREEZE_RETRIEVAL,
     GROQ_TIMEOUT,
     JWT_ALGORITHM,
     JWT_EXPIRY_HOURS,
@@ -371,17 +372,20 @@ class Pool:
             errors.append(f"MongoDB: {e}")
             log.error(f"MongoDB connection failed: {e}")
 
-        try:
-            self.neo4j = GraphDatabase.driver(
-                NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD), notifications_min_severity="OFF"
-            )
-            await asyncio.wait_for(asyncio.to_thread(self.neo4j.verify_connectivity), timeout=10.0)
-            self.neo4j_ok = True
-            log.info("Neo4j connected")
-        except asyncio.TimeoutError:
-            log.warning("Neo4j timed out (degraded mode)")
-        except Exception as e:
-            log.warning(f"Neo4j unavailable (degraded): {e}")
+        if FREEZE_RETRIEVAL:
+            log.info("Database retrieval is frozen. Skipping Neo4j connection initialization.")
+        else:
+            try:
+                self.neo4j = GraphDatabase.driver(
+                    NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD), notifications_min_severity="OFF"
+                )
+                await asyncio.wait_for(asyncio.to_thread(self.neo4j.verify_connectivity), timeout=10.0)
+                self.neo4j_ok = True
+                log.info("Neo4j connected")
+            except asyncio.TimeoutError:
+                log.warning("Neo4j timed out (degraded mode)")
+            except Exception as e:
+                log.warning(f"Neo4j unavailable (degraded): {e}")
 
         self.groq_http = httpx.AsyncClient(
             timeout=httpx.Timeout(GROQ_TIMEOUT, connect=5.0),
