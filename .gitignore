@@ -47,6 +47,8 @@ coverage.xml
 # ──────────────────────────────────────────
 # Logs & Debug outputs
 # ──────────────────────────────────────────
+.logs/
+brain/
 *.log
 app.log
 app/*.log
