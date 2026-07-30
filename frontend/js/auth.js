@@ -197,3 +197,333 @@ export async function startRazorpayCheckout() {
         alert(e.message || "Failed to start checkout process.");
     }
 }
+
+export function initProfileSettings() {
+    // 1. Open/Close Modal Listeners
+    if (els.profileSettingsBtn && els.profileModal) {
+        els.profileSettingsBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const dropdown = document.getElementById('userDropdown');
+            if (dropdown) dropdown.style.display = 'none'; // Close dropdown
+
+            // Load user data
+            await loadProfileData();
+
+            // Open Modal
+            els.profileModal.classList.add('visible');
+            switchTab('details');
+        });
+    }
+
+    if (els.profileModalClose && els.profileModal) {
+        els.profileModalClose.addEventListener('click', () => {
+            els.profileModal.classList.remove('visible');
+        });
+    }
+
+    // Close payment modal
+    if (els.paymentModalClose && els.paymentModal) {
+        els.paymentModalClose.addEventListener('click', () => {
+            els.paymentModal.classList.remove('visible');
+        });
+    }
+
+    // Toggle payment modal from profile modal upgrade button
+    if (els.profileUpgradeBtn && els.paymentModal) {
+        els.profileUpgradeBtn.addEventListener('click', () => {
+            if (els.profileModal) els.profileModal.classList.remove('visible');
+            els.paymentModal.classList.add('visible');
+        });
+    }
+
+    // Toggle payment modal from dropdown upgrade button
+    if (els.upgradeDropdownBtn && els.paymentModal) {
+        els.upgradeDropdownBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const dropdown = document.getElementById('userDropdown');
+            if (dropdown) dropdown.style.display = 'none'; // Close dropdown
+            els.paymentModal.classList.add('visible');
+        });
+    }
+
+    // 2. Tab Switching Listeners
+    if (els.profileTabDetails) {
+        els.profileTabDetails.addEventListener('click', () => switchTab('details'));
+    }
+    if (els.profileTabSecurity) {
+        els.profileTabSecurity.addEventListener('click', () => switchTab('security'));
+    }
+    if (els.profileTabBilling) {
+        els.profileTabBilling.addEventListener('click', () => switchTab('billing'));
+    }
+
+    // 3. Form Submission Listeners
+    if (els.profileForm) {
+        els.profileForm.addEventListener('submit', handleProfileUpdate);
+    }
+    if (els.passwordForm) {
+        els.passwordForm.addEventListener('submit', handlePasswordUpdate);
+    }
+}
+
+// Helper to switch tabs
+function switchTab(tabName) {
+    // Reset alerts
+    if (els.profileError) { els.profileError.style.display = 'none'; els.profileError.textContent = ''; }
+    if (els.profileSuccess) { els.profileSuccess.style.display = 'none'; els.profileSuccess.textContent = ''; }
+
+    // Update active tab button classes
+    const tabs = [els.profileTabDetails, els.profileTabSecurity, els.profileTabBilling];
+    tabs.forEach(t => {
+        if (t) t.classList.remove('active');
+    });
+
+    // Update active content visibility
+    if (els.profileDetailsTabContent) els.profileDetailsTabContent.style.display = 'none';
+    if (els.profileSecurityTabContent) els.profileSecurityTabContent.style.display = 'none';
+    if (els.profileBillingTabContent) els.profileBillingTabContent.style.display = 'none';
+
+    if (tabName === 'details') {
+        if (els.profileTabDetails) els.profileTabDetails.classList.add('active');
+        if (els.profileDetailsTabContent) els.profileDetailsTabContent.style.display = 'flex';
+    } else if (tabName === 'security') {
+        if (els.profileTabSecurity) els.profileTabSecurity.classList.add('active');
+        if (els.profileSecurityTabContent) els.profileSecurityTabContent.style.display = 'block';
+    } else if (tabName === 'billing') {
+        if (els.profileTabBilling) els.profileTabBilling.classList.add('active');
+        if (els.profileBillingTabContent) els.profileBillingTabContent.style.display = 'block';
+        loadBillingData();
+    }
+}
+
+// Load account profile details
+async function loadProfileData() {
+    try {
+        const token = localStorage.getItem('aether_token');
+        if (!token) return;
+
+        const res = await fetch('/api/auth/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error();
+
+        const user = await res.json();
+        const metadata = user.user_metadata || {};
+
+        if (els.profileEmail) els.profileEmail.value = user.email || '';
+        if (els.profileFullName) els.profileFullName.value = metadata.full_name || '';
+        if (els.profileInstitution) els.profileInstitution.value = metadata.institution || '';
+        if (els.profileRole) els.profileRole.value = metadata.role || '';
+
+        // Populate hidden username field for password form
+        const pwdUser = document.getElementById('passwordFormUsername');
+        if (pwdUser) pwdUser.value = user.email || '';
+    } catch (e) {
+        console.error("Failed to load user profile data:", e);
+    }
+}
+
+// Update profile details
+async function handleProfileUpdate(e) {
+    e.preventDefault();
+    if (els.profileError) els.profileError.style.display = 'none';
+    if (els.profileSuccess) els.profileSuccess.style.display = 'none';
+
+    const saveBtn = document.getElementById('saveProfileBtn');
+    const originalText = saveBtn ? saveBtn.textContent : 'Update Profile Details';
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Updating...';
+    }
+
+    try {
+        const token = localStorage.getItem('aether_token');
+        const res = await fetch('/api/auth/profile', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                full_name: els.profileFullName ? els.profileFullName.value.trim() : '',
+                institution: els.profileInstitution ? els.profileInstitution.value.trim() : '',
+                role: els.profileRole ? els.profileRole.value : ''
+            })
+        });
+
+        if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || "Failed to update profile details");
+        }
+
+        const data = await res.json();
+        // Update user header / top UI
+        updateUserUI(data);
+
+        if (els.profileSuccess) {
+            els.profileSuccess.textContent = "Profile details updated successfully!";
+            els.profileSuccess.style.display = 'block';
+        }
+    } catch (err) {
+        if (els.profileError) {
+            els.profileError.textContent = err.message || "An unexpected error occurred.";
+            els.profileError.style.display = 'block';
+        }
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = originalText;
+        }
+    }
+}
+
+// Update password
+async function handlePasswordUpdate(e) {
+    e.preventDefault();
+    if (els.profileError) els.profileError.style.display = 'none';
+    if (els.profileSuccess) els.profileSuccess.style.display = 'none';
+
+    const newPwd = els.profilePassword ? els.profilePassword.value : '';
+    const confirmPwd = els.profileConfirmPassword ? els.profileConfirmPassword.value : '';
+
+    if (newPwd.length < 6) {
+        if (els.profileError) {
+            els.profileError.textContent = "Password must be at least 6 characters long.";
+            els.profileError.style.display = 'block';
+        }
+        return;
+    }
+
+    if (newPwd !== confirmPwd) {
+        if (els.profileError) {
+            els.profileError.textContent = "Passwords do not match.";
+            els.profileError.style.display = 'block';
+        }
+        return;
+    }
+
+    const saveBtn = document.getElementById('savePasswordBtn');
+    const originalText = saveBtn ? saveBtn.textContent : 'Update Password';
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Updating...';
+    }
+
+    try {
+        const token = localStorage.getItem('aether_token');
+        const res = await fetch('/api/auth/password', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                password: newPwd
+            })
+        });
+
+        if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || "Failed to update password");
+        }
+
+        if (els.profilePassword) els.profilePassword.value = '';
+        if (els.profileConfirmPassword) els.profileConfirmPassword.value = '';
+
+        if (els.profileSuccess) {
+            els.profileSuccess.textContent = "Password updated successfully!";
+            els.profileSuccess.style.display = 'block';
+        }
+    } catch (err) {
+        if (els.profileError) {
+            els.profileError.textContent = err.message || "An unexpected error occurred.";
+            els.profileError.style.display = 'block';
+        }
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = originalText;
+        }
+    }
+}
+
+// Load billing & subscription data
+async function loadBillingData() {
+    try {
+        const token = localStorage.getItem('aether_token');
+        const res = await fetch(`${API_BASE}/api/credits`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error();
+        const credits = await res.json();
+
+        if (els.profilePlanName) {
+            els.profilePlanName.textContent = credits.plan === 'pro' || credits.is_unlimited ? 'Pro Plan' : 'Free Trial';
+        }
+
+        if (credits.plan === 'pro' || credits.is_unlimited) {
+            if (els.profilePlanCredits) els.profilePlanCredits.style.display = 'none';
+            if (els.profileUpgradeBtn) els.profileUpgradeBtn.style.display = 'none';
+            if (els.profileProBadge) els.profileProBadge.style.display = 'inline-block';
+        } else {
+            const remaining = credits.credits_remaining ?? 0;
+            const limit = credits.credits_limit ?? 20;
+            if (els.profilePlanCredits) {
+                els.profilePlanCredits.textContent = `${remaining} / ${limit} credits remaining`;
+                els.profilePlanCredits.style.display = 'block';
+            }
+            if (els.profileUpgradeBtn) els.profileUpgradeBtn.style.display = 'inline-block';
+            if (els.profileProBadge) els.profileProBadge.style.display = 'none';
+        }
+    } catch (e) {
+        console.error("Failed to load billing summary:", e);
+    }
+
+    // Load payment/billing history list
+    await loadPaymentHistory();
+}
+
+// Fetch billing history from razorpay
+async function loadPaymentHistory() {
+    const list = els.billingHistoryList;
+    if (!list) return;
+
+    try {
+        const token = localStorage.getItem('aether_token');
+        const res = await fetch('/api/razorpay/payments', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+
+        list.innerHTML = '';
+        if (data.length === 0) {
+            list.innerHTML = `<div style="font-size: 13px; color: var(--text-secondary); text-align: center; padding: 12px 0;">No billing history found.</div>`;
+            return;
+        }
+
+        data.forEach(item => {
+            const dateStr = new Date(item.created_at).toLocaleDateString(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+            const amtStr = (item.amount / 100).toFixed(2);
+            const row = document.createElement('div');
+            row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: rgba(255,255,255,0.02); border-radius: var(--radius-sm); border: 1px solid var(--surface-glass-border); font-size: 13px; gap: 12px;';
+            row.innerHTML = `
+                <div style="flex: 1; min-width: 0;">
+                    <div style="font-weight: 500; color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${item.plan === 'pro' ? 'Pro Plan Upgrade' : 'Credit Topup'}</div>
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${dateStr} • Ref: ${item.razorpay_payment_id || 'N/A'}</div>
+                </div>
+                <div style="text-align: right; flex-shrink: 0;">
+                    <div style="font-weight: 600; color: var(--primary-light);">${item.currency === 'INR' ? '₹' : '$'}${amtStr}</div>
+                    <div style="font-size: 10px; text-transform: uppercase; color: var(--accent-emerald); font-weight: 600; margin-top: 2px;">${item.status || 'success'}</div>
+                </div>
+            `;
+            list.appendChild(row);
+        });
+    } catch (e) {
+        list.innerHTML = `<div style="font-size: 13px; color: #ef4444; text-align: center; padding: 12px 0;">Failed to load billing history.</div>`;
+    }
+}

@@ -12,7 +12,7 @@ import {
     loadSettingsFromLocalStorage, saveSettingsToLocalStorage, resetSettingsToDefaults, syncStudyGuardrails
 } from './js/settings.js';
 import { checkHealth, showHealthModal } from './js/health.js';
-import { initAuth, startRazorpayCheckout } from './js/auth.js';
+import { initAuth, startRazorpayCheckout, initProfileSettings } from './js/auth.js';
 import { loadHistory, renderHistory, startNewChat } from './js/history.js';
 import {
     toggleSourcesPanel, openSourcesPanel, setSourcesPanelOpen, switchSourceTab,
@@ -59,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
     checkHealth();
     setInterval(checkHealth, 30000);
     initAuth();
+    initProfileSettings();
     renderAttachmentTray();
     if (els.queryInput) els.queryInput.focus();
 });
