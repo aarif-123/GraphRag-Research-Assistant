@@ -36,12 +36,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from fastapi.responses import FileResponse, RedirectResponse
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_methods=["*"],
+    allow_headers=["*"],
     allow_credentials=False,
 )
 
@@ -55,11 +57,27 @@ app.include_router(research_router)
 app.include_router(chat_router)
 app.include_router(media_router)
 
-# Mount Frontend Static Files if directory exists
+# Serve Frontend Static Files
 _frontend_dir = Path("frontend")
 if _frontend_dir.exists():
-    app.mount("/app", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend")
-    log.info(f"Frontend mounted at /app → {_frontend_dir}")
+
+    @app.get("/")
+    async def serve_root():
+        landing_file = _frontend_dir / "landing.html"
+        if landing_file.exists():
+            return FileResponse(landing_file)
+        index_file = _frontend_dir / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        return RedirectResponse(url="/app/")
+
+    @app.get("/app")
+    async def serve_app_redirect():
+        return RedirectResponse(url="/app/")
+
+    app.mount("/app", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend_app")
+    app.mount("/", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend_root")
+    log.info(f"Frontend mounted at / and /app → {_frontend_dir}")
 
 if __name__ == "__main__":
     import os

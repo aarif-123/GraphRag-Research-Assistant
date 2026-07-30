@@ -169,6 +169,7 @@ async def get_pdf_text(pdf_id: str, request: Request):
 
 
 @router.post("/audio/transcribe")
+@router.post("/voice/transcribe")
 async def transcribe_audio(
     request: Request,
     file: UploadFile = File(...),
