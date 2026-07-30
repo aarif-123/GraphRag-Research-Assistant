@@ -823,19 +823,38 @@ export async function startSpeechToText() {
                 state.audioStream.getTracks().forEach(track => track.stop());
             }
 
-            if (els.voiceRecordingOverlay) els.voiceRecordingOverlay.classList.remove('visible');
-            if (els.composerMain) els.composerMain.classList.remove('recording');
-            if (els.micBtn) els.micBtn.classList.remove('active');
-
             if (state.discardRecording) {
+                if (els.voiceRecordingOverlay) {
+                    els.voiceRecordingOverlay.classList.remove('visible');
+                    els.voiceRecordingOverlay.classList.remove('transcribing');
+                }
+                if (els.composerMain) els.composerMain.classList.remove('recording');
+                if (els.micBtn) els.micBtn.classList.remove('active');
                 state.audioRecording = false;
                 return;
+            }
+
+            // Enter transcribing state
+            if (els.voiceRecordingOverlay) {
+                els.voiceRecordingOverlay.classList.add('transcribing');
+                if (els.voicePreviewText) {
+                    els.voicePreviewText.textContent = "Transcribing voice input...";
+                }
             }
 
             const audioBlob = new Blob(state.audioChunks, { type: 'audio/webm' });
             state.audioRecording = false;
 
-            if (audioBlob.size === 0) return;
+            if (audioBlob.size === 0) {
+                // Exit transcribing state and hide
+                if (els.voiceRecordingOverlay) {
+                    els.voiceRecordingOverlay.classList.remove('visible');
+                    els.voiceRecordingOverlay.classList.remove('transcribing');
+                }
+                if (els.composerMain) els.composerMain.classList.remove('recording');
+                if (els.micBtn) els.micBtn.classList.remove('active');
+                return;
+            }
 
             const formData = new FormData();
             formData.append('file', audioBlob, 'speech.webm');
@@ -860,6 +879,16 @@ export async function startSpeechToText() {
             } catch (e) {
                 console.error("Transcription failed:", e);
             } finally {
+                // Exit transcribing state and hide overlay
+                if (els.voiceRecordingOverlay) {
+                    els.voiceRecordingOverlay.classList.remove('visible');
+                    els.voiceRecordingOverlay.classList.remove('transcribing');
+                    if (els.voicePreviewText) {
+                        els.voicePreviewText.textContent = "Listening...";
+                    }
+                }
+                if (els.composerMain) els.composerMain.classList.remove('recording');
+                if (els.micBtn) els.micBtn.classList.remove('active');
                 updateQueryInputPlaceholder();
             }
         };
@@ -887,6 +916,20 @@ export function stopSpeechToText(discard = false) {
 }
 
 function initVoiceWaveVisualizer(stream) {
+    const waveContainer = els.voiceWaveContainer;
+    if (!waveContainer) return;
+
+    waveContainer.innerHTML = '';
+    const numBars = 16;
+    const bars = [];
+    for (let i = 0; i < numBars; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'voice-wave-bar';
+        bar.style.setProperty('--i', i);
+        waveContainer.appendChild(bar);
+        bars.push(bar);
+    }
+
     try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         const audioCtx = new AudioContext();
@@ -899,25 +942,7 @@ function initVoiceWaveVisualizer(stream) {
         source.connect(analyser);
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        const waveContainer = els.voiceWaveContainer;
-        if (!waveContainer) return;
-
-        waveContainer.innerHTML = '';
-        const numBars = 16;
-        const bars = [];
-        for (let i = 0; i < numBars; i++) {
-            const bar = document.createElement('div');
-            bar.className = 'voice-bar';
-            bar.style.cssText = `
-                width: 4px;
-                height: 6px;
-                background: var(--primary-light);
-                border-radius: 4px;
-                transition: height 0.05s ease;
-            `;
-            waveContainer.appendChild(bar);
-            bars.push(bar);
-        }
+        waveContainer.classList.remove('fallback-animated');
 
         const updateWave = () => {
             if (!state.audioRecording) return;
@@ -935,6 +960,8 @@ function initVoiceWaveVisualizer(stream) {
 
     } catch (e) {
         console.error("Wave visualizer init failed:", e);
+        // Fallback CSS animation
+        waveContainer.classList.add('fallback-animated');
     }
 }
 

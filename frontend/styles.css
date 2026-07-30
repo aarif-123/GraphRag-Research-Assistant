@@ -3420,6 +3420,10 @@ textarea {
     animation: voice-overlay-fade-in 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.voice-recording-overlay.visible {
+    display: flex !important;
+}
+
 @keyframes voice-overlay-fade-in {
     from {
         opacity: 0;
