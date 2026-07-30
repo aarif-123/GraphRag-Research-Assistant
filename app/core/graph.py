@@ -1,11 +1,12 @@
 import asyncio
 import math
 from typing import Any, Dict, List, Optional, Tuple
+
 from neo4j import exceptions as neo4j_exceptions
 
+from app.clients.pool import cache_key, get_cache, pool, set_cache
 from app.config import FREEZE_RETRIEVAL, MAX_GRAPH_NODES, log
 from app.core.exceptions import GraphRetrievalError
-from app.clients.pool import pool, cache_key, get_cache, set_cache
 
 
 def rank_papers(papers: List[Dict], anchors: List[str]) -> List[Dict]:
@@ -183,6 +184,7 @@ async def retrieve_graph_papers(
     """
 
     try:
+
         def _fetch():
             with pool.neo4j.session() as session:
                 s_rows = [dict(r) for r in session.run(seed_cypher, params)]
@@ -211,6 +213,7 @@ async def retrieve_graph_papers(
         top_ids = [r["research_id"] for r in result if r.get("research_id")]
         if top_ids:
             try:
+
                 def _fetch_links():
                     cypher = """
                     MATCH (p1:Publication)-[:CITES]->(p2:Publication)
@@ -290,6 +293,7 @@ async def get_paper_full(paper_id_or_title: str) -> Optional[Dict]:
            COUNT {{ ()-[:CITES]->(p) }}        AS citation_count
     """
     try:
+
         def _run():
             with pool.neo4j.session() as session:
                 rows = list(session.run(cypher, {"id": paper_id_or_title}))
@@ -333,6 +337,7 @@ async def get_author_network(author_name: str) -> Dict:
            count(DISTINCT p)                AS paper_count
     """
     try:
+
         def _run():
             with pool.neo4j.session() as session:
                 rows = list(session.run(cypher, {"name": author_name}))
@@ -371,6 +376,7 @@ async def get_citation_path(from_title: str, to_title: str, max_depth: int = 4) 
     """.replace("{max_depth}", str(max_depth))
 
     try:
+
         def _run():
             with pool.neo4j.session() as session:
                 rows = list(session.run(cypher, {"from_title": from_title, "to_title": to_title}))
@@ -413,6 +419,7 @@ async def get_trending_papers(limit: int = 10) -> List[Dict]:
     ORDER BY recent_citations DESC
     """
     try:
+
         def _run():
             with pool.neo4j.session() as session:
                 return [dict(r) for r in session.run(cypher, {"limit": limit})]
@@ -446,6 +453,7 @@ async def get_graph_stats() -> Dict:
     RETURN papers, authors, venues, citations
     """
     try:
+
         def _run():
             with pool.neo4j.session() as session:
                 rows = list(session.run(cypher))
@@ -482,6 +490,7 @@ async def get_co_citation_cluster(paper_ids: List[str], limit: int = 10) -> List
            co_citation_count
     """
     try:
+
         def _run():
             with pool.neo4j.session() as session:
                 return [dict(r) for r in session.run(cypher, {"ids": paper_ids, "limit": limit})]

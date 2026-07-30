@@ -1,10 +1,10 @@
 import asyncio
-import re
 import base64
 import hashlib
 import json
+import re
 import zlib
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple
 
 import httpx
 import numpy as np
@@ -15,9 +15,16 @@ try:
 except ImportError:
     fitz = None
 
-from app.config import MAX_PDF_BYTES, _MB, _REDIS_MAX_PAYLOAD_BYTES, log
-from app.clients.pool import pool, cache_key, get_cache, set_cache, upstash_redis, local_chunks_cache, local_embeddings_cache
 from app.clients.groq import create_embedding, create_embeddings_batch
+from app.clients.pool import (
+    cache_key,
+    get_cache,
+    local_chunks_cache,
+    local_embeddings_cache,
+    set_cache,
+    upstash_redis,
+)
+from app.config import _MB, _REDIS_MAX_PAYLOAD_BYTES, MAX_PDF_BYTES, log
 
 
 def extract_paper_urls(text: str) -> List[str]:
@@ -74,6 +81,7 @@ async def parse_pdf_from_url(url: str) -> Tuple[str, List[str]]:
     if "/api/pdf/" in url:
         try:
             import app.clients.pool as pool_mod
+
             pdf_id = url.split("/api/pdf/")[-1].replace(".pdf", "")
             doc = await asyncio.to_thread(pool_mod.db.uploaded_pdfs.find_one, {"_id": pdf_id})
             if doc:
@@ -388,10 +396,19 @@ def is_whisper_hallucination(text: str) -> bool:
 
     # Check subtitle/caption artifact patterns
     lower = text.lower().strip()
-    if any(pat in lower for pat in [
-        "subtitles by", "captioned by", "amara.org", "thanks for watching",
-        "please subscribe", "like and subscribe", "thank you for watching",
-        "copyright", "all rights reserved"
-    ]):
+    if any(
+        pat in lower
+        for pat in [
+            "subtitles by",
+            "captioned by",
+            "amara.org",
+            "thanks for watching",
+            "please subscribe",
+            "like and subscribe",
+            "thank you for watching",
+            "copyright",
+            "all rights reserved",
+        ]
+    ):
         return True
     return False

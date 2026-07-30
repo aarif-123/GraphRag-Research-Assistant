@@ -4,8 +4,7 @@ Provides wrappers for Groq chat model calls, key rotation, and BGE embedding gen
 """
 
 import asyncio
-import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 
 import httpx
 import numpy as np
@@ -15,17 +14,17 @@ try:
 except ImportError:
     SentenceTransformer = None
 
+from app.clients.pool import cache_key, get_cache, pool, set_cache
 from app.config import (
-    GROQ_API_KEY,
-    GROQ_API_KEYS,
     EMBED_MODEL,
     EMBED_TIMEOUT,
     FREEZE_RETRIEVAL,
+    GROQ_API_KEY,
+    GROQ_API_KEYS,
     HF_TOKEN,
     log,
 )
 from app.core.exceptions import EmbeddingError, LLMError
-from app.clients.pool import cache_key, get_cache, set_cache, pool
 
 # ================================================================
 # LOCAL EMBEDDING MODEL INITIALIZATION

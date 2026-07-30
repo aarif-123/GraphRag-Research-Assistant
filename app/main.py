@@ -9,15 +9,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.config import ALLOWED_ORIGINS, log
 from app.clients.pool import pool
-
-from app.routes.health import router as health_router
-from app.routes.auth import router as auth_router, router_payments, router_history
-from app.routes.graph import router as graph_router
-from app.routes.research import router as research_router
+from app.config import ALLOWED_ORIGINS, log
+from app.routes.auth import router as auth_router
+from app.routes.auth import router_history, router_payments
 from app.routes.chat import router as chat_router
+from app.routes.graph import router as graph_router
+from app.routes.health import router as health_router
 from app.routes.media import router as media_router
+from app.routes.research import router as research_router
 
 
 @asynccontextmanager
@@ -63,6 +63,7 @@ if _frontend_dir.exists():
 
 if __name__ == "__main__":
     import os
+
     import uvicorn
 
     uvicorn.run(

@@ -2,14 +2,14 @@ import asyncio
 import os
 import urllib.parse
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import httpx
 import numpy as np
 
+from app.clients.pool import cache_key, get_cache, get_supabase_client, pool, set_cache
 from app.config import FREEZE_RETRIEVAL, MMR_LAMBDA, RELEVANCE_FLOOR, log
 from app.core.exceptions import VectorSearchError
-from app.clients.pool import pool, get_supabase_client, cache_key, get_cache, set_cache
 
 SIMILARITY_KEYS = ("similarity", "score", "relevance", "_score", "sim")
 
@@ -27,6 +27,7 @@ async def vector_search(
     if not pool.supabase:
         raise VectorSearchError("Supabase not connected")
     try:
+
         def _rpc():
             return (
                 get_supabase_client()
@@ -61,6 +62,7 @@ async def hybrid_search(
     if not pool.supabase:
         raise VectorSearchError("Supabase not connected")
     try:
+
         def _rpc():
             return (
                 get_supabase_client()
@@ -617,9 +619,7 @@ async def run_vector_pipeline(
 ) -> List[Dict]:
     """Runs full vector search pipeline: vector search -> filter relevance -> merge adjacent -> MMR rerank."""
     try:
-        raw_chunks = await vector_search(
-            embedding, min_similarity, top_k * 2, filter_ids
-        )
+        raw_chunks = await vector_search(embedding, min_similarity, top_k * 2, filter_ids)
     except VectorSearchError:
         return []
 

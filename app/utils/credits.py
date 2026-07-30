@@ -5,6 +5,7 @@ rate limiting, and credit snapshot helpers.
 
 import asyncio
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from fastapi import HTTPException, Request
@@ -16,8 +17,6 @@ from app.config import (
     log,
 )
 from app.utils.auth import decode_access_token
-
-from datetime import datetime, timedelta, timezone
 
 # ──────────────────────────────────────────────────────────────────────────────
 # RATE LIMITER
@@ -49,6 +48,7 @@ async def check_rate_limit(client_ip: str) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 # PLAN / CREDIT SYSTEM
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 async def get_user_plan(request: Request) -> Dict[str, Any]:
     """Return {plan, credits_used, credits_reset_at} for the authenticated user.

@@ -3,7 +3,6 @@ utils/conversation.py — Conversation history management, context compression,
 and message compilation for the chat endpoint.
 """
 
-import json
 from typing import Dict, List
 
 from app.config import PLAN_MODEL, log
@@ -13,6 +12,7 @@ from app.models.chat import ChatMessage
 def compress_rag_prompt(content: str) -> str:
     """Remove excessive whitespace and boilerplate from a prompt to reduce token usage."""
     import re
+
     # Collapse multiple blank lines
     content = re.sub(r"\n{3,}", "\n\n", content)
     # Strip trailing spaces
@@ -46,7 +46,7 @@ def truncate_messages(messages: List[Dict], max_total_chars: int = 120_000) -> L
 
 def build_conversation_context(messages: List[ChatMessage], n: int = 3) -> str:
     """Build a compact text summary of the last n turns for the planner prompt."""
-    recent = [m for m in messages[-n * 2:] if m.role in ("user", "assistant")]
+    recent = [m for m in messages[-n * 2 :] if m.role in ("user", "assistant")]
     return "\n".join(f"{m.role.upper()}: {m.content[:300]}" for m in recent) or "None"
 
 
@@ -84,9 +84,7 @@ async def summarize_conversation(messages: List[Dict]) -> str:
         return "\n".join(f"{m['role'].upper()}: {m['content'][:150]}..." for m in messages[:3])
 
 
-async def compile_chat_messages(
-    system_prompt: str, chat_messages: List[ChatMessage]
-) -> List[Dict]:
+async def compile_chat_messages(system_prompt: str, chat_messages: List[ChatMessage]) -> List[Dict]:
     """Apply sliding-window context engineering + conversation summarisation.
 
     Keeps the system prompt and last 2 messages in full, and summarises

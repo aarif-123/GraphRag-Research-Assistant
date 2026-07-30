@@ -7,56 +7,32 @@ routes/research.py — Full research execution endpoints:
 """
 
 import asyncio
-import json
-import logging
 import os
+import re
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.clients.groq import create_embedding, groq_chat
+from app.clients.pool import cache_key, get_cache, pool, set_cache
 from app.config import (
-    CREDIT_COSTS,
     FREE_CREDITS_PER_DAY,
     FREE_TOP_K_MAX,
     HEAVY_MODEL,
     REASON_MODEL,
+    RELEVANCE_FLOOR,
     REQUEST_TIMEOUT,
     log,
 )
-from app.clients.pool import pool, cache_key, get_cache, set_cache
-from app.clients.groq import create_embedding, groq_chat
-from app.core.exceptions import EmbeddingError, GraphRetrievalError, LLMError, PlanError
-from app.models.research import (
-    BulkRequest,
-    CompareRequest,
-    ResearchRequest,
-    SurveyRequest,
-    TimelineRequest,
-)
-from app.core.planner import (
-    check_requirements_covered,
-    plan_query,
-    read_primary_source_passages,
-)
-from app.core.graph import (
-    build_relationship_context,
-    retrieve_graph_papers,
-)
-from app.core.retrieval import (
-    filter_relevant_chunks,
-    format_arxiv_context,
-    format_pwc_context,
-    format_s2_context,
-    merge_adjacent_chunks,
-    mmr_rerank,
-    pack_context_within_budget,
-    retrieve_arxiv_context,
-    run_vector_pipeline,
-    vector_search,
-)
 from app.core.document import get_or_parse_pdf_safe, get_relevant_pdf_chunks
+from app.core.exceptions import (
+    EmbeddingError,
+    GraphRetrievalError,
+    LLMError,
+    VectorSearchError,
+)
 from app.core.generation import (
     apply_verification,
     compare_prompt,
@@ -66,7 +42,27 @@ from app.core.generation import (
     grounded_prompt,
     survey_prompt,
     timeline_prompt,
-    verify_answer,
+)
+from app.core.graph import (
+    get_co_citation_cluster,
+    retrieve_graph_papers,
+)
+from app.core.planner import (
+    check_requirements_covered,
+    plan_query,
+    read_primary_source_passages,
+)
+from app.core.retrieval import (
+    merge_adjacent_chunks,
+    pack_context_within_budget,
+    retrieve_arxiv_context,
+    run_vector_pipeline,
+)
+from app.models.research import (
+    BulkRequest,
+    ResearchRequest,
+    SurveyRequest,
+    TimelineRequest,
 )
 from app.utils.auth import set_user_context
 from app.utils.credits import (
@@ -80,7 +76,6 @@ from app.utils.misc import (
     clean_and_resolve_links,
     extract_paper_urls,
     is_simple_link_paste,
-    mask_credentials_and_secrets,
     retrieve_datasets_and_repos,
 )
 
@@ -92,21 +87,41 @@ try:
     from app.sources.papers_with_code import enrich_arxiv_papers_with_pwc
     from app.sources.semantic_scholar import enrich_arxiv_papers_with_s2, search_papers_s2
     from app.sources.wikipedia import enrich_datasets_with_wikipedia, search_wikipedia_summary
+
     _SOURCES_AVAILABLE = True
 except ImportError as _src_err:
     _SOURCES_AVAILABLE = False
     log.warning(f"External sources unavailable in routes/research: {_src_err}")
 
-    async def enrich_arxiv_papers_with_s2(papers, **kw): return papers
-    async def search_papers_s2(query, **kw): return []
-    async def enrich_arxiv_papers_with_pwc(papers, **kw): return papers
-    async def search_wikipedia_summary(query, **kw): return None
-    async def enrich_datasets_with_wikipedia(datasets, **kw): return datasets
-    async def search_kaggle_dataset(query, **kw): return None
-    async def enrich_datasets_with_kaggle(datasets, **kw): return datasets
-    async def search_core_papers(query, **kw): return []
-    async def search_openalex(query, **kw): return None
-    async def enrich_arxiv_papers_with_openalex(papers, **kw): return papers
+    async def enrich_arxiv_papers_with_s2(papers, **kw):
+        return papers
+
+    async def search_papers_s2(query, **kw):
+        return []
+
+    async def enrich_arxiv_papers_with_pwc(papers, **kw):
+        return papers
+
+    async def search_wikipedia_summary(query, **kw):
+        return None
+
+    async def enrich_datasets_with_wikipedia(datasets, **kw):
+        return datasets
+
+    async def search_kaggle_dataset(query, **kw):
+        return None
+
+    async def enrich_datasets_with_kaggle(datasets, **kw):
+        return datasets
+
+    async def search_core_papers(query, **kw):
+        return []
+
+    async def search_openalex(query, **kw):
+        return None
+
+    async def enrich_arxiv_papers_with_openalex(papers, **kw):
+        return papers
 
 
 router = APIRouter()
@@ -138,6 +153,7 @@ def _direct_response(rid: str, answer: str, route: str, papers: List[Dict], t0: 
         "model_used": "direct-backend",
         "warning": None,
     }
+
 
 @router.post("/api/research")
 async def research(req: ResearchRequest, request: Request):
@@ -594,7 +610,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
                         continue
                     seen_ids.add(dedup_key)
                     if i < n_entity:
-                        tier_results.append(paper)   # entity tier — high priority
+                        tier_results.append(paper)  # entity tier — high priority
                     else:
                         discovery_results.append(paper)
 
@@ -869,7 +885,8 @@ async def _research_impl(req: ResearchRequest, request: Request):
         }
         candidate_papers = (arxiv_papers or []) + (s2_papers or [])
         primary_papers = [
-            p for p in candidate_papers
+            p
+            for p in candidate_papers
             if any(name in (p.get("title") or "").lower() for name in primary_entity_names)
         ][:3]  # cap at 3 to avoid excessive latency
 
@@ -934,7 +951,9 @@ async def _research_impl(req: ResearchRequest, request: Request):
             reqs_notice = "\n\n---\n> [!WARNING]\n> **Evidence gap** — the retrieved sources did not contain sufficient information to fully address:\n"
             for r in missing_reqs:
                 reqs_notice += f"> - {r}\n"
-            reqs_notice += ">\n> Consider uploading the primary paper PDF or asking a more targeted follow-up."
+            reqs_notice += (
+                ">\n> Consider uploading the primary paper PDF or asking a more targeted follow-up."
+            )
             answer += reqs_notice
 
     verification = None
@@ -999,7 +1018,6 @@ async def _research_impl(req: ResearchRequest, request: Request):
 
 
 @router.post("/api/research/timeline")
-
 async def research_timeline(req: TimelineRequest, request: Request):
     """Chronological evolution of a research topic. [3 credits for Free, unlimited for Pro]"""
     rid = str(uuid.uuid4())
@@ -1173,4 +1191,3 @@ async def bulk_research(req: BulkRequest, request: Request):
 
     results = await asyncio.gather(*[single(q) for q in req.queries])
     return {"results": results}
-

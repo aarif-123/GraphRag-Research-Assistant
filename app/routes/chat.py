@@ -5,14 +5,15 @@ routes/chat.py — Full chat execution endpoints:
 """
 
 import asyncio
-import logging
 import os
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.clients.groq import create_embedding, groq_chat
+from app.clients.pool import pool
 from app.config import (
     CREDIT_COSTS,
     FREE_CREDITS_PER_DAY,
@@ -22,30 +23,8 @@ from app.config import (
     REQUEST_TIMEOUT,
     log,
 )
-from app.clients.pool import pool, cache_key, get_cache, set_cache
-from app.clients.groq import create_embedding, groq_chat
-from app.core.exceptions import EmbeddingError, GraphRetrievalError, LLMError, PlanError
-from app.models.chat import ChatCompletionRequest, ChatMessage, ConversationRequest
-from app.core.planner import (
-    plan_query,
-)
-from app.core.graph import (
-    build_relationship_context,
-    retrieve_graph_papers,
-)
-from app.core.retrieval import (
-    filter_relevant_chunks,
-    format_arxiv_context,
-    format_pwc_context,
-    format_s2_context,
-    merge_adjacent_chunks,
-    mmr_rerank,
-    pack_context_within_budget,
-    retrieve_arxiv_context,
-    run_vector_pipeline,
-    vector_search,
-)
 from app.core.document import get_or_parse_pdf_safe, get_relevant_pdf_chunks
+from app.core.exceptions import EmbeddingError, GraphRetrievalError, LLMError, VectorSearchError
 from app.core.generation import (
     apply_verification,
     compare_prompt,
@@ -55,9 +34,25 @@ from app.core.generation import (
     grounded_prompt,
     survey_prompt,
     timeline_prompt,
-    verify_answer,
 )
+from app.core.graph import (
+    retrieve_graph_papers,
+)
+from app.core.planner import (
+    plan_query,
+)
+from app.core.retrieval import (
+    merge_adjacent_chunks,
+    pack_context_within_budget,
+    retrieve_arxiv_context,
+    run_vector_pipeline,
+)
+from app.models.chat import ChatCompletionRequest, ConversationRequest
 from app.utils.auth import set_user_context
+from app.utils.conversation import (
+    build_conversation_context,
+    compile_chat_messages,
+)
 from app.utils.credits import (
     append_credits_snapshot,
     check_and_deduct_credit,
@@ -65,15 +60,10 @@ from app.utils.credits import (
     get_user_plan,
     require_pro,
 )
-from app.utils.conversation import (
-    build_conversation_context,
-    compile_chat_messages,
-)
 from app.utils.misc import (
     clean_and_resolve_links,
     extract_paper_urls,
     is_simple_link_paste,
-    mask_credentials_and_secrets,
     retrieve_datasets_and_repos,
 )
 
@@ -85,21 +75,41 @@ try:
     from app.sources.papers_with_code import enrich_arxiv_papers_with_pwc
     from app.sources.semantic_scholar import enrich_arxiv_papers_with_s2, search_papers_s2
     from app.sources.wikipedia import enrich_datasets_with_wikipedia, search_wikipedia_summary
+
     _SOURCES_AVAILABLE = True
 except ImportError as _src_err:
     _SOURCES_AVAILABLE = False
     log.warning(f"External sources unavailable in routes/chat: {_src_err}")
 
-    async def enrich_arxiv_papers_with_s2(papers, **kw): return papers
-    async def search_papers_s2(query, **kw): return []
-    async def enrich_arxiv_papers_with_pwc(papers, **kw): return papers
-    async def search_wikipedia_summary(query, **kw): return None
-    async def enrich_datasets_with_wikipedia(datasets, **kw): return datasets
-    async def search_kaggle_dataset(query, **kw): return None
-    async def enrich_datasets_with_kaggle(datasets, **kw): return datasets
-    async def search_core_papers(query, **kw): return []
-    async def search_openalex(query, **kw): return None
-    async def enrich_arxiv_papers_with_openalex(papers, **kw): return papers
+    async def enrich_arxiv_papers_with_s2(papers, **kw):
+        return papers
+
+    async def search_papers_s2(query, **kw):
+        return []
+
+    async def enrich_arxiv_papers_with_pwc(papers, **kw):
+        return papers
+
+    async def search_wikipedia_summary(query, **kw):
+        return None
+
+    async def enrich_datasets_with_wikipedia(datasets, **kw):
+        return datasets
+
+    async def search_kaggle_dataset(query, **kw):
+        return None
+
+    async def enrich_datasets_with_kaggle(datasets, **kw):
+        return datasets
+
+    async def search_core_papers(query, **kw):
+        return []
+
+    async def search_openalex(query, **kw):
+        return None
+
+    async def enrich_arxiv_papers_with_openalex(papers, **kw):
+        return papers
 
 
 router = APIRouter()
@@ -131,6 +141,7 @@ def _direct_response(rid: str, answer: str, route: str, papers: List[Dict], t0: 
         "model_used": "direct-backend",
         "warning": None,
     }
+
 
 @router.post("/api/chat")
 async def chat_with_context(req: ConversationRequest, request: Request):
@@ -552,7 +563,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             )
             sys_p += f"\n\n{pdf_context}"
             msgs = await compile_chat_messages(sys_p, req.messages)
-            answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature, max_tokens=200)
+            answer = await groq_chat(
+                msgs, REASON_MODEL, temperature=req.temperature, max_tokens=200
+            )
         else:
             sys_p = (
                 "You are Aether, a research assistant purpose-built for scientific and academic queries.\n"

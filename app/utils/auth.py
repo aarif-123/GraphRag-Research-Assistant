@@ -8,16 +8,17 @@ from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request
 
-from app.config import JWT_ALGORITHM, JWT_EXPIRY_HOURS, JWT_SECRET, log
 from app.clients.pool import current_user_id
+from app.config import JWT_ALGORITHM, JWT_EXPIRY_HOURS, JWT_SECRET, log
 
 try:
     import bcrypt
 except ImportError:
     bcrypt = None  # type: ignore
 
-import jwt
 from datetime import datetime, timedelta, timezone
+
+import jwt
 
 
 def hash_password(password: str) -> str:

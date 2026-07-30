@@ -1,7 +1,8 @@
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
-from dataclasses import dataclass, field
 
 
 class ResearchRequest(BaseModel):
@@ -81,5 +82,3 @@ class QueryPlan:
     depth: str = "standard"
     # Checklist of requirements the answer must satisfy (used for self-check)
     requirements: List[str] = field(default_factory=list)
-
-

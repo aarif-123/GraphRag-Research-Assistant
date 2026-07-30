@@ -7,39 +7,37 @@ along with global caching, rate limiting, and credit validation helpers.
 import asyncio
 import contextvars
 import hashlib
-import logging
 import threading
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
 import jwt
 from fastapi import HTTPException, Request
 from neo4j import GraphDatabase
-from neo4j import exceptions as neo4j_exceptions
 from pymongo import MongoClient
 from supabase import create_client
 
 from app.config import (
-    SUPABASE_KEY,
-    SUPABASE_URL,
+    CACHE_MAX,
+    CACHE_TTL,
+    CREDIT_COSTS,
+    FREE_CREDITS_PER_DAY,
+    GROQ_TIMEOUT,
+    JWT_ALGORITHM,
+    JWT_EXPIRY_HOURS,
+    JWT_SECRET,
     MONGODB_DB_NAME,
     MONGODB_URI,
     NEO4J_PASSWORD,
     NEO4J_URI,
     NEO4J_USER,
-    GROQ_TIMEOUT,
-    JWT_SECRET,
-    JWT_ALGORITHM,
-    JWT_EXPIRY_HOURS,
+    RATE_LIMIT,
+    SUPABASE_KEY,
+    SUPABASE_URL,
     UPSTASH_REDIS_REST_TOKEN,
     UPSTASH_REDIS_REST_URL,
-    CACHE_TTL,
-    CACHE_MAX,
-    RATE_LIMIT,
-    FREE_CREDITS_PER_DAY,
-    CREDIT_COSTS,
     log,
 )
 

@@ -4,7 +4,6 @@ sent via SMTP, with a mock/dev fallback when SMTP is not configured.
 """
 
 import asyncio
-import os
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
@@ -13,7 +12,6 @@ import httpx
 
 from app.config import (
     MAILBOXLAYER_API_KEY,
-    REQUIRE_EMAIL_VERIFICATION,
     SMTP_FROM,
     SMTP_HOST,
     SMTP_PASSWORD,

@@ -35,12 +35,10 @@ from __future__ import annotations
 
 import io
 import os
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import Headers
 
 # ---------------------------------------------------------------------------
 # Ensure dummy env vars are set before importing the app so DB connections
@@ -55,12 +53,13 @@ for _k, _v in {
     "GROQ_API_KEY": "gsk_dummy",
     "MONGODB_URI": "mongodb://localhost:27017",
     "MONGODB_DB_NAME": "test_db",
-    "MAX_PDF_SIZE_MB": "10",   # 10 MB limit in tests
+    "MAX_PDF_SIZE_MB": "10",  # 10 MB limit in tests
     "MAX_AUDIO_SIZE_MB": "5",  # 5 MB limit in tests
 }.items():
     os.environ.setdefault(_k, _v)
 
-import app._server as srv  # noqa: E402
+from app import config as cfg
+from app.main import app as fastapi_app  # noqa: E402
 
 _MB = 1024 * 1024
 
@@ -73,7 +72,7 @@ _MB = 1024 * 1024
 @pytest.fixture(scope="module")
 def client() -> TestClient:
     """A synchronous TestClient wrapping the FastAPI app."""
-    return TestClient(srv.app, raise_server_exceptions=False)
+    return TestClient(fastapi_app, raise_server_exceptions=False)
 
 
 def _make_fitz_mock(text: str = "Sample extracted text from PDF.") -> MagicMock:
@@ -103,9 +102,9 @@ def _make_db_mock() -> MagicMock:
 class TestUploadPdf:
     # The endpoint calls asyncio.to_thread to run fitz in a thread pool.
     # We patch it to invoke the callable directly (synchronous test context).
-    _THREAD_PATCH = "app._server.asyncio.to_thread"
-    _FITZ_PATCH = "app._server.fitz"
-    _DB_PATCH = "app._server.db"
+    _THREAD_PATCH = "app.routes.media.asyncio.to_thread"
+    _FITZ_PATCH = "app.routes.media.fitz"
+    _DB_PATCH = "app.routes.media.pool.db"
 
     @staticmethod
     def _run_to_thread(fn, *args, **kwargs):
@@ -137,7 +136,7 @@ class TestUploadPdf:
             patch(self._FITZ_PATCH, fitz_mock),
             patch(self._DB_PATCH, db_mock),
             patch(self._THREAD_PATCH, side_effect=self._run_to_thread),
-            patch("app._server.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
         ):
             resp = self._post_pdf(client)
 
@@ -151,8 +150,8 @@ class TestUploadPdf:
 
     def test_content_length_header_pre_check_returns_413(self, client: TestClient):
         """When Content-Length header exceeds MAX_PDF_BYTES, reject before reading."""
-        oversized = srv.MAX_PDF_BYTES + 1
-        with patch("app._server.set_user_context", new_callable=AsyncMock):
+        oversized = cfg.MAX_PDF_BYTES + 1
+        with patch("app.routes.media.set_user_context", new_callable=AsyncMock):
             resp = self._post_pdf(
                 client,
                 content=b"small",
@@ -163,9 +162,9 @@ class TestUploadPdf:
 
     def test_body_size_guard_returns_413(self, client: TestClient):
         """When body itself exceeds MAX_PDF_BYTES (no Content-Length header), reject after read."""
-        oversized_body = b"x" * (srv.MAX_PDF_BYTES + 1)
+        oversized_body = b"x" * (cfg.MAX_PDF_BYTES + 1)
         with (
-            patch("app._server.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
             # Prevent the fitz call from running — we expect 413 before it
             patch(self._FITZ_PATCH, _make_fitz_mock()),
         ):
@@ -173,14 +172,14 @@ class TestUploadPdf:
         assert resp.status_code == 413
 
     def test_non_pdf_extension_returns_400(self, client: TestClient):
-        with patch("app._server.set_user_context", new_callable=AsyncMock):
+        with patch("app.routes.media.set_user_context", new_callable=AsyncMock):
             resp = self._post_pdf(client, filename="report.docx")
         assert resp.status_code == 400
         assert "pdf" in resp.json()["detail"].lower()
 
     def test_empty_file_returns_400(self, client: TestClient):
         with (
-            patch("app._server.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
             patch(self._FITZ_PATCH, _make_fitz_mock()),
         ):
             resp = self._post_pdf(client, content=b"")
@@ -192,7 +191,7 @@ class TestUploadPdf:
             patch(self._FITZ_PATCH, None),
             patch(self._DB_PATCH, _make_db_mock()),
             patch(self._THREAD_PATCH, side_effect=self._run_to_thread),
-            patch("app._server.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
         ):
             resp = self._post_pdf(client)
         assert resp.status_code == 500
@@ -204,7 +203,7 @@ class TestUploadPdf:
             patch(self._FITZ_PATCH, fitz_mock),
             patch(self._DB_PATCH, _make_db_mock()),
             patch(self._THREAD_PATCH, side_effect=self._run_to_thread),
-            patch("app._server.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
         ):
             resp = self._post_pdf(client)
         assert resp.status_code == 400
@@ -212,7 +211,7 @@ class TestUploadPdf:
 
     def test_oversized_text_is_truncated(self, client: TestClient):
         """PDFs producing text > _MAX_PDF_TEXT_CHARS must be stored truncated."""
-        huge_text = "A" * (srv._MAX_PDF_TEXT_CHARS + 500)
+        huge_text = "A" * (cfg._MAX_PDF_TEXT_CHARS + 500)
         fitz_mock = _make_fitz_mock(text=huge_text)
         db_mock = _make_db_mock()
 
@@ -220,19 +219,19 @@ class TestUploadPdf:
             patch(self._FITZ_PATCH, fitz_mock),
             patch(self._DB_PATCH, db_mock),
             patch(self._THREAD_PATCH, side_effect=self._run_to_thread),
-            patch("app._server.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
         ):
             resp = self._post_pdf(client)
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["truncated"] is True
-        assert body["text_length"] == srv._MAX_PDF_TEXT_CHARS
+        assert body["text_length"] == cfg._MAX_PDF_TEXT_CHARS
 
         # Confirm the truncated flag is persisted in MongoDB
         call_args = db_mock.uploaded_pdfs.insert_one.call_args[0][0]
         assert call_args["truncated"] is True
-        assert len(call_args["text"]) == srv._MAX_PDF_TEXT_CHARS
+        assert len(call_args["text"]) == cfg._MAX_PDF_TEXT_CHARS
 
     def test_internal_error_returns_500(self, client: TestClient):
         fitz_mock = MagicMock()
@@ -242,7 +241,7 @@ class TestUploadPdf:
             patch(self._FITZ_PATCH, fitz_mock),
             patch(self._DB_PATCH, _make_db_mock()),
             patch(self._THREAD_PATCH, side_effect=self._run_to_thread),
-            patch("app._server.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
         ):
             resp = self._post_pdf(client)
 
@@ -263,7 +262,7 @@ def _make_groq_response(status_code: int = 200, text: str = "What is GraphRAG?")
 
 
 class TestTranscribeAudio:
-    _GROQ_HTTP_PATCH = "app._server.pool"
+    _GROQ_HTTP_PATCH = "app.routes.media.pool"
 
     def _post_audio(
         self,
@@ -289,10 +288,10 @@ class TestTranscribeAudio:
         pool_mock.groq_http.post = AsyncMock(return_value=groq_resp)
 
         with (
-            patch("app._server.set_user_context", new_callable=AsyncMock),
-            patch("app._server.pool", pool_mock),
-            patch("app._server.GROQ_API_KEY", "gsk_dummy"),
-            patch("app._server.GROQ_API_KEYS", ["gsk_dummy"]),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.pool", pool_mock),
+            patch("app.routes.media.GROQ_API_KEY", "gsk_dummy"),
+            patch("app.routes.media.GROQ_API_KEYS", ["gsk_dummy"]),
         ):
             resp = self._post_audio(client)
 
@@ -300,23 +299,23 @@ class TestTranscribeAudio:
         assert resp.json()["text"] == "What is the transformer architecture?"
 
     def test_content_length_header_pre_check_returns_413(self, client: TestClient):
-        oversized = srv.MAX_AUDIO_BYTES + 1
-        with patch("app._server.set_user_context", new_callable=AsyncMock):
+        oversized = cfg.MAX_AUDIO_BYTES + 1
+        with patch("app.routes.media.set_user_context", new_callable=AsyncMock):
             resp = self._post_audio(client, content_length_override=oversized)
         assert resp.status_code == 413
         assert "too large" in resp.json()["detail"].lower()
 
     def test_body_size_guard_returns_413(self, client: TestClient):
-        oversized_body = b"x" * (srv.MAX_AUDIO_BYTES + 1)
-        with patch("app._server.set_user_context", new_callable=AsyncMock):
+        oversized_body = b"x" * (cfg.MAX_AUDIO_BYTES + 1)
+        with patch("app.routes.media.set_user_context", new_callable=AsyncMock):
             resp = self._post_audio(client, content=oversized_body)
         assert resp.status_code == 413
 
     def test_empty_audio_returns_400(self, client: TestClient):
         with (
-            patch("app._server.set_user_context", new_callable=AsyncMock),
-            patch("app._server.GROQ_API_KEY", "gsk_dummy"),
-            patch("app._server.GROQ_API_KEYS", ["gsk_dummy"]),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.GROQ_API_KEY", "gsk_dummy"),
+            patch("app.routes.media.GROQ_API_KEYS", ["gsk_dummy"]),
         ):
             resp = self._post_audio(client, content=b"")
         assert resp.status_code == 400
@@ -331,11 +330,11 @@ class TestTranscribeAudio:
         pool_mock.groq_http.post = AsyncMock(side_effect=[fail_resp, ok_resp])
 
         with (
-            patch("app._server.set_user_context", new_callable=AsyncMock),
-            patch("app._server.pool", pool_mock),
-            patch("app._server.GROQ_API_KEY", ""),
-            patch("app._server.GROQ_API_KEYS", ["gsk_key1", "gsk_key2"]),
-            patch("app._server.rotate_groq_key"),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.pool", pool_mock),
+            patch("app.routes.media.GROQ_API_KEY", ""),
+            patch("app.routes.media.GROQ_API_KEYS", ["gsk_key1", "gsk_key2"]),
+            patch("app.routes.media.rotate_groq_key"),
         ):
             resp = self._post_audio(client)
 
@@ -348,11 +347,11 @@ class TestTranscribeAudio:
         pool_mock.groq_http.post = AsyncMock(return_value=fail_resp)
 
         with (
-            patch("app._server.set_user_context", new_callable=AsyncMock),
-            patch("app._server.pool", pool_mock),
-            patch("app._server.GROQ_API_KEY", ""),
-            patch("app._server.GROQ_API_KEYS", ["gsk_only_key"]),
-            patch("app._server.rotate_groq_key"),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.pool", pool_mock),
+            patch("app.routes.media.GROQ_API_KEY", ""),
+            patch("app.routes.media.GROQ_API_KEYS", ["gsk_only_key"]),
+            patch("app.routes.media.rotate_groq_key"),
         ):
             resp = self._post_audio(client)
 
@@ -365,10 +364,10 @@ class TestTranscribeAudio:
         pool_mock.groq_http.post = AsyncMock(return_value=groq_resp)
 
         with (
-            patch("app._server.set_user_context", new_callable=AsyncMock),
-            patch("app._server.pool", pool_mock),
-            patch("app._server.GROQ_API_KEY", "gsk_dummy"),
-            patch("app._server.GROQ_API_KEYS", ["gsk_dummy"]),
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.pool", pool_mock),
+            patch("app.routes.media.GROQ_API_KEY", "gsk_dummy"),
+            patch("app.routes.media.GROQ_API_KEYS", ["gsk_dummy"]),
         ):
             resp = self._post_audio(client)
 

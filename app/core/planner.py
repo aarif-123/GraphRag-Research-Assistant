@@ -7,11 +7,11 @@ import json
 import re
 from typing import Dict, List
 
+from app.clients.groq import groq_chat
+from app.clients.pool import cache_key, get_cache, set_cache
 from app.config import PLAN_MODEL, log
 from app.core.exceptions import LLMError
 from app.models.research import QueryPlan
-from app.clients.pool import cache_key, get_cache, set_cache
-from app.clients.groq import groq_chat
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SUPER-MASTER STRATEGIC PLANNING BRAIN PROMPT v2
@@ -174,6 +174,7 @@ Input: "Explain the limitations of LoRA and how QLoRA resolves them, including t
 # plan_query  (v2 — uses plan_v2 cache prefix to avoid stale v1 hits)
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 async def plan_query(query: str, context: str = "") -> QueryPlan:
     # 'v2' prefix ensures old cached plans (missing new fields) are not reused
     ck = cache_key("plan_v2", query, context[:200])
@@ -198,15 +199,11 @@ async def plan_query(query: str, context: str = "") -> QueryPlan:
 
     # Validate and sanitise named_entities and search_tiers
     raw_entities = data.get("named_entities", [])
-    named_entities: List[Dict] = [
-        e for e in raw_entities
-        if isinstance(e, dict) and e.get("name")
-    ]
+    named_entities: List[Dict] = [e for e in raw_entities if isinstance(e, dict) and e.get("name")]
 
     raw_tiers = data.get("search_tiers", [])
     search_tiers: List[str] = [
-        str(t).strip() for t in raw_tiers
-        if isinstance(t, str) and t.strip()
+        str(t).strip() for t in raw_tiers if isinstance(t, str) and t.strip()
     ][:7]
 
     depth = data.get("depth", "standard")
@@ -242,6 +239,7 @@ async def plan_query(query: str, context: str = "") -> QueryPlan:
 # ──────────────────────────────────────────────────────────────────────────────
 # PRIMARY SOURCE READER  (zero vector DB — keyword extraction over PDF)
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 async def read_primary_source_passages(
     paper: Dict,
@@ -279,7 +277,7 @@ async def read_primary_source_passages(
 
     # Split into overlapping windows of ~passage_chars characters with 50% overlap
     step = passage_chars // 2
-    windows = [doc_text[i: i + passage_chars] for i in range(0, len(doc_text), step)]
+    windows = [doc_text[i : i + passage_chars] for i in range(0, len(doc_text), step)]
 
     # Score each window by keyword overlap (BM25-inspired: term frequency, unique hits)
     lowered_terms = [t.lower() for t in search_terms if t]
@@ -313,6 +311,7 @@ async def read_primary_source_passages(
 # ──────────────────────────────────────────────────────────────────────────────
 # REQUIREMENT COVERAGE CHECK  (lightweight second LLM call for depth=high)
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 async def check_requirements_covered(
     draft_answer: str,

@@ -10,21 +10,31 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app.clients.pool import pool
 from app.config import (
     CREDIT_COSTS,
     FREE_CREDITS_PER_DAY,
-    PRO_TOP_K_MAX,
     FREE_TOP_K_MAX,
+    PRO_TOP_K_MAX,
     RAZORPAY_KEY_ID,
     RAZORPAY_KEY_SECRET,
     REQUIRE_EMAIL_VERIFICATION,
     STRIPE_WEBHOOK_SECRET,
     log,
 )
-from app.clients.pool import pool
+from app.models.auth import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    PasswordUpdateRequest,
+    ProfileUpdateRequest,
+    RazorpayVerifyRequest,
+    ResendVerificationRequest,
+    ResetPasswordRequest,
+    SignUpRequest,
+    VerifyEmailRequest,
+)
 from app.utils.auth import (
     create_access_token,
-    decode_access_token,
     get_authenticated_user,
     get_token_from_request,
     hash_password,
@@ -35,17 +45,6 @@ from app.utils.email import (
     send_reset_email,
     send_verification_email,
     validate_email_mailboxlayer,
-)
-from app.models.auth import (
-    ForgotPasswordRequest,
-    LoginRequest,
-    PasswordUpdateRequest,
-    ProfileUpdateRequest,
-    ResendVerificationRequest,
-    ResetPasswordRequest,
-    SignUpRequest,
-    VerifyEmailRequest,
-    RazorpayVerifyRequest,
 )
 
 router = APIRouter(prefix="/api/auth")
@@ -70,6 +69,7 @@ async def auth_signup(req: SignUpRequest, request: Request):
         raise HTTPException(status_code=400, detail="An account with this email already exists")
 
     from datetime import timedelta
+
     uid = str(uuid.uuid4())
     password_hash = hash_password(req.password)
     now = datetime.now(timezone.utc)
@@ -157,14 +157,21 @@ async def verify_email(req: VerifyEmailRequest):
     await asyncio.to_thread(
         pool.db.users.update_one,
         {"_id": user["_id"]},
-        {"$set": {"is_verified": True}, "$unset": {"verification_code": "", "verification_expires_at": ""}},
+        {
+            "$set": {"is_verified": True},
+            "$unset": {"verification_code": "", "verification_expires_at": ""},
+        },
     )
 
     token = create_access_token(user["_id"], user["email"])
     return {
         "access_token": token,
         "token_type": "bearer",
-        "user": {"id": user["_id"], "email": user["email"], "user_metadata": user.get("user_metadata", {})},
+        "user": {
+            "id": user["_id"],
+            "email": user["email"],
+            "user_metadata": user.get("user_metadata", {}),
+        },
     }
 
 
@@ -173,36 +180,48 @@ async def verify_email_link(email: str, code: str):
     email = email.strip().lower()
     user = await asyncio.to_thread(pool.db.users.find_one, {"email": email})
     if not user:
-        return HTMLResponse(status_code=400, content="""
+        return HTMLResponse(
+            status_code=400,
+            content="""
             <html><body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f8fafc; padding: 40px; text-align: center;">
                 <h2 style="color: #ef4444;">User Not Found</h2>
                 <p style="color: #94a3b8;">The requested user account was not found.</p>
                 <p><a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Landing Page</a></p>
-            </body></html>""")
+            </body></html>""",
+        )
 
     stored_code = user.get("verification_code")
     expires_at = user.get("verification_expires_at")
 
     if not stored_code or stored_code != code.strip():
-        return HTMLResponse(status_code=400, content="""
+        return HTMLResponse(
+            status_code=400,
+            content="""
             <html><body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f8fafc; padding: 40px; text-align: center;">
                 <h2 style="color: #ef4444;">Invalid Verification Link</h2>
                 <p style="color: #94a3b8;">This verification link is invalid or has already been used.</p>
                 <p><a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Landing Page</a></p>
-            </body></html>""")
+            </body></html>""",
+        )
 
     if expires_at and datetime.utcnow() > expires_at:
-        return HTMLResponse(status_code=400, content="""
+        return HTMLResponse(
+            status_code=400,
+            content="""
             <html><body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f8fafc; padding: 40px; text-align: center;">
                 <h2 style="color: #ef4444;">Verification Link Expired</h2>
                 <p style="color: #94a3b8;">This verification link has expired. Please log in to request a new link.</p>
                 <p><a href="/" style="color: #6366f1; text-decoration: none; font-weight: bold;">Return to Landing Page</a></p>
-            </body></html>""")
+            </body></html>""",
+        )
 
     await asyncio.to_thread(
         pool.db.users.update_one,
         {"_id": user["_id"]},
-        {"$set": {"is_verified": True}, "$unset": {"verification_code": "", "verification_expires_at": ""}},
+        {
+            "$set": {"is_verified": True},
+            "$unset": {"verification_code": "", "verification_expires_at": ""},
+        },
     )
     return RedirectResponse(url="/?verified=true")
 
@@ -248,7 +267,10 @@ async def reset_password(req: ResetPasswordRequest):
     await asyncio.to_thread(
         pool.db.users.update_one,
         {"_id": user["_id"]},
-        {"$set": {"password_hash": password_hash}, "$unset": {"password_reset_token": "", "password_reset_expires_at": ""}},
+        {
+            "$set": {"password_hash": password_hash},
+            "$unset": {"password_reset_token": "", "password_reset_expires_at": ""},
+        },
     )
     return {"msg": "Password reset successful"}
 
@@ -347,6 +369,7 @@ async def get_plan(request: Request):
 
 # ─────────────────────── PAYMENT ───────────────────────────────────
 
+
 @router.post("/upgrade")
 async def stripe_webhook(request: Request):
     """Stripe webhook — flips plan to pro on payment, back to free on cancellation."""
@@ -391,7 +414,13 @@ async def stripe_webhook(request: Request):
             await asyncio.to_thread(
                 pool.db.users.update_one,
                 {"email": customer_email.lower()},
-                {"$set": {"plan": "pro", "stripe_customer_id": customer_id, "stripe_subscription_id": subscription_id}},
+                {
+                    "$set": {
+                        "plan": "pro",
+                        "stripe_customer_id": customer_id,
+                        "stripe_subscription_id": subscription_id,
+                    }
+                },
             )
             log.info(f"Stripe: upgraded {customer_email} to pro (sub={subscription_id})")
 
@@ -413,7 +442,6 @@ router_payments = APIRouter(prefix="/api")
 
 @router_payments.post("/razorpay/create-order")
 async def razorpay_create_order(request: Request):
-    import json as json_module
     try:
         body = await request.json()
     except Exception:
@@ -427,6 +455,7 @@ async def razorpay_create_order(request: Request):
 
     try:
         import razorpay
+
         client_rp = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
         order = await asyncio.to_thread(
             client_rp.order.create,
@@ -442,7 +471,8 @@ async def razorpay_create_order(request: Request):
 async def razorpay_verify_payment(req: RazorpayVerifyRequest, request: Request):
     import hashlib
     import hmac
-    from app.utils.auth import get_token_from_request, get_authenticated_user
+
+    from app.utils.auth import get_authenticated_user, get_token_from_request
 
     if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
         raise HTTPException(503, "Razorpay not configured on this server.")
@@ -478,14 +508,17 @@ async def razorpay_verify_payment(req: RazorpayVerifyRequest, request: Request):
 
 @router_payments.get("/razorpay/payments")
 async def get_payment_history(request: Request):
-    from app.utils.auth import get_token_from_request, get_authenticated_user
+    from app.utils.auth import get_authenticated_user, get_token_from_request
+
     token = get_token_from_request(request)
     user = await get_authenticated_user(token)
     if not user:
         raise HTTPException(401, "Invalid token")
     try:
         history = await asyncio.to_thread(
-            lambda: list(pool.db.payments.find({"user_id": user["id"]}).sort("created_at", -1).limit(20))
+            lambda: list(
+                pool.db.payments.find({"user_id": user["id"]}).sort("created_at", -1).limit(20)
+            )
         )
         for h in history:
             h["id"] = str(h.pop("_id"))
@@ -504,7 +537,8 @@ router_history = APIRouter(prefix="/api")
 
 @router_history.get("/history")
 async def list_history(request: Request):
-    from app.utils.auth import get_token_from_request, get_authenticated_user
+    from app.utils.auth import get_authenticated_user, get_token_from_request
+
     token = get_token_from_request(request)
     user = await get_authenticated_user(token)
     if not user:
@@ -527,7 +561,8 @@ async def list_history(request: Request):
 
 @router_history.post("/history")
 async def create_history(request: Request):
-    from app.utils.auth import get_token_from_request, get_authenticated_user
+    from app.utils.auth import get_authenticated_user, get_token_from_request
+
     token = get_token_from_request(request)
     user = await get_authenticated_user(token)
     if not user:
@@ -563,8 +598,9 @@ async def create_history(request: Request):
 
 @router_history.put("/history/{session_id}")
 async def update_history(session_id: str, request: Request):
-    from app.utils.auth import get_token_from_request, get_authenticated_user
     from pymongo import ReturnDocument
+
+    from app.utils.auth import get_authenticated_user, get_token_from_request
 
     token = get_token_from_request(request)
     user = await get_authenticated_user(token)
@@ -606,7 +642,8 @@ async def update_history(session_id: str, request: Request):
 
 @router_history.delete("/history")
 async def delete_all_history(request: Request):
-    from app.utils.auth import get_token_from_request, get_authenticated_user
+    from app.utils.auth import get_authenticated_user, get_token_from_request
+
     token = get_token_from_request(request)
     user = await get_authenticated_user(token)
     if not user:
@@ -621,7 +658,8 @@ async def delete_all_history(request: Request):
 
 @router_history.delete("/history/{session_id}")
 async def delete_history(session_id: str, request: Request):
-    from app.utils.auth import get_token_from_request, get_authenticated_user
+    from app.utils.auth import get_authenticated_user, get_token_from_request
+
     token = get_token_from_request(request)
     user = await get_authenticated_user(token)
     if not user:

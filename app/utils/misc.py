@@ -10,20 +10,20 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from app.config import log
 from app.clients.pool import cache_key, get_cache, set_cache
-
+from app.config import log
 
 # ──────────────────────────────────────────────────────────────────────────────
 # URL DETECTION
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def extract_paper_urls(text: str) -> List[str]:
     """Extract arXiv and PDF URLs from arbitrary text."""
     urls = re.findall(r"https?://[^\s]+", text)
     paper_urls = []
     for url in urls:
-        url = url.rstrip(".,;()[]{}") # strip trailing punctuation
+        url = url.rstrip(".,;()[]{}")  # strip trailing punctuation
         is_arxiv = "arxiv.org" in url
         is_pdf = url.lower().endswith(".pdf") or "/pdf/" in url.lower()
         if is_arxiv or is_pdf:
@@ -44,8 +44,21 @@ def is_simple_link_paste(text: str, urls: List[str]) -> bool:
 
     words = cleaned.split()
     summary_words = {
-        "summarize", "summarise", "summary", "parse", "read", "pdf", "paper",
-        "analyze", "analyse", "this", "explain", "about", "what", "is", "intro",
+        "summarize",
+        "summarise",
+        "summary",
+        "parse",
+        "read",
+        "pdf",
+        "paper",
+        "analyze",
+        "analyse",
+        "this",
+        "explain",
+        "about",
+        "what",
+        "is",
+        "intro",
         "introduction",
     }
     if all(w in summary_words for w in words):
@@ -57,6 +70,7 @@ def is_simple_link_paste(text: str, urls: List[str]) -> bool:
 # ──────────────────────────────────────────────────────────────────────────────
 # CREDENTIAL MASKING
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def mask_credentials_and_secrets(text: str) -> str:
     """Masks API keys, database URIs, passwords, and private document URLs
@@ -105,6 +119,7 @@ def mask_credentials_and_secrets(text: str) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 # LINK RESOLUTION
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def clean_and_resolve_links(
     answer: str,
@@ -155,7 +170,10 @@ def clean_and_resolve_links(
 
         url_lower = url.lower()
         is_placeholder = (
-            any(x in url_lower for x in ["pdf_url", "arxiv_url", "placeholder", "fake", "link", "url"])
+            any(
+                x in url_lower
+                for x in ["pdf_url", "arxiv_url", "placeholder", "fake", "link", "url"]
+            )
             or url == "#"
             or not url.startswith("http")
         )
@@ -250,6 +268,7 @@ def clean_and_resolve_links(
 # DATASET & REPO RETRIEVAL
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 async def search_huggingface_datasets(query: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Search Hugging Face Hub for datasets matching a query."""
     if not query.strip():
@@ -321,6 +340,7 @@ async def suggest_datasets_for_query(query: str) -> List[str]:
             purpose="plan",
         )
         import json
+
         data = json.loads(raw.strip())
         suggested = data.get("datasets", [])
         if isinstance(suggested, list):
@@ -347,12 +367,14 @@ async def retrieve_datasets_and_repos(
         try:
             from sources.kaggle import search_kaggle_datasets_bulk
         except ImportError:
+
             async def search_kaggle_datasets_bulk(q: str, **kw: Any) -> List[Dict]:
                 return []
 
     try:
         from app.sources.papers_with_code import enrich_arxiv_papers_with_pwc
     except ImportError:
+
         async def enrich_arxiv_papers_with_pwc(papers: List[Dict], **kw: Any) -> List[Dict]:
             return papers
 
@@ -407,8 +429,7 @@ async def retrieve_datasets_and_repos(
     search_queries = list(llm_suggested)
     for ds_name in list(mentioned_ds_names)[:2]:
         if not any(
-            ds_name.lower() in sq.lower() or sq.lower() in ds_name.lower()
-            for sq in search_queries
+            ds_name.lower() in sq.lower() or sq.lower() in ds_name.lower() for sq in search_queries
         ):
             search_queries.append(ds_name)
 

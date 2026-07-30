@@ -3,34 +3,26 @@ routes/graph.py — Graph intelligence endpoints: paper lookup, author network,
 citation path, paper comparison, and trending papers.
 """
 
-import asyncio
-
 from fastapi import APIRouter, HTTPException, Request
 
+from app.clients.groq import create_embedding, groq_chat
 from app.clients.pool import pool
-from app.utils.credits import check_rate_limit, require_pro
+from app.config import HEAVY_MODEL, REASON_MODEL
+from app.core.exceptions import EmbeddingError, GraphRetrievalError, LLMError
+from app.core.generation import compare_prompt
 from app.core.graph import (
-    get_paper_full,
     get_author_network,
     get_citation_path,
+    get_paper_full,
     get_trending_papers,
     retrieve_graph_papers,
-    get_co_citation_cluster,
 )
 from app.core.retrieval import (
-    vector_search,
-    run_vector_pipeline,
     retrieve_arxiv_context,
-    format_arxiv_context,
-    format_s2_context,
-    format_pwc_context,
-    build_chronological_flow,
+    run_vector_pipeline,
 )
-from app.core.generation import compare_prompt
-from app.core.exceptions import GraphRetrievalError, EmbeddingError, LLMError
-from app.clients.groq import groq_chat, create_embedding
-from app.models.research import CompareRequest, CitationPathRequest
-from app.config import REASON_MODEL, HEAVY_MODEL, log
+from app.models.research import CitationPathRequest, CompareRequest
+from app.utils.credits import check_rate_limit
 
 router = APIRouter(prefix="/api/graph")
 
@@ -68,7 +60,7 @@ async def trending(limit: int = 10, request: Request = None):
 
 @router.post("/compare")
 async def compare_papers(req: CompareRequest, request: Request):
-    from app.utils.credits import check_and_deduct_credit, append_credits_snapshot
+    from app.utils.credits import append_credits_snapshot, check_and_deduct_credit
 
     pool.assert_ready()
     await check_rate_limit(request.client.host if request.client else "unknown")

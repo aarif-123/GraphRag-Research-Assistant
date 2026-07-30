@@ -2,15 +2,15 @@ import re
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.config import RELEVANCE_FLOOR, log
-from app.core.exceptions import LLMError
 from app.clients.groq import groq_chat
+from app.config import log
+from app.core.exceptions import LLMError
 from app.core.graph import build_relationship_context
 from app.core.retrieval import (
-    format_arxiv_context,
-    format_s2_context,
-    format_pwc_context,
     build_chronological_flow,
+    format_arxiv_context,
+    format_pwc_context,
+    format_s2_context,
 )
 
 
@@ -928,10 +928,9 @@ async def apply_verification(
 ) -> Tuple[str, Dict, Optional[str]]:
     """Runs verify_answer and appends a low-grounding warning block if confidence < 0.70."""
     import time
+
     t_v0 = time.time()
-    verification = await verify_answer(
-        answer, chunks, model, arxiv_papers, s2_papers
-    )
+    verification = await verify_answer(answer, chunks, model, arxiv_papers, s2_papers)
     v_ms = int((time.time() - t_v0) * 1000)
     log.info(
         f"[{rid}] Verification ({v_ms}ms): confidence={verification.get('confidence')}"

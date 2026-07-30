@@ -6,6 +6,7 @@ Handles environment file loading, fallbacks, and static constants.
 import logging
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load environmental variables

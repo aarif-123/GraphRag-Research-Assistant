@@ -5,22 +5,21 @@ routes/media.py — PDF upload/retrieval and audio transcription endpoints.
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
+from app.clients.groq import rotate_groq_key
+from app.clients.pool import pool
 from app.config import (
+    _MAX_PDF_TEXT_CHARS,
+    _MB,
     GROQ_API_KEY,
     GROQ_API_KEYS,
     MAX_AUDIO_BYTES,
     MAX_PDF_BYTES,
-    _MAX_PDF_TEXT_CHARS,
-    _MB,
     log,
 )
-from app.clients.pool import pool, pool
-from app.clients.groq import rotate_groq_key
 from app.utils.auth import set_user_context
 
 try:
@@ -38,9 +37,25 @@ def _is_whisper_hallucination(text: str) -> bool:
     if len(cleaned) <= 1:
         return True
     hallucinations = {
-        "", "you", "thankyou", "thankyouforwatching", "pleaselikeandsubscribe",
-        "subscribe", "watching", "bye", "thankyoubye", "thankyousomuch",
-        "amaraorg", "subtitlesby", "captionedby", "translatedby", "mb", "so", "oh", "uh", "um",
+        "",
+        "you",
+        "thankyou",
+        "thankyouforwatching",
+        "pleaselikeandsubscribe",
+        "subscribe",
+        "watching",
+        "bye",
+        "thankyoubye",
+        "thankyousomuch",
+        "amaraorg",
+        "subtitlesby",
+        "captionedby",
+        "translatedby",
+        "mb",
+        "so",
+        "oh",
+        "uh",
+        "um",
     }
     if cleaned in hallucinations:
         return True
@@ -48,9 +63,15 @@ def _is_whisper_hallucination(text: str) -> bool:
     if any(
         pat in lower
         for pat in [
-            "subtitles by", "captioned by", "amara.org", "thanks for watching",
-            "please subscribe", "like and subscribe", "thank you for watching",
-            "copyright", "all rights reserved",
+            "subtitles by",
+            "captioned by",
+            "amara.org",
+            "thanks for watching",
+            "please subscribe",
+            "like and subscribe",
+            "thank you for watching",
+            "copyright",
+            "all rights reserved",
         ]
     ):
         return True
@@ -195,6 +216,7 @@ async def transcribe_audio(
         current_key = GROQ_API_KEY or ""
         if GROQ_API_KEYS:
             from app.clients.groq import groq_key_index
+
             key_idx = (groq_key_index + attempt) % len(GROQ_API_KEYS)
             current_key = GROQ_API_KEYS[key_idx]
 

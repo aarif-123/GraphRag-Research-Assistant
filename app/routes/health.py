@@ -7,9 +7,9 @@ import asyncio
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.config import REASON_MODEL, SUPABASE_KEY, SUPABASE_URL, log
-from app.clients.pool import CACHE, pool, mongo_client, get_supabase_client
-from app.clients.groq import groq_chat, create_embedding
+from app.clients.groq import create_embedding, groq_chat
+from app.clients.pool import CACHE, get_supabase_client, mongo_client, pool
+from app.config import REASON_MODEL, SUPABASE_KEY, SUPABASE_URL
 
 router = APIRouter()
 
@@ -84,13 +84,15 @@ async def full_health():
 @router.get("/api/stats")
 async def stats():
     from app.core.graph import get_graph_stats
+
     pool.assert_ready()
     return await get_graph_stats()
 
 
 @router.get("/api/models")
 async def list_models(request=None):
-    from app.config import REASON_MODEL, HEAVY_MODEL, PLAN_MODEL
+    from app.config import HEAVY_MODEL, PLAN_MODEL, REASON_MODEL
+
     return {
         "models": [
             {"id": REASON_MODEL, "type": "reason", "description": "Default reasoning model"},

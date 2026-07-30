@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # Constants are read from env at module import time.  We set test-specific
 # values before importing so the tests are deterministic even if the developer
@@ -25,8 +23,8 @@ _TEST_PDF_MB = 5
 _TEST_AUDIO_MB = 10
 
 # Patch before import so the module sees our test values.
-os.environ.setdefault("MAX_PDF_SIZE_MB", str(_TEST_PDF_MB))
-os.environ.setdefault("MAX_AUDIO_SIZE_MB", str(_TEST_AUDIO_MB))
+os.environ["MAX_PDF_SIZE_MB"] = str(_TEST_PDF_MB)
+os.environ["MAX_AUDIO_SIZE_MB"] = str(_TEST_AUDIO_MB)
 
 # Standard _server import guard — env vars for DB connections must exist.
 # tests/conftest.py already sets them, so this is a safety belt.
@@ -40,7 +38,11 @@ for _k, _v in {
 }.items():
     os.environ.setdefault(_k, _v)
 
-import app._server as srv  # noqa: E402  (import after env setup)
+import importlib
+
+import app.config as srv  # noqa: E402  (import after env setup)
+
+importlib.reload(srv)
 
 _MB = 1024 * 1024
 
