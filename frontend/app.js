@@ -5,7 +5,8 @@
 import { initEls, els, state, $, $$ } from './js/state.js';
 import {
     isMobileViewport, toggleSidebar, openMobileSidebar, closeMobileSidebar,
-    initMobileSidebar, initMermaidModal, copyTextToClipboard
+    initMobileSidebar, initMermaidModal, postProcessResponse, openMermaidModal,
+    closeMermaidModal, copyTextToClipboard
 } from './js/utils.js';
 import {
     loadSettingsFromLocalStorage, saveSettingsToLocalStorage, resetSettingsToDefaults, syncStudyGuardrails
@@ -30,6 +31,9 @@ window.setSourcesPanelOpen = setSourcesPanelOpen;
 window.switchSourceTab = switchSourceTab;
 window.updateSourcesPanel = updateSourcesPanel;
 window.renderGraph = renderGraph;
+window.postProcessResponse = postProcessResponse;
+window.openMermaidModal = openMermaidModal;
+window.closeMermaidModal = closeMermaidModal;
 
 // INIT ON DOM CONTENT LOADED
 document.addEventListener('DOMContentLoaded', () => {

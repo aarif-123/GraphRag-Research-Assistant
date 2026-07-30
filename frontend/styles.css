@@ -4480,26 +4480,41 @@ mjx-container:not([display="true"]) {
     background: transparent !important;
 }
 
-/* Override Mermaid default colors to fit dark theme styling */
-.message-content .mermaid .node rect,
-.message-content .mermaid .node circle,
-.message-content .mermaid .node polygon,
-.message-content .mermaid .node ellipse,
-.message-content .mermaid .node .label-container,
-.message-content .mermaid .node path {
+/* Override Mermaid default colors to fit dark theme styling (inline and modal) */
+.mermaid .node rect,
+.mermaid .node circle,
+.mermaid .node polygon,
+.mermaid .node ellipse,
+.mermaid .node .label-container,
+.mermaid .node path,
+.mermaid-modal-canvas .node rect,
+.mermaid-modal-canvas .node circle,
+.mermaid-modal-canvas .node polygon,
+.mermaid-modal-canvas .node ellipse,
+.mermaid-modal-canvas .node .label-container,
+.mermaid-modal-canvas .node path {
     fill: #0f172a !important;
-    stroke: var(--primary) !important;
+    stroke: var(--primary, #6366f1) !important;
     stroke-width: 1.5px !important;
 }
 
-.message-content .mermaid .edgePath .path {
+.mermaid .edgePath .path,
+.mermaid-modal-canvas .edgePath .path,
+.mermaid .flowchart-link,
+.mermaid-modal-canvas .flowchart-link {
     stroke: #94a3b8 !important;
     stroke-width: 1.5px !important;
 }
 
-.message-content .mermaid .label {
+.mermaid .label,
+.mermaid-modal-canvas .label,
+.mermaid text,
+.mermaid-modal-canvas text,
+.mermaid span,
+.mermaid-modal-canvas span {
     color: #f8fafc !important;
-    font-family: var(--font-sans) !important;
+    fill: #f8fafc !important;
+    font-family: var(--font-sans, system-ui, sans-serif) !important;
     font-size: 12px !important;
 }
 
@@ -4632,7 +4647,7 @@ mjx-container:not([display="true"]) {
     width: auto !important;
     height: auto !important;
     user-select: none;
-    pointer-events: none;
+    pointer-events: auto;
 }
 
 .mermaid-modal-footer {

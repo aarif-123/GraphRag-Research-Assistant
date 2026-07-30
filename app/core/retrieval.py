@@ -648,17 +648,23 @@ def build_chronological_flow(*paper_lists: Optional[List[Dict]]) -> str:
                 continue
             seen_titles.add(title.lower())
 
-            year = p.get("year") or p.get("published_year")
-            if not year and p.get("published"):
+            raw_year = p.get("year") or p.get("published_year")
+            if not raw_year and p.get("published"):
+                raw_year = p.get("published")
+
+            year: int = 9999
+            if raw_year is not None:
                 try:
-                    year = int(str(p["published"])[:4])
+                    year_str = str(raw_year).strip()[:4]
+                    if year_str.isdigit():
+                        year = int(year_str)
                 except (ValueError, TypeError):
-                    year = None
+                    year = 9999
 
             all_papers.append(
                 {
                     "title": title,
-                    "year": year or 9999,
+                    "year": year,
                     "authors": p.get("authors") or [],
                     "summary": p.get("summary") or p.get("abstract") or "",
                     "url": p.get("pdf_url") or p.get("url") or "",

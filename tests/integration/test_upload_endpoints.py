@@ -150,25 +150,30 @@ class TestUploadPdf:
 
     def test_content_length_header_pre_check_returns_413(self, client: TestClient):
         """When Content-Length header exceeds MAX_PDF_BYTES, reject before reading."""
-        oversized = cfg.MAX_PDF_BYTES + 1
-        with patch("app.routes.media.set_user_context", new_callable=AsyncMock):
-            resp = self._post_pdf(
-                client,
-                content=b"small",
-                content_length_override=oversized,
-            )
+        with (
+            patch("app.routes.media.set_user_context", new_callable=AsyncMock),
+            patch("app.routes.media.MAX_PDF_BYTES", 10),
+        ):
+            resp = self._post_pdf(client, content=b"small")
         assert resp.status_code == 413
         assert "too large" in resp.json()["detail"].lower()
 
     def test_body_size_guard_returns_413(self, client: TestClient):
         """When body itself exceeds MAX_PDF_BYTES (no Content-Length header), reject after read."""
-        oversized_body = b"x" * (cfg.MAX_PDF_BYTES + 1)
+        from starlette.datastructures import Headers
+        orig_get = Headers.get
+
+        def fake_get(self_hdr, key, default=None):
+            if str(key).lower() == "content-length":
+                return None
+            return orig_get(self_hdr, key, default)
+
         with (
             patch("app.routes.media.set_user_context", new_callable=AsyncMock),
-            # Prevent the fitz call from running — we expect 413 before it
-            patch(self._FITZ_PATCH, _make_fitz_mock()),
+            patch("app.routes.media.MAX_PDF_BYTES", 10),
+            patch("starlette.datastructures.Headers.get", fake_get),
         ):
-            resp = self._post_pdf(client, content=oversized_body)
+            resp = self._post_pdf(client, content=b"x" * 20)
         assert resp.status_code == 413
 
     def test_non_pdf_extension_returns_400(self, client: TestClient):

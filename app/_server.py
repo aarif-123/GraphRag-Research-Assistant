@@ -7,6 +7,10 @@ import os
 
 import uvicorn
 
+from app.main import app
+
+__all__ = ["app"]
+
 if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
@@ -17,3 +21,4 @@ if __name__ == "__main__":
         log_level="info",
         workers=int(os.getenv("WORKERS", "1")),
     )
+

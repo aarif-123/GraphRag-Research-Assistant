@@ -215,3 +215,37 @@ class TestTruncateMessages:
         messages = [{"role": "user", "content": ""}]
         result = truncate_messages(messages, max_total_chars=10)
         assert result == messages
+
+
+# ---------------------------------------------------------------------------
+# build_chronological_flow() tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildChronologicalFlow:
+    def test_mixed_year_types_sorting(self):
+        from app.core.retrieval import build_chronological_flow
+
+        paper_list_1 = [
+            {"title": "Paper Int Year", "year": 2021, "summary": "Abstract 1"},
+            {"title": "Paper Str Year", "year": "2019", "summary": "Abstract 2"},
+        ]
+        paper_list_2 = [
+            {"title": "Paper Date Str", "published": "2023-04-12", "summary": "Abstract 3"},
+            {"title": "Paper No Year", "summary": "Abstract 4"},
+        ]
+
+        flow = build_chronological_flow(paper_list_1, paper_list_2)
+        assert "Paper Str Year" in flow
+        assert "Paper Int Year" in flow
+        assert "Paper Date Str" in flow
+        assert "Paper No Year" in flow
+
+        # Verify ordering in output lines: 2019 -> 2021 -> 2023 -> Unknown Year
+        idx_2019 = flow.index("[2019]")
+        idx_2021 = flow.index("[2021]")
+        idx_2023 = flow.index("[2023]")
+        idx_unknown = flow.index("[Unknown Year]")
+
+        assert idx_2019 < idx_2021 < idx_2023 < idx_unknown
+

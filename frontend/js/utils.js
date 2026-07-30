@@ -153,40 +153,312 @@ export function initMobileSidebar() {
     }
 }
 
+let modalState = {
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    isDragging: false,
+    startX: 0,
+    startY: 0
+};
+
+export function openMermaidModal(svgContent, title = 'Interactive Diagram Viewer') {
+    const modal = document.getElementById('mermaid-modal');
+    const canvas = document.getElementById('mermaidModalCanvas');
+    const titleEl = document.querySelector('#mermaid-modal .mermaid-modal-title');
+
+    if (!modal || !canvas) return;
+
+    if (titleEl) {
+        titleEl.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-cyan, #22d3ee);">
+                <polygon points="12 2 2 22 22 22"></polygon>
+            </svg>
+            ${escapeHtml(title)}
+        `;
+    }
+
+    canvas.innerHTML = svgContent;
+
+    // Reset pan & zoom
+    modalState.zoom = 1;
+    modalState.panX = 0;
+    modalState.panY = 0;
+    updateModalCanvasTransform();
+
+    modal.style.display = 'flex';
+    requestAnimationFrame(() => {
+        modal.classList.add('active');
+    });
+}
+
+export function closeMermaidModal() {
+    const modal = document.getElementById('mermaid-modal');
+    if (!modal) return;
+
+    modal.classList.remove('active');
+    setTimeout(() => {
+        modal.style.display = 'none';
+    }, 300);
+}
+
+function updateModalCanvasTransform() {
+    const canvas = document.getElementById('mermaidModalCanvas');
+    if (canvas) {
+        canvas.style.transform = `translate(${modalState.panX}px, ${modalState.panY}px) scale(${modalState.zoom})`;
+    }
+}
+
 export function initMermaidModal() {
-    const modal = document.getElementById('mermaidModal');
-    const container = document.getElementById('mermaidModalContainer');
-    const closeBtn = document.getElementById('mermaidModalClose');
-    const zoomIn = document.getElementById('mermaidZoomIn');
-    const zoomOut = document.getElementById('mermaidZoomOut');
-    const resetZoom = document.getElementById('mermaidResetZoom');
-    const titleEl = document.getElementById('mermaidModalTitle');
+    const modal = document.getElementById('mermaid-modal');
+    const viewport = document.getElementById('mermaidModalViewport');
+    const closeBtn = document.getElementById('mermaidCloseBtn');
+    const zoomIn = document.getElementById('btnMermaidZoomIn');
+    const zoomOut = document.getElementById('btnMermaidZoomOut');
+    const resetBtn = document.getElementById('btnMermaidReset');
 
-    if (!modal || !container) return;
+    if (!modal) return;
 
-    let zoomLevel = 1;
-
-    const setZoom = (level) => {
-        zoomLevel = Math.max(0.5, Math.min(3, level));
-        const svg = container.querySelector('svg');
-        if (svg) {
-            svg.style.transform = `scale(${zoomLevel})`;
-            svg.style.transformOrigin = 'center center';
-            svg.style.transition = 'transform 0.2s ease';
-        }
-    };
-
-    if (zoomIn) zoomIn.addEventListener('click', () => setZoom(zoomLevel + 0.2));
-    if (zoomOut) zoomOut.addEventListener('click', () => setZoom(zoomLevel - 0.2));
-    if (resetZoom) resetZoom.addEventListener('click', () => setZoom(1));
-
-    if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-            modal.classList.remove('visible');
+    if (zoomIn) {
+        zoomIn.addEventListener('click', () => {
+            modalState.zoom = Math.min(4, modalState.zoom + 0.25);
+            updateModalCanvasTransform();
         });
     }
 
+    if (zoomOut) {
+        zoomOut.addEventListener('click', () => {
+            modalState.zoom = Math.max(0.25, modalState.zoom - 0.25);
+            updateModalCanvasTransform();
+        });
+    }
+
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            modalState.zoom = 1;
+            modalState.panX = 0;
+            modalState.panY = 0;
+            updateModalCanvasTransform();
+        });
+    }
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeMermaidModal);
+    }
+
     modal.addEventListener('click', (e) => {
-        if (e.target === modal) modal.classList.remove('visible');
+        if (e.target === modal) closeMermaidModal();
     });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) {
+            closeMermaidModal();
+        }
+    });
+
+    // Mouse Dragging (Panning)
+    if (viewport) {
+        viewport.addEventListener('mousedown', (e) => {
+            modalState.isDragging = true;
+            modalState.startX = e.clientX - modalState.panX;
+            modalState.startY = e.clientY - modalState.panY;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!modalState.isDragging) return;
+            modalState.panX = e.clientX - modalState.startX;
+            modalState.panY = e.clientY - modalState.startY;
+            updateModalCanvasTransform();
+        });
+
+        window.addEventListener('mouseup', () => {
+            modalState.isDragging = false;
+        });
+
+        // Wheel Zoom
+        viewport.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = e.deltaY < 0 ? 0.15 : -0.15;
+            modalState.zoom = Math.max(0.25, Math.min(4, modalState.zoom + delta));
+            updateModalCanvasTransform();
+        }, { passive: false });
+    }
 }
+
+export function cleanAndSanitizeMermaid(code) {
+    if (!code) return '';
+
+    // 1. Remove Markdown code block syntax if present inside text
+    let clean = code.replace(/```mermaid/gi, '').replace(/```/g, '').trim();
+
+    // 2. Normalize line breaks
+    clean = clean.replace(/\r\n/g, '\n');
+
+    // 3. Remove unneeded markdown formatting inside node text (e.g., **bold**, *italic*)
+    clean = clean.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1');
+
+    // 4. Wrap unquoted node labels in [...] with double quotes
+    // Handles nodeId[Label Text (with parens, colons: etc)] -> nodeId["Label Text (with parens, colons: etc)"]
+    clean = clean.replace(/([\w-]+)\[\s*([^"\]\n][^\]\n]*?)\s*\]/g, (match, id, label) => {
+        const safeLabel = label.replace(/"/g, "'");
+        return `${id}["${safeLabel}"]`;
+    });
+
+    // 5. Wrap unquoted node labels in ((...))
+    clean = clean.replace(/([\w-]+)\(\(\s*([^"\)\n][^\)\n]*?)\s*\)\)/g, (match, id, label) => {
+        const safeLabel = label.replace(/"/g, "'");
+        return `${id}(("${safeLabel}"))`;
+    });
+
+    // 6. Wrap unquoted node labels in (...)
+    clean = clean.replace(/([\w-]+)\(\s*([^"\)\n][^\)\n]*?)\s*\)/g, (match, id, label) => {
+        if (id.toLowerCase() === 'subgraph') return match;
+        const safeLabel = label.replace(/"/g, "'");
+        return `${id}("${safeLabel}")`;
+    });
+
+    // 7. Ensure valid graph directive
+    const validDirectives = [
+        'graph', 'flowchart', 'sequenceDiagram', 'classDiagram',
+        'stateDiagram', 'erDiagram', 'gantt', 'pie', 'gitGraph', 'mindmap', 'timeline'
+    ];
+
+    const lines = clean.split('\n');
+    let firstLine = lines[0].trim();
+    const hasDirective = validDirectives.some(dir => firstLine.toLowerCase().startsWith(dir.toLowerCase()));
+
+    if (!hasDirective) {
+        clean = 'graph TD\n' + clean;
+    }
+
+    return clean;
+}
+
+export async function postProcessResponse(container) {
+    if (!container) return;
+
+    const codeBlocks = container.querySelectorAll('pre code.language-mermaid, pre.mermaid, code.language-mermaid');
+
+    if (!codeBlocks || codeBlocks.length === 0) return;
+
+    if (!window.mermaid) {
+        console.warn('Mermaid library not loaded');
+        return;
+    }
+
+    for (let i = 0; i < codeBlocks.length; i++) {
+        const codeBlock = codeBlocks[i];
+        const preElement = codeBlock.closest('pre') || codeBlock;
+
+        if (preElement.getAttribute('data-mermaid-processed')) continue;
+        preElement.setAttribute('data-mermaid-processed', 'true');
+
+        let rawMermaid = codeBlock.textContent || codeBlock.innerText || '';
+
+        // Decode HTML entities safely
+        const doc = new DOMParser().parseFromString(rawMermaid, 'text/html');
+        rawMermaid = doc.documentElement.textContent || rawMermaid;
+
+        if (!rawMermaid.trim()) continue;
+
+        const sanitizedCode = cleanAndSanitizeMermaid(rawMermaid);
+        const uniqueId = 'mermaid-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+
+        try {
+            const { svg } = await window.mermaid.render(uniqueId, sanitizedCode);
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'mermaid-container';
+            wrapper.style.cssText = `
+                position: relative;
+                margin: 1.25rem 0;
+                padding: 1.25rem;
+                background: rgba(15, 23, 42, 0.65);
+                border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+                border-radius: 12px;
+                overflow-x: auto;
+                cursor: pointer;
+            `;
+
+            wrapper.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 12px; color: var(--accent-cyan, #22d3ee); font-weight: 500;">
+                    <span style="display: flex; align-items: center; gap: 6px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 22 22 22"/></svg>
+                        Taxonomy / Architecture Flowchart
+                    </span>
+                    <button class="btn-expand-mermaid" style="background: rgba(30, 41, 59, 0.8); border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.15)); color: var(--text-primary, #fff); padding: 4px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s ease;">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                        Expand Diagram
+                    </button>
+                </div>
+                <div class="mermaid" style="display: flex; justify-content: center;">${svg}</div>
+            `;
+
+            const openHandler = (e) => {
+                e.stopPropagation();
+                openMermaidModal(svg, 'Taxonomy / Architecture Flowchart');
+            };
+
+            wrapper.addEventListener('click', openHandler);
+
+            preElement.parentNode.replaceChild(wrapper, preElement);
+        } catch (err) {
+            console.warn('First render attempt failed, trying fallback sanitization:', err);
+
+            // Clean up any error DOM nodes inserted by Mermaid
+            document.querySelectorAll(`[id*="${uniqueId}"]`).forEach(el => el.remove());
+
+            try {
+                // Secondary fallback: strip all non-alphanumeric chars from labels
+                const fallbackCode = sanitizedCode.replace(/\[\s*"([^"]+)"\s*\]/g, (m, lbl) => {
+                    const cleanLbl = lbl.replace(/[^a-zA-Z0-9\s-_]/g, '');
+                    return `["${cleanLbl}"]`;
+                });
+
+                const fallbackId = uniqueId + '-fallback';
+                const { svg } = await window.mermaid.render(fallbackId, fallbackCode);
+
+                const wrapper = document.createElement('div');
+                wrapper.className = 'mermaid-container';
+                wrapper.style.cssText = `
+                    position: relative;
+                    margin: 1.25rem 0;
+                    padding: 1.25rem;
+                    background: rgba(15, 23, 42, 0.65);
+                    border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+                    border-radius: 12px;
+                    overflow-x: auto;
+                    cursor: pointer;
+                `;
+                wrapper.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 12px; color: var(--accent-cyan, #22d3ee); font-weight: 500;">
+                        <span style="display: flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 22 22 22"/></svg>
+                            Taxonomy / Architecture Flowchart
+                        </span>
+                        <button class="btn-expand-mermaid" style="background: rgba(30, 41, 59, 0.8); border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.15)); color: var(--text-primary, #fff); padding: 4px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s ease;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                            Expand Diagram
+                        </button>
+                    </div>
+                    <div class="mermaid" style="display: flex; justify-content: center;">${svg}</div>
+                `;
+                wrapper.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openMermaidModal(svg, 'Taxonomy / Architecture Flowchart');
+                });
+                preElement.parentNode.replaceChild(wrapper, preElement);
+            } catch (fallbackErr) {
+                console.error('All Mermaid rendering attempts failed:', fallbackErr);
+                document.querySelectorAll(`[id*="${uniqueId}"]`).forEach(el => el.remove());
+                preElement.removeAttribute('data-mermaid-processed');
+            }
+        }
+    }
+}
+
+// Global exposure
+window.cleanAndSanitizeMermaid = cleanAndSanitizeMermaid;
+window.postProcessResponse = postProcessResponse;
+window.openMermaidModal = openMermaidModal;
+window.closeMermaidModal = closeMermaidModal;
