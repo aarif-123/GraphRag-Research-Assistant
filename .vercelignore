@@ -1,6 +1,7 @@
+.venv/
 venv311/
 __pycache__/
-**/__pycache__/
+/**/__pycache__/
 *.pyc
 .vscode/
 tests/
@@ -13,9 +14,4 @@ fix_symbols.py
 .env
 .env.*
 requirements-local.txt
-*.svg
-*.png
 test_*.py
-
-
-

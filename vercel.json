@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/index.py": {
-      "includeFiles": "app/**"
+      "includeFiles": "{app/**,frontend/**}"
     }
   },
   "rewrites": [
@@ -26,7 +26,19 @@
       "destination": "/api/index.py"
     },
     {
+      "source": "/js/:path*",
+      "destination": "/frontend/js/:path*"
+    },
+    {
+      "source": "/app/js/:path*",
+      "destination": "/frontend/js/:path*"
+    },
+    {
       "source": "/app.js",
+      "destination": "/frontend/app.js"
+    },
+    {
+      "source": "/app/app.js",
       "destination": "/frontend/app.js"
     },
     {
@@ -34,23 +46,23 @@
       "destination": "/frontend/styles.css"
     },
     {
-      "source": "/app/app.js",
-      "destination": "/frontend/app.js"
-    },
-    {
       "source": "/app/styles.css",
       "destination": "/frontend/styles.css"
+    },
+    {
+      "source": "/frontend/:path*",
+      "destination": "/frontend/:path*"
     },
     {
       "source": "/app",
       "destination": "/frontend/index.html"
     },
     {
-      "source": "/app/:path*",
+      "source": "/app/",
       "destination": "/frontend/index.html"
     },
     {
-      "source": "/:path*",
+      "source": "/",
       "destination": "/frontend/landing.html"
     }
   ]
