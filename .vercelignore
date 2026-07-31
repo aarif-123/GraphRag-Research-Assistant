@@ -15,4 +15,3 @@ fix_symbols.py
 .env.*
 requirements-local.txt
 test_*.py
-assets/
