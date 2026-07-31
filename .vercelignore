@@ -12,4 +12,5 @@ fix_symbols.py
 .env
 .env.*
 requirements-local.txt
-test_*.py
+/test_*.py
+/archive-repos.sh
