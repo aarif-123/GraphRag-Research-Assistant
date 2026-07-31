@@ -159,6 +159,8 @@ Every push and pull request to `main` triggers the following pipeline:
 
 ### High-Level Architecture
 
+![High-Level Architecture](assets/aether_full_system_architecture.svg)
+
 ```mermaid
 graph TB
     subgraph Client["Client Layer"]
@@ -330,6 +332,8 @@ sequenceDiagram
 
 ### Retrieval Pipeline
 
+![Retrieval Pipeline Flowchart](assets/aether_intent_routing_flowchart.svg)
+
 ```mermaid
 flowchart LR
     Q["User Query"] --> PLAN["Strategic Brain\nplan_query\ngpt-oss-20b"]
@@ -453,6 +457,8 @@ flowchart TD
 - **Dual-pass verification**: Second LLM call checks factual grounding with `PASS/FAIL` + `confidence` + issue list
 
 ### 🖥️ Frontend UI
+
+![Aether Frontend Research Chat UI](assets/systemView.png)
 
 - Glassmorphic dark-mode research chat interface
 - JWT login/signup flow (`landing.html` → `index.html`)

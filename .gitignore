@@ -114,6 +114,8 @@ test_prompt.py
 test_research_cycle.py
 test_sources.py
 test_arxiv_debug.py
+archive-repos.sh
+requirements-local.txt
 
 # ──────────────────────────────────────────
 # Vercel local config (should never be committed from subdirectories)
