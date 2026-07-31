@@ -4,8 +4,6 @@ __pycache__/
 /**/__pycache__/
 *.pyc
 .vscode/
-tests/
-ingestion/
 *.log
 app.log
 connectivity_report.json
