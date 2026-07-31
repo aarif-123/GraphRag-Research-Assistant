@@ -12,13 +12,13 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=flat-square&logo=mongodb)](https://www.mongodb.com/atlas)
 [![Groq](https://img.shields.io/badge/Groq-LLM-F55036?style=flat-square)](https://groq.com)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square)](LICENSE)
-[![CI](https://github.com/<your-username>/GraphRag-Research-Assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-username>/GraphRag-Research-Assistant/actions/workflows/ci.yml)
+
 
 </div>
 
 > [!NOTE]
 > **Neo4j and Supabase are integrated but currently paused** (`FREEZE_RETRIEVAL=true`).
-> The system runs in external-API-only mode. All graph and vector retrieval code is preserved and can be re-enabled by removing that flag when the databases are back online.
+> The system runs in external-API-only mode because the Neo4j instance is offline and database retrieval is frozen. All graph and vector retrieval code is preserved and can be re-enabled when the databases are online and active (the Supabase pgvector schema expects 768-dimensional embeddings).
 
 ---
 
@@ -173,10 +173,9 @@ graph TB
         AppJS["app.js JWT Auth, SSE Controls, Mermaid Renderer"]
     end
 
-    subgraph FastAPI["FastAPI Backend app/app.py"]
+    subgraph FastAPI["FastAPI Backend app/main.py"]
         direction TB
         Middleware["CORS Middleware Rate Limiter 30 req/min JWT Auth Guard"]
-        MCP["Local ArXiv MCP Server /sse FastMCP SSE endpoint search_arxiv tool"]
         Router["Intent Router 9 Route Types"]
         Brain["Strategic Planning Brain plan_query LLM call SUPER_MASTER_PROMPT"]
         Retrieval["Hybrid Retrieval Engine"]
@@ -185,11 +184,15 @@ graph TB
         ContextAssembly["Context Assembly and Prompt Engineering"]
     end
 
+    subgraph MCPServer["ArXiv MCP Server (Remote Render)"]
+        MCP["FastMCP Server (SSE) search_arxiv & get_paper_details tools"]
+    end
+
     subgraph Databases["Persistent Storage"]
-        Neo4j[("Neo4j Aura 196875 nodes 398961 relationships 111896 publications")]
-        Supabase[("Supabase pgvector paper_chunks table match_paper_chunks RPC hybrid_search RPC")]
-        MongoDB[("MongoDB Atlas users collection chat_sessions payments uploaded_pdfs")]
-        Redis[("Upstash Redis PDF chunk cache optional")]
+        Neo4j[("Neo4j Aura (Currently Paused)")]
+        Supabase[("Supabase pgvector (768-dim BGE embeddings)")]
+        MongoDB[("MongoDB Atlas users collection, chat_sessions, payments, uploaded_pdfs")]
+        Redis[("Upstash Redis PDF chunk cache (optional)")]
     end
 
     subgraph ExternalAPIs["External Academic APIs"]
@@ -208,7 +211,7 @@ graph TB
     end
 
     subgraph LLMProviders["LLM Providers Groq API"]
-        PlanModel["openai/gpt-oss-20b Plan, Verify, Fast routes"]
+        PlanModel["llama-3.3-70b-versatile Plan, Verify, Fast routes"]
         HeavyModel["llama-3.3-70b-versatile Survey, Compare, Deep research"]
     end
 
@@ -229,7 +232,6 @@ graph TB
     Landing & Chat --> AppJS
 
     AppJS -->|"HTTPS REST Bearer JWT"| Middleware
-    Middleware --> MCP
     Middleware --> Brain
 
     Brain --> Router
@@ -240,7 +242,7 @@ graph TB
     Retrieval -->|"Cache lookup"| InMemoryCache
 
     Retrieval --> ArXivXML & S2 & PwC & OpenAlex & CORE & Wiki & Kaggle
-    Retrieval --> MCP
+    Retrieval -->|"SSE Client connection (ARXIV_MCP_URL)"| MCP
 
     Retrieval --> LocalBGE
     Retrieval --> HFAPI
@@ -336,7 +338,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    Q["User Query"] --> PLAN["Strategic Brain\nplan_query\ngpt-oss-20b"]
+    Q["User Query"] --> PLAN["Strategic Brain\nplan_query\nllama-3.3-70b-versatile"]
 
     PLAN -->|route| ROUTER{"Intent\nRouter"}
 
@@ -360,7 +362,7 @@ flowchart LR
     end
 
     subgraph ExternalEnrichment["External Source Enrichment parallel"]
-        AX["ArXiv XML API\nplus MCP Server /sse"]
+        AX["ArXiv XML API\nor Remote MCP Server"]
         S2E["Semantic Scholar\ncitations, TLDR, abstract"]
         PWCE["Papers With Code\nGitHub repos, datasets\nHF models, spaces, metrics"]
         OA["OpenAlex\nopen scholarly graph"]
@@ -426,7 +428,7 @@ flowchart TD
 | **OpenAlex** | Open scholarly graph — works, venues, authors |
 | **CORE Open Access** | Full-text open-access paper search via core.ac.uk v3 API |
 | **ArXiv XML API** | Live paper search with categories, DOI, journal refs, comment fields |
-| **ArXiv MCP Server** | Self-hosted SSE endpoint at `/sse` (FastMCP) — `search_arxiv` + `get_paper_details` tools |
+| **ArXiv MCP Server** | Standalone SSE service (FastMCP) — `search_arxiv` + `get_paper_details` tools, accessed via `ARXIV_MCP_URL` |
 | **Wikipedia** | Dataset/concept contextual summaries |
 | **Kaggle** | Dataset enrichment for ML research queries |
 
@@ -451,8 +453,7 @@ flowchart TD
 ### 🛡️ Token Engineering & Anti-Hallucination
 
 - **Chitchat constraints**: `max_tokens=250` (350 with PDF context) with explicit complete-sentence enforcement
-- **Multi-key Groq rotation**: Distributes plan/reason/heavy calls across multiple API keys by purpose
-- **Cascade fallback**: `gpt-oss-20b` → `llama-3.3-70b-versatile` on 413/timeout
+- **Multi-key Groq rotation**: Automatically rotates between configured `GROQ_API_KEYS` on rate limits and calls
 - **Smart RAG compression**: Truncates abstracts (120 chars) and chunk bodies (150 chars) before character-level slicing
 - **Dual-pass verification**: Second LLM call checks factual grounding with `PASS/FAIL` + `confidence` + issue list
 
@@ -478,12 +479,12 @@ flowchart TD
 | **User & Auth DB** | MongoDB Atlas | ≥ 4.0 |
 | **PDF Cache** | Upstash Redis REST | optional |
 | **LLM Provider** | Groq API | — |
-| **LLM Models** | `openai/gpt-oss-20b` (plan/fast) · `llama-3.3-70b-versatile` (heavy) | — |
+| **LLM Models** | `llama-3.3-70b-versatile` (planning, reasoning, and heavy synthesis; configured via .env) | — |
 | **Embedding Model** | `BAAI/bge-base-en` (local SentenceTransformer or HF Inference API) | L2-normalized, 768-dim |
 | **PDF Parsing** | PyMuPDF (fitz) | 1.24.2 |
 | **Text Splitting** | LangChain `RecursiveCharacterTextSplitter` | — |
 | **Authentication** | PyJWT + bcrypt | ≥ 2.8 / ≥ 4.0 |
-| **Payment Gateway** | Razorpay (HMAC-SHA256 signature verification) | — |
+| **Payment Gateway** | Razorpay (HMAC-SHA256 signature verification) & Stripe Webhook | — |
 | **MCP Protocol** | FastMCP (SSE transport) | ≥ 1.2.0 |
 | **Frontend** | HTML5 + CSS3 (Glassmorphic) + Vanilla JS | — |
 | **Diagram Engine** | Mermaid.js | v10 |
@@ -499,29 +500,46 @@ GraphRag-Research-Assistant/
 │   └── index.py                          # Vercel serverless entry point
 │
 ├── app/
-│   ├── _server.py                        # Main FastAPI application
-│   │                                     #  - Pool: Supabase + Neo4j + MongoDB + Groq
-│   │                                     #  - plan_query() Strategic Brain
-│   │                                     #  - retrieve_graph_papers() + Cypher traversal
-│   │                                     #  - vector_search() + hybrid_search()
-│   │                                     #  - RRF fusion + MMR re-ranking
-│   │                                     #  - groq_chat() with multi-key rotation
-│   │                                     #  - Local ArXiv MCP Server (/sse)
-│   │                                     #  - All 30+ REST API endpoints
-│   │                                     #  - JWT Auth + Razorpay payments
+│   ├── _server.py                        # Server entry point, imports and runs FastAPI app from app.main
+│   ├── main.py                           # Main FastAPI app, mounts static frontend and includes routers
+│   ├── config.py                         # Config module, validates & loads environment variables, sets credits/costs
+│   │
+│   ├── clients/                          # Persistent client initializers
+│   │   ├── pool.py                       # Connection pooling for MongoDB, Neo4j, Supabase, caching & rate limiter
+│   │   └── groq.py                       # Groq LLM client wrapper, key rotation, local/HF embedding generator
+│   │
+│   ├── core/                             # Core intelligence layer
+│   │   ├── planner.py                    # Strategic Brain (plan_query), intent routing and tiered query planner
+│   │   ├── retrieval.py                  # Hybrid retrieval pipeline combining vector, graph, and external sources
+│   │   ├── graph.py                      # Neo4j Cypher query execution, co-citation, citation paths & trending stats
+│   │   ├── generation.py                 # Route-specific prompt engineering and anti-hallucination verification
+│   │   ├── document.py                   # PDF parser (PyMuPDF) and chunking logic with Upstash Redis cache
+│   │   └── exceptions.py                 # Custom exception classes (EmbeddingError, LLMError, etc.)
+│   │
+│   ├── routes/                           # API Route Handlers
+│   │   ├── auth.py                       # Auth, JWT keys, reset/profile, payments (Razorpay/Stripe), history
+│   │   ├── chat.py                       # Conversational context/sessions, OpenAI completions endpoint
+│   │   ├── research.py                   # Main query research, timeline, survey, and bulk endpoints
+│   │   ├── graph.py                      # Graph-specific endpoints (authors/papers ego networks)
+│   │   ├── media.py                      # PDF upload and audio transcription
+│   │   └── health.py                     # Health checks, config outputs, and DB stats
+│   │
+│   ├── models/                           # Pydantic and dataclass models
+│   │   ├── auth.py                       # Request/Response schemas for user settings and billing
+│   │   └── research.py                   # QueryPlan and research endpoint specifications
 │   │
 │   ├── embeddingService/
-│   │   └── embeddings.py                 # BAAI/bge-base-en local/HF API wrapper
+│   │   └── embeddings.py                 # L2 normalizer and HF Inference helper
 │   │
-│   └── sources/                          # External academic source connectors
-│       ├── __init__.py                   # Public re-exports for all connectors
-│       ├── semantic_scholar.py           # S2 citation, abstract, TL;DR enrichment
-│       ├── papers_with_code.py           # GitHub repos, datasets, HF models/spaces
-│       ├── arxiv_mcp.py                  # ArXiv MCP connector (SSE client)
-│       ├── openalex.py                   # OpenAlex open scholarly graph
-│       ├── core.py                       # CORE Open Access API v3
-│       ├── wikipedia.py                  # Wikipedia summary enrichment
-│       └── kaggle.py                     # Kaggle dataset search
+│   └── sources/                          # Academic source connectors
+│       ├── __init__.py                   # Re-exports for all connectors
+│       ├── semantic_scholar.py           # Semantic Scholar citation/abstract API connector
+│       ├── papers_with_code.py           # Papers With Code GitHub repository and datasets parser
+│       ├── openalex.py                   # OpenAlex open scholarly graph connector
+│       ├── core.py                       # CORE Open Access search API connector
+│       ├── arxiv_mcp.py                  # ArXiv MCP client for connecting to remote MCP Server
+│       ├── wikipedia.py                  # Wikipedia context retrieval connector
+│       └── kaggle.py                     # Kaggle datasets catalog query tool
 │
 ├── frontend/
 │   ├── index.html                        # Main research chat interface
@@ -645,9 +663,9 @@ NEO4J_PASSWORD=your-neo4j-password
 GROQ_API_KEY=gsk_key1,gsk_key2,gsk_key3   # comma-separated for rotation
 HF_TOKEN=hf_your_huggingface_token
 EMBED_MODEL=BAAI/bge-base-en
-REASON_MODEL=openai/gpt-oss-20b
+REASON_MODEL=llama-3.3-70b-versatile
 HEAVY_MODEL=llama-3.3-70b-versatile
-PLAN_MODEL=openai/gpt-oss-20b
+PLAN_MODEL=llama-3.3-70b-versatile
 
 # -- External Sources (optional) -----------------------------------
 ARXIV_MCP_URL=https://your-render-app.onrender.com/sse
@@ -720,7 +738,6 @@ vercel dev
 |---|---|
 | `http://localhost:8000/app` | Frontend UI (redirects to `landing.html` if unauthenticated) |
 | `http://localhost:8000/docs` | Swagger / OpenAPI interactive docs |
-| `http://localhost:8000/sse` | Local ArXiv MCP Server (SSE endpoint) |
 | `http://localhost:8000/api/health` | Quick health check |
 | `http://localhost:8000/api/health/full` | Full diagnostics (DB connectivity + embedding) |
 
@@ -743,7 +760,7 @@ vercel dev
 | `POST` | `/api/auth/forgot-password` | Send password-reset token |
 | `POST` | `/api/auth/reset-password` | Reset password with token |
 | `GET` | `/api/auth/plan` | Get subscription plan + credits |
-| `POST` | `/api/auth/upgrade` | Manual plan upgrade |
+| `POST` | `/api/auth/upgrade` | Stripe Webhook (upgrades plan to pro on successful checkout event) |
 
 ### Research & Chat
 
@@ -764,7 +781,6 @@ vercel dev
 | `POST` | `/api/graph/citation-path` | Shortest citation path between two papers |
 | `POST` | `/api/graph/compare` | Deep structured paper comparison (cost: 3 credits) |
 | `GET` | `/api/graph/trending` | Trending papers by recent citation velocity (≥ 2022) |
-| `GET` | `/api/stats` | Neo4j + Supabase database statistics |
 
 ### History & Sessions
 
@@ -789,9 +805,9 @@ vercel dev
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/credits` | Current credit balance snapshot |
-| `POST` | `/api/auth/razorpay/create-order` | Create Razorpay payment order |
-| `POST` | `/api/auth/razorpay/verify-payment` | Verify Razorpay signature + activate Pro |
-| `GET` | `/api/auth/payments/history` | Payment transaction history |
+| `POST` | `/api/razorpay/create-order` | Create Razorpay payment order |
+| `POST` | `/api/razorpay/verify` | Verify Razorpay signature + activate Pro |
+| `GET` | `/api/razorpay/payments` | Payment transaction history |
 
 ### OpenAI-Compatible Endpoint
 
@@ -805,6 +821,8 @@ vercel dev
 |---|---|---|
 | `GET` | `/api/health` | Quick connectivity health check |
 | `GET` | `/api/health/full` | Full diagnostics: DB + embedding + external APIs |
+| `GET` | `/api/stats` | Neo4j + Supabase database statistics |
+| `GET` | `/api/models` | List of configured LLM models |
 | `GET` | `/api/config` | Runtime configuration snapshot |
 
 ---
@@ -843,8 +861,8 @@ stateDiagram-v2
     Free --> CheckCredits : API Request
     CheckCredits --> DeductCredit : credits_used + cost is 20 or less
     CheckCredits --> Blocked : credits_used + cost exceeds 20
-    Blocked --> Upgrade : POST /api/auth/razorpay/create-order
-    Upgrade --> VerifyPayment : POST /api/auth/razorpay/verify-payment
+    Blocked --> Upgrade : POST /api/razorpay/create-order
+    Upgrade --> VerifyPayment : POST /api/razorpay/verify
     VerifyPayment --> Pro : HMAC-SHA256 signature valid
     Pro --> Unlimited : No credit deduction
     DeductCredit --> DailyReset : credits_reset_at reached
