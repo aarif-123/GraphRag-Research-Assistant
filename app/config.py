@@ -29,21 +29,10 @@ logging.basicConfig(
 log = logging.getLogger("aether")
 
 
-# Required default values for fallback
-_REQUIRED_DEFAULTS = {
-    "SUPABASE_URL": "https://dummy.supabase.co",
-    "SUPABASE_SERVICE_ROLE_KEY": "dummy_service_role_key",
-    "NEO4J_URI": "bolt://localhost:7687",
-    "NEO4J_USER": "neo4j",
-    "NEO4J_PASSWORD": "dummy_password",
-}
-for _v, _default in _REQUIRED_DEFAULTS.items():
-    if not os.getenv(_v):
-        os.environ[_v] = _default
-
 # Supabase Configurations
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
 # Razorpay Configurations
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
@@ -59,9 +48,9 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24 * 7  # 1 week
 
 # Neo4j Configurations
-NEO4J_URI = os.getenv("NEO4J_URI")
-NEO4J_USER = os.getenv("NEO4J_USER")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+NEO4J_URI = os.getenv("NEO4J_URI", "")
+NEO4J_USER = os.getenv("NEO4J_USER", "")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 
 # Groq Configurations
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -72,12 +61,12 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 
 # Model Names
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-base-en")
-REASON_MODEL = os.getenv("REASON_MODEL", "openai/gpt-oss-20b")
-HEAVY_MODEL = os.getenv("HEAVY_MODEL", "llama-3.3-70b-versatile")
-PLAN_MODEL = os.getenv("PLAN_MODEL", "openai/gpt-oss-20b")  # strategic brain
+REASON_MODEL = os.getenv("REASON_MODEL", "openai/gpt-oss-120b")
+HEAVY_MODEL = os.getenv("HEAVY_MODEL", "openai/gpt-oss-120b")
+PLAN_MODEL = os.getenv("PLAN_MODEL", "openai/gpt-oss-120b")  # strategic brain
 
 # Feature Flags & Parameters
-FREEZE_RETRIEVAL = os.getenv("FREEZE_RETRIEVAL", "false").lower() == "true"
+FREEZE_RETRIEVAL = os.getenv("FREEZE_RETRIEVAL", "true").lower() == "true"
 MAX_GRAPH_NODES = int(os.getenv("MAX_GRAPH_NODES", "25"))
 GROQ_TIMEOUT = int(os.getenv("GROQ_TIMEOUT", "30"))
 EMBED_TIMEOUT = int(os.getenv("EMBED_TIMEOUT", "20"))
@@ -97,6 +86,7 @@ _REDIS_MAX_PAYLOAD_BYTES = 900 * 1024
 
 # Pricing and Credits
 FREE_CREDITS_PER_DAY = int(os.getenv("FREE_CREDITS_PER_DAY", "20"))
+CREDIT_SYSTEM_ENABLED = os.getenv("CREDIT_SYSTEM_ENABLED", "false").lower() == "true"
 FREE_TOP_K_MAX = 8
 PRO_TOP_K_MAX = 20
 
@@ -128,7 +118,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 SMTP_FROM = os.getenv("SMTP_FROM", "Aether Intelligence <no-reply@aether.com>")
-REQUIRE_EMAIL_VERIFICATION = os.getenv("REQUIRE_EMAIL_VERIFICATION", "true").lower() == "true"
+REQUIRE_EMAIL_VERIFICATION = os.getenv("REQUIRE_EMAIL_VERIFICATION", "false").lower() == "true"
 MAILBOXLAYER_API_KEY = os.getenv("MAILBOXLAYER_API_KEY")
 
 # Stripe Configs

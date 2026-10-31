@@ -8,8 +8,15 @@ from fastapi import APIRouter
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.clients.groq import create_embedding, groq_chat
-from app.clients.pool import CACHE, get_supabase_client, mongo_client, pool
-from app.config import REASON_MODEL, SUPABASE_KEY, SUPABASE_URL
+from app.clients.pool import CACHE, pool
+from app.config import (
+    FREEZE_RETRIEVAL,
+    REASON_MODEL,
+    SUPABASE_ANON_KEY,
+    SUPABASE_KEY,
+    SUPABASE_URL,
+    log,
+)
 
 router = APIRouter()
 
@@ -41,40 +48,68 @@ def health():
     }
 
 
+@router.get("/api/ready")
+def readiness():
+    if not pool._ready:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "ready": False},
+        )
+    return {"status": "ready", "ready": True}
+
+
 @router.get("/api/health/full")
 async def full_health():
     checks: dict = {}
+    if FREEZE_RETRIEVAL:
+        checks["supabase"] = "skipped"
+    else:
+        try:
+            if pool.supabase is None:
+                raise RuntimeError("Supabase client unavailable")
+            await asyncio.to_thread(
+                lambda: pool.supabase.table("papers").select("id").limit(1).execute()
+            )
+            checks["supabase"] = "ok"
+        except Exception as e:
+            log.warning(f"Supabase health check failed: {e}")
+            checks["supabase"] = "unavailable"
     try:
-        await asyncio.to_thread(
-            lambda: get_supabase_client().table("papers").select("id").limit(1).execute()
-        )
-        checks["supabase"] = "ok"
-    except Exception as e:
-        checks["supabase"] = f"error: {e}"
-    try:
-        if mongo_client:
-            await asyncio.to_thread(mongo_client.admin.command, "ping")
+        if pool.db is not None:
+            await asyncio.to_thread(pool.db.client.admin.command, "ping")
             checks["mongodb"] = "ok"
         else:
-            checks["mongodb"] = "error: MongoClient not initialized"
+            checks["mongodb"] = "unavailable"
     except Exception as e:
-        checks["mongodb"] = f"error: {e}"
-    try:
-        await asyncio.to_thread(pool.neo4j.verify_connectivity)
-        checks["neo4j"] = "ok"
-    except Exception as e:
-        checks["neo4j"] = f"error: {e}"
+        log.warning(f"MongoDB health check failed: {e}")
+        checks["mongodb"] = "unavailable"
+    if FREEZE_RETRIEVAL:
+        checks["neo4j"] = "skipped"
+    else:
+        try:
+            if pool.neo4j is None:
+                raise RuntimeError("Neo4j driver unavailable")
+            await asyncio.to_thread(pool.neo4j.verify_connectivity)
+            checks["neo4j"] = "ok"
+        except Exception as e:
+            log.warning(f"Neo4j health check failed: {e}")
+            checks["neo4j"] = "unavailable"
     try:
         await groq_chat([{"role": "user", "content": "ping"}], REASON_MODEL, max_tokens=1)
         checks["groq"] = "ok"
     except Exception as e:
-        checks["groq"] = f"error: {e}"
-    try:
-        await create_embedding("health check")
-        checks["embedding"] = "ok"
-    except Exception as e:
-        checks["embedding"] = f"error: {e}"
-    all_ok = all(v == "ok" for v in checks.values())
+        log.warning(f"Groq health check failed: {e}")
+        checks["groq"] = "unavailable"
+    if FREEZE_RETRIEVAL:
+        checks["embedding"] = "skipped"
+    else:
+        try:
+            await create_embedding("health check")
+            checks["embedding"] = "ok"
+        except Exception as e:
+            log.warning(f"Embedding health check failed: {e}")
+            checks["embedding"] = "unavailable"
+    all_ok = all(v in ("ok", "skipped") for v in checks.values())
     return JSONResponse(
         status_code=200 if all_ok else 207,
         content={"status": "healthy" if all_ok else "degraded", "checks": checks},
@@ -104,7 +139,14 @@ async def list_models(request=None):
 
 @router.get("/api/config")
 def get_config():
-    return {"supabase_url": SUPABASE_URL, "supabase_anon_key": SUPABASE_KEY}
+    public_key = SUPABASE_ANON_KEY or None
+    if public_key and public_key == SUPABASE_KEY:
+        log.error("SUPABASE_ANON_KEY matches the service-role key; omitting it from public config.")
+        public_key = None
+    return {
+        "supabase_url": SUPABASE_URL,
+        "supabase_anon_key": public_key,
+    }
 
 
 @router.get("/")

@@ -25,6 +25,7 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+RETRIEVAL_FROZEN = os.getenv("FREEZE_RETRIEVAL", "false").lower() == "true"
 
 # ── Pretty printing helpers ──────────────────────────────────────
 BOLD = "\033[1m"
@@ -72,6 +73,10 @@ results = {
 # ══════════════════════════════════════════════════════════════════
 def check_env_vars() -> bool:
     header("1 · Environment Variables")
+    if RETRIEVAL_FROZEN:
+        status(True, "Retrieval databases", "checks skipped (FREEZE_RETRIEVAL=true)")
+        return True
+
     all_ok = True
 
     env_checks = {
@@ -98,6 +103,11 @@ def check_env_vars() -> bool:
 # ══════════════════════════════════════════════════════════════════
 def test_supabase() -> None:
     header("2 · Supabase Connectivity & Response")
+
+    if RETRIEVAL_FROZEN:
+        results["supabase"]["status"] = "SKIPPED"
+        status(True, "Supabase", "retrieval is frozen")
+        return
 
     if not SUPABASE_URL or not SUPABASE_KEY:
         status(False, "Skipped", "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
@@ -126,6 +136,7 @@ def test_supabase() -> None:
         return
 
     # ── 2b. Auth health (Supabase REST endpoint) ─────────────────
+    rest_ok = False
     try:
         import httpx
 
@@ -139,17 +150,15 @@ def test_supabase() -> None:
             timeout=10.0,
         )
         elapsed = (time.perf_counter() - t0) * 1000
-        status(
-            resp.status_code in (200, 204),
-            "REST API health",
-            f"HTTP {resp.status_code}  ({elapsed:.0f} ms)",
-        )
+        rest_ok = resp.status_code in (200, 204)
+        status(rest_ok, "REST API health", f"HTTP {resp.status_code}  ({elapsed:.0f} ms)")
         results["supabase"]["details"]["rest_status"] = resp.status_code
         results["supabase"]["details"]["rest_latency_ms"] = round(elapsed, 1)
     except Exception as e:
         status(False, "REST API health", str(e))
         results["supabase"]["details"]["rest_error"] = str(e)
 
+    database_ok = False
     # ── 2c. List tables via RPC/query ────────────────────────────
     try:
         t0 = time.perf_counter()
@@ -165,19 +174,22 @@ def test_supabase() -> None:
             timeout=10.0,
         )
         elapsed = (time.perf_counter() - t0) * 1000
-        status(True, "Database reachable", f"{elapsed:.0f} ms")
+        database_ok = resp.status_code in (200, 204)
+        status(database_ok, "Database reachable", f"HTTP {resp.status_code} ({elapsed:.0f} ms)")
         results["supabase"]["details"]["db_latency_ms"] = round(elapsed, 1)
     except Exception as e:
         status(False, "Database reachable", str(e))
+        results["supabase"]["details"]["db_error"] = str(e)[:200]
 
     # ── 2d. Test RPC function (match_paper_chunks) ───────────────
+    rpc_ok = False
     try:
         t0 = time.perf_counter()
         # Check if the function exists by calling with dummy data
         rpc_result = client.rpc(
             "match_paper_chunks",
             {
-                "query_embedding": [0.0] * 1024,  # dummy embedding
+                "query_embedding": [0.0] * 768,
                 "match_threshold": 0.99,  # very high = expect 0 results
                 "match_count": 1,
                 "filter_ids": [],
@@ -190,6 +202,7 @@ def test_supabase() -> None:
             "RPC match_paper_chunks",
             f"returned {row_count} row(s)  ({elapsed:.0f} ms)",
         )
+        rpc_ok = True
         results["supabase"]["details"]["rpc_works"] = True
         results["supabase"]["details"]["rpc_latency_ms"] = round(elapsed, 1)
     except Exception as e:
@@ -201,8 +214,13 @@ def test_supabase() -> None:
         results["supabase"]["details"]["rpc_works"] = False
         results["supabase"]["details"]["rpc_note"] = err_msg[:200]
 
-    results["supabase"]["status"] = "OK"
-    status(True, f"{BOLD}Supabase overall{RESET}", "CONNECTED")
+    supabase_ok = rest_ok and database_ok and rpc_ok
+    results["supabase"]["status"] = "OK" if supabase_ok else "DEGRADED"
+    status(
+        supabase_ok,
+        f"{BOLD}Supabase overall{RESET}",
+        "CONNECTED" if supabase_ok else "CHECKS FAILED",
+    )
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -210,6 +228,11 @@ def test_supabase() -> None:
 # ══════════════════════════════════════════════════════════════════
 def test_neo4j() -> None:
     header("3 · Neo4j Connectivity & Response")
+
+    if RETRIEVAL_FROZEN:
+        results["neo4j"]["status"] = "SKIPPED"
+        status(True, "Neo4j", "retrieval is frozen")
+        return
 
     if not NEO4J_URI or not NEO4J_USER or not NEO4J_PASSWORD:
         status(False, "Skipped", "Missing NEO4J_URI, NEO4J_USER, or NEO4J_PASSWORD")
@@ -311,11 +334,20 @@ def test_neo4j() -> None:
             results["neo4j"]["details"]["ping_ms"] = round(elapsed, 1)
         else:
             status(False, "Test query", "Unexpected result")
+            results["neo4j"]["status"] = "QUERY_ERROR"
+            driver.close()
+            return
     except concurrent.futures.TimeoutError:
         status(False, "Test query", "Timed out (15s)")
+        results["neo4j"]["status"] = "QUERY_ERROR"
+        driver.close()
+        return
     except Exception as e:
         elapsed = (time.perf_counter() - t0) * 1000
         status(False, "Test query", f"{e} ({elapsed:.0f} ms)")
+        results["neo4j"]["status"] = "QUERY_ERROR"
+        driver.close()
+        return
 
     # ── 3e. Count nodes & relationships ──────────────────────────
     t0 = time.perf_counter()
@@ -424,7 +456,9 @@ def print_summary() -> None:
     status(n4_ok, f"Neo4j     →  {n4}")
 
     print()
-    if sb_ok and n4_ok:
+    if sb == "SKIPPED" and n4 == "SKIPPED":
+        print(f"  {YELLOW}{BOLD}Retrieval databases are paused; both checks were skipped.{RESET}")
+    elif sb_ok and n4_ok:
         print(f"  {GREEN}{BOLD}All services are connected and responding!{RESET}")
     elif sb_ok or n4_ok:
         print(f"  {YELLOW}{BOLD}Partial connectivity — some services are down.{RESET}")
@@ -453,6 +487,8 @@ if __name__ == "__main__":
     # Exit code: 0 = all OK, 1 = partial, 2 = all failed
     sb_ok = results["supabase"]["status"] == "OK"
     n4_ok = results["neo4j"]["status"] == "OK"
+    if results["supabase"]["status"] == "SKIPPED" and results["neo4j"]["status"] == "SKIPPED":
+        sys.exit(0)
     if sb_ok and n4_ok:
         sys.exit(0)
     elif sb_ok or n4_ok:

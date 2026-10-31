@@ -240,6 +240,68 @@ export function renderGraph(papers) {
     }
 }
 
+function getSafeExternalUrl(value) {
+    if (typeof value !== 'string' || !value.trim()) return null;
+
+    try {
+        const url = new URL(value);
+        return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+    } catch {
+        return null;
+    }
+}
+
+export function renderDatasetCards(datasets) {
+    const items = Array.isArray(datasets)
+        ? datasets.filter(dataset => dataset && typeof dataset === 'object' && !Array.isArray(dataset))
+        : [];
+    if (items.length === 0) {
+        return '<div class="sources-empty">No datasets found for this query.</div>';
+    }
+
+    const text = value => escapeHtml(value == null ? '' : String(value));
+    const link = (label, value, badgeClass) => {
+        const url = getSafeExternalUrl(value);
+        return url
+            ? `<a class="ds-link-badge ${badgeClass}" href="${text(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+            : '';
+    };
+
+    return `<div class="dataset-grid">${items.map(dataset => {
+        const name = dataset.name || dataset.full_name || 'Unnamed dataset';
+        const source = dataset.source
+            ? text(String(dataset.source).replace(/[_-]+/g, ' '))
+            : 'Dataset';
+        const description = dataset.description ? text(dataset.description) : 'No description available.';
+        const urls = new Set();
+        const links = [
+            ['Dataset page', dataset.url, 'pwc-badge'],
+            ['Kaggle', dataset.kaggle_url, 'kaggle-badge'],
+        ].filter(([, value]) => {
+            const url = getSafeExternalUrl(value);
+            if (!url || urls.has(url)) return false;
+            urls.add(url);
+            return true;
+        }).map(([label, value, badgeClass]) => link(label, value, badgeClass)).join('');
+
+        const modalities = Array.isArray(dataset.modalities)
+            ? dataset.modalities.filter(Boolean).map(text).join(', ')
+            : '';
+
+        return `
+            <article class="dataset-card">
+                <div class="dataset-card-header">
+                    <h3 class="dataset-card-name">${text(name)}</h3>
+                    <span class="domain-tag">${source}</span>
+                </div>
+                <p class="dataset-card-desc">${description}</p>
+                ${modalities ? `<p class="dataset-card-desc"><strong>Modalities:</strong> ${modalities}</p>` : ''}
+                ${links ? `<div class="dataset-card-links">${links}</div>` : ''}
+            </article>
+        `;
+    }).join('')}</div>`;
+}
+
 export function updateSourcesPanel(data) {
     const overviewContainer = document.getElementById('sourcesOverviewContainer');
     if (overviewContainer) {
@@ -300,6 +362,11 @@ export function updateSourcesPanel(data) {
                 `;
             }).join('') + '</div>'
             : '<div class="sources-empty">No extracted knowledge found.</div>';
+    }
+
+    const datasetList = document.getElementById('tabDatasets');
+    if (datasetList) {
+        datasetList.innerHTML = renderDatasetCards(data.datasets);
     }
 
     const paperList = document.getElementById('tabPapers');

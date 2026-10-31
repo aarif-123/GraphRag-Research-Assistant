@@ -140,11 +140,19 @@
                     <span class="status-dot"></span>
                     <span class="status-text">Checking...</span>
                 </div>
+                <span class="pipeline-step" id="pipelineStep" aria-live="polite"></span>
                 <!-- Credit Pill -->
-                <div id="creditPill" style="display:none; align-items:center; gap:6px; padding:5px 11px; border-radius:20px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); font-size:12px; font-weight:600; color:var(--primary-light); cursor:default; transition:all 0.3s ease; white-space:nowrap;" title="Daily credits remaining">
-                    <svg id="creditIcon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <div id="creditPill"
+                    style="display:none; align-items:center; gap:6px; padding:5px 11px; border-radius:20px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); font-size:12px; font-weight:600; color:var(--primary-light); cursor:default; transition:all 0.3s ease; white-space:nowrap;"
+                    title="Daily credits remaining">
+                    <svg id="creditIcon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 6v6l4 2" />
+                    </svg>
                     <span id="creditText">-- / 20</span>
-                    <span id="planBadge" style="display:none; background:linear-gradient(135deg,#6366f1,#a78bfa); color:white; padding:2px 7px; border-radius:10px; font-size:10px; font-weight:700; letter-spacing:0.3px;">PRO</span>
+                    <span id="planBadge"
+                        style="display:none; background:linear-gradient(135deg,#6366f1,#a78bfa); color:white; padding:2px 7px; border-radius:10px; font-size:10px; font-weight:700; letter-spacing:0.3px;">PRO</span>
                 </div>
                 <!-- User Profile Menu -->
                 <div class="user-profile-menu" id="userProfileMenu" style="position: relative; margin-right: 8px;">
@@ -167,7 +175,8 @@
                             style="font-size: 13px; padding: 8px 12px; text-align: left; background: transparent; border: none; display: none; align-items: center; gap: 8px; color: #a78bfa; width: 100%; cursor: pointer;">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
-                                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                                <path
+                                    d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
                             </svg>
                             Upgrade to Pro
                         </button>
@@ -382,13 +391,15 @@
                         <div class="voice-wave-bar" style="--i:11"></div>
                     </div>
                     <button class="btn-voice-cancel" id="voiceCancelBtn" title="Cancel recording">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.5">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
                             <line x1="6" y1="6" x2="18" y2="18"></line>
                         </svg>
                     </button>
                     <button class="btn-voice-confirm" id="voiceConfirmBtn" title="Transcribe and send">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="3">
                             <polyline points="20 6 9 17 4 12"></polyline>
                         </svg>
                     </button>
@@ -543,15 +554,23 @@
 
     <!-- ================= PAYMENT/UPGRADE MODAL ================= -->
     <div class="modal-overlay" id="paymentModal">
-        <div class="modal" style="max-width: 500px; background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.15), var(--bg-secondary) 60%);">
+        <div class="modal"
+            style="max-width: 500px; background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.15), var(--bg-secondary) 60%);">
             <div class="modal-header" style="border-bottom: none; padding-bottom: 0;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <div style="background: linear-gradient(135deg, #6366f1, #a78bfa); border-radius: 8px; padding: 6px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    <div
+                        style="background: linear-gradient(135deg, #6366f1, #a78bfa); border-radius: 8px; padding: 6px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
+                            <path
+                                d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                        </svg>
                     </div>
                     <div>
-                        <h2 style="font-size: 18px; font-weight: 800; margin: 0; background: linear-gradient(135deg, #a78bfa, #f472b6); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">Upgrade to Aether Pro</h2>
-                        <p style="font-size: 12px; color: var(--text-secondary); margin: 2px 0 0 0;">Unlock unlimited research capabilities</p>
+                        <h2
+                            style="font-size: 18px; font-weight: 800; margin: 0; background: linear-gradient(135deg, #a78bfa, #f472b6); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">
+                            Upgrade to Aether Pro</h2>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin: 2px 0 0 0;">Unlock unlimited
+                            research capabilities</p>
                     </div>
                 </div>
                 <button class="btn-icon" id="paymentModalClose" aria-label="Close modal">
@@ -563,63 +582,105 @@
             </div>
             <div class="modal-body" style="padding-top: 16px;">
                 <!-- Pricing Highlights -->
-                <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--surface-glass-border); border-radius: var(--radius-lg); padding: 18px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div
+                    style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--surface-glass-border); border-radius: var(--radius-lg); padding: 18px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <div>
-                        <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #a78bfa; margin-bottom: 4px;">PRO MEMBERSHIP</div>
-                        <div style="font-size: 13px; color: var(--text-secondary);">Unlimited master queries & tools</div>
+                        <div
+                            style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #a78bfa; margin-bottom: 4px;">
+                            PRO MEMBERSHIP</div>
+                        <div style="font-size: 13px; color: var(--text-secondary);">Unlimited master queries & tools
+                        </div>
                     </div>
                     <div style="text-align: right;">
-                        <div style="font-size: 26px; font-weight: 800; color: white;">₹499<span style="font-size: 14px; font-weight: 500; color: var(--text-secondary);">/mo</span></div>
-                        <div style="font-size: 11px; color: var(--accent-emerald); font-weight: 600;">Inclusive of taxes</div>
+                        <div style="font-size: 26px; font-weight: 800; color: white;">₹499<span
+                                style="font-size: 14px; font-weight: 500; color: var(--text-secondary);">/mo</span>
+                        </div>
+                        <div style="font-size: 11px; color: var(--accent-emerald); font-weight: 600;">Inclusive of taxes
+                        </div>
                     </div>
                 </div>
 
                 <!-- Features Checklist -->
                 <div style="display: flex; flex-direction: column; gap: 12px; margin: 12px 0 20px 0;">
                     <div style="display: flex; align-items: flex-start; gap: 10px;">
-                        <div style="color: var(--accent-emerald); background: rgba(16, 185, 129, 0.1); border-radius: 50%; padding: 3px; display: flex; align-items: center; justify-content: center;">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                        <div
+                            style="color: var(--accent-emerald); background: rgba(16, 185, 129, 0.1); border-radius: 50%; padding: 3px; display: flex; align-items: center; justify-content: center;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                         </div>
-                        <div style="font-size: 13px; line-height: 1.4;"><strong style="color: white;">Unlimited Daily Queries</strong> (no free credit resets)</div>
+                        <div style="font-size: 13px; line-height: 1.4;"><strong style="color: white;">Unlimited Daily
+                                Queries</strong> (no free credit resets)</div>
                     </div>
                     <div style="display: flex; align-items: flex-start; gap: 10px;">
-                        <div style="color: var(--accent-emerald); background: rgba(16, 185, 129, 0.1); border-radius: 50%; padding: 3px; display: flex; align-items: center; justify-content: center;">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                        <div
+                            style="color: var(--accent-emerald); background: rgba(16, 185, 129, 0.1); border-radius: 50%; padding: 3px; display: flex; align-items: center; justify-content: center;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                         </div>
-                        <div style="font-size: 13px; line-height: 1.4;"><strong style="color: white;">Strategic Heavy Models</strong> (Llama 3.3 70B Versatile)</div>
+                        <div style="font-size: 13px; line-height: 1.4;"><strong style="color: white;">Strategic Heavy
+                                Models</strong> (Llama 3.3 70B Versatile)</div>
                     </div>
                     <div style="display: flex; align-items: flex-start; gap: 10px;">
-                        <div style="color: var(--accent-emerald); background: rgba(16, 185, 129, 0.1); border-radius: 50%; padding: 3px; display: flex; align-items: center; justify-content: center;">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                        <div
+                            style="color: var(--accent-emerald); background: rgba(16, 185, 129, 0.1); border-radius: 50%; padding: 3px; display: flex; align-items: center; justify-content: center;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                         </div>
-                        <div style="font-size: 13px; line-height: 1.4;"><strong style="color: white;">Deep Literature Surveys</strong> & timeline maps</div>
+                        <div style="font-size: 13px; line-height: 1.4;"><strong style="color: white;">Deep Literature
+                                Surveys</strong> & timeline maps</div>
                     </div>
                     <div style="display: flex; align-items: flex-start; gap: 10px;">
-                        <div style="color: var(--accent-emerald); background: rgba(16, 185, 129, 0.1); border-radius: 50%; padding: 3px; display: flex; align-items: center; justify-content: center;">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                        <div
+                            style="color: var(--accent-emerald); background: rgba(16, 185, 129, 0.1); border-radius: 50%; padding: 3px; display: flex; align-items: center; justify-content: center;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                         </div>
-                        <div style="font-size: 13px; line-height: 1.4;"><strong style="color: white;">Extended Citation Networks</strong> (traverse up to 50 nodes)</div>
+                        <div style="font-size: 13px; line-height: 1.4;"><strong style="color: white;">Extended Citation
+                                Networks</strong> (traverse up to 50 nodes)</div>
                     </div>
                     <div style="display: flex; align-items: flex-start; gap: 10px;">
-                        <div style="color: var(--accent-emerald); background: rgba(16, 185, 129, 0.1); border-radius: 50%; padding: 3px; display: flex; align-items: center; justify-content: center;">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                        <div
+                            style="color: var(--accent-emerald); background: rgba(16, 185, 129, 0.1); border-radius: 50%; padding: 3px; display: flex; align-items: center; justify-content: center;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                         </div>
-                        <div style="font-size: 13px; line-height: 1.4;"><strong style="color: white;">Bulk Research & API Access</strong> (fully integrated)</div>
+                        <div style="font-size: 13px; line-height: 1.4;"><strong style="color: white;">Bulk Research &
+                                API Access</strong> (fully integrated)</div>
                     </div>
                 </div>
 
                 <!-- Pay Button & Trust Indicators -->
-                <button class="btn btn-primary" id="checkoutPayBtn" style="width: 100%; height: 48px; font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; background: linear-gradient(135deg, #6366f1, #a78bfa); border: none; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4); transition: transform 0.2s ease, box-shadow 0.2s ease; cursor: pointer; border-radius: var(--radius-md);">
+                <button class="btn btn-primary" id="checkoutPayBtn"
+                    style="width: 100%; height: 48px; font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; background: linear-gradient(135deg, #6366f1, #a78bfa); border: none; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4); transition: transform 0.2s ease, box-shadow 0.2s ease; cursor: pointer; border-radius: var(--radius-md);">
                     <span>Pay Securely with Razorpay</span>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <polyline points="9 18 15 12 9 6" />
+                    </svg>
                 </button>
 
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 14px;">
-                    <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary);">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <div
+                        style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary);">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
                         <span>Secure SSL Encryption & Trust</span>
                     </div>
-                    <div style="display: flex; gap: 12px; font-size: 10px; color: var(--text-muted); opacity: 0.8; font-weight: 500;">
+                    <div
+                        style="display: flex; gap: 12px; font-size: 10px; color: var(--text-muted); opacity: 0.8; font-weight: 500;">
                         <span>CARDS</span> • <span>UPI</span> • <span>NETBANKING</span> • <span>WALLETS</span>
                     </div>
                 </div>
@@ -702,8 +763,10 @@
                 <div id="profileSecurityTabContent" style="display: none;">
                     <form id="passwordForm" style="display: flex; flex-direction: column; gap: 16px;">
                         <!-- Hidden username field for accessibility -->
-                        <input type="text" id="passwordFormUsername" autocomplete="username" style="display: none;" readonly />
-                        <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">Change
+                        <input type="text" id="passwordFormUsername" autocomplete="username" style="display: none;"
+                            readonly />
+                        <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">
+                            Change
                             Password</h3>
 
                         <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
@@ -732,22 +795,35 @@
                 <!-- Tab content 3: Billing & Subscription -->
                 <div id="profileBillingTabContent" style="display: none;">
                     <!-- Active Plan Info Card -->
-                    <div id="profilePlanCard" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(167, 139, 250, 0.05)); border: 1px solid var(--surface-glass-border); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <div id="profilePlanCard"
+                        style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(167, 139, 250, 0.05)); border: 1px solid var(--surface-glass-border); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
                         <div>
-                            <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 4px;">Current Plan</div>
-                            <div id="profilePlanName" style="font-size: 18px; font-weight: 700; color: var(--text-primary);">Loading...</div>
-                            <div id="profilePlanCredits" style="font-size: 13px; color: var(--text-secondary); margin-top: 4px; display: none;"></div>
+                            <div
+                                style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 4px;">
+                                Current Plan</div>
+                            <div id="profilePlanName"
+                                style="font-size: 18px; font-weight: 700; color: var(--text-primary);">Loading...</div>
+                            <div id="profilePlanCredits"
+                                style="font-size: 13px; color: var(--text-secondary); margin-top: 4px; display: none;">
+                            </div>
                         </div>
                         <div>
-                            <button type="button" id="profileUpgradeBtn" class="btn btn-primary" style="padding: 8px 16px; font-size: 13px; font-weight: 600; display: none;">Upgrade to Pro</button>
-                            <span id="profileProBadge" style="display: none; background: linear-gradient(135deg, #6366f1, #a78bfa); color: white; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; box-shadow: 0 4px 12px rgba(99,102,241,0.2);">PRO</span>
+                            <button type="button" id="profileUpgradeBtn" class="btn btn-primary"
+                                style="padding: 8px 16px; font-size: 13px; font-weight: 600; display: none;">Upgrade to
+                                Pro</button>
+                            <span id="profileProBadge"
+                                style="display: none; background: linear-gradient(135deg, #6366f1, #a78bfa); color: white; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; box-shadow: 0 4px 12px rgba(99,102,241,0.2);">PRO</span>
                         </div>
                     </div>
 
                     <div id="billingHistorySection" style="display: flex; flex-direction: column; gap: 8px;">
-                        <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">Subscription & Billing History</h3>
-                        <div id="billingHistoryList" style="display: flex; flex-direction: column; gap: 8px; max-height: 180px; overflow-y: auto; padding-right: 4px;">
-                            <div style="font-size: 13px; color: var(--text-secondary); text-align: center; padding: 12px 0;">Loading payment history...</div>
+                        <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">
+                            Subscription & Billing History</h3>
+                        <div id="billingHistoryList"
+                            style="display: flex; flex-direction: column; gap: 8px; max-height: 180px; overflow-y: auto; padding-right: 4px;">
+                            <div
+                                style="font-size: 13px; color: var(--text-secondary); text-align: center; padding: 12px 0;">
+                                Loading payment history...</div>
                         </div>
                     </div>
                 </div>
@@ -853,7 +929,8 @@
             <form id="signin-form" class="auth-form">
                 <div class="form-group">
                     <label for="signin-email">Email Address</label>
-                    <input type="email" id="signin-email" autocomplete="username" required placeholder="name@university.edu">
+                    <input type="email" id="signin-email" autocomplete="username" required
+                        placeholder="name@university.edu">
                 </div>
                 <div class="form-group">
                     <label for="signin-password">Password</label>
@@ -868,7 +945,8 @@
             <form id="signup-form" class="auth-form" style="display: none;">
                 <div class="form-group">
                     <label for="signup-email">Email Address</label>
-                    <input type="email" id="signup-email" autocomplete="username" required placeholder="name@university.edu">
+                    <input type="email" id="signup-email" autocomplete="username" required
+                        placeholder="name@university.edu">
                 </div>
                 <div class="form-group">
                     <label for="signup-password">Password</label>

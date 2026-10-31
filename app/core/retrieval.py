@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import urllib.parse
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional
@@ -12,6 +13,81 @@ from app.config import FREEZE_RETRIEVAL, MMR_LAMBDA, RELEVANCE_FLOOR, log
 from app.core.exceptions import VectorSearchError
 
 SIMILARITY_KEYS = ("similarity", "score", "relevance", "_score", "sim")
+_PAPER_STOP_WORDS = {
+    "about",
+    "after",
+    "also",
+    "and",
+    "are",
+    "compared",
+    "could",
+    "does",
+    "enhance",
+    "for",
+    "from",
+    "how",
+    "into",
+    "its",
+    "over",
+    "standard",
+    "that",
+    "the",
+    "their",
+    "this",
+    "through",
+    "using",
+    "what",
+    "when",
+    "which",
+    "with",
+}
+
+
+def paper_relevance_score(query: str, paper: Dict[str, Any]) -> float:
+    """Score and gate external papers against the query before popularity ranking."""
+    def tokens(text: str) -> set[str]:
+        normalized = set()
+        for token in re.findall(r"[a-z0-9]+", text.lower()):
+            if token == "graphrag":
+                normalized.update(("graph", "rag"))
+                continue
+            if token == "gnn":
+                normalized.update(("graph", "neural", "network"))
+                continue
+            if token.endswith("ies") and len(token) > 5:
+                token = token[:-3] + "y"
+            elif token.endswith("s") and len(token) > 4:
+                token = token[:-1]
+            if token.endswith("ing") and len(token) > 6:
+                token = token[:-3]
+            if len(token) > 2 and token not in _PAPER_STOP_WORDS:
+                normalized.add(token)
+        return normalized
+
+    query_tokens = tokens(query)
+    if not query_tokens:
+        return 0.0
+    title_tokens = tokens(str(paper.get("title") or ""))
+    abstract_tokens = tokens(
+        " ".join(
+            str(paper.get(key) or "")
+            for key in ("abstract", "tldr", "description")
+        )
+    )
+    document_tokens = title_tokens | abstract_tokens
+
+    if {"graph", "neural", "network"} & query_tokens:
+        if not {"graph", "neural", "network"} & document_tokens:
+            return 0.0
+
+    matched = query_tokens & document_tokens
+    if len(matched) < min(2, len(query_tokens)):
+        return 0.0
+
+    weighted_matches = 2 * len(query_tokens & title_tokens) + len(
+        query_tokens & abstract_tokens
+    )
+    return min(1.0, weighted_matches / (2 * len(query_tokens)))
 
 
 async def vector_search(

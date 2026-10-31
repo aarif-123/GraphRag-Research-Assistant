@@ -6030,9 +6030,12 @@ mjx-container:not([display="true"]) {
     .composer-main textarea,
     .input-wrapper textarea {
         flex: 1 1 0;
-        min-width: 0;      /* Prevent flex child overflow */
-        font-size: 16px;   /* 16px prevents iOS auto-zoom on focus */
-        max-height: 160px; /* Tighter cap on mobile */
+        min-width: 0;
+        /* Prevent flex child overflow */
+        font-size: 16px;
+        /* 16px prevents iOS auto-zoom on focus */
+        max-height: 160px;
+        /* Tighter cap on mobile */
     }
 
     /* Shrink icon buttons slightly for narrow screens */

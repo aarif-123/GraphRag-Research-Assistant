@@ -13,36 +13,7 @@ from __future__ import annotations
 
 import os
 
-# ---------------------------------------------------------------------------
-# Constants are read from env at module import time.  We set test-specific
-# values before importing so the tests are deterministic even if the developer
-# has custom env vars set.
-# ---------------------------------------------------------------------------
-
-_TEST_PDF_MB = 5
-_TEST_AUDIO_MB = 10
-
-# Patch before import so the module sees our test values.
-os.environ["MAX_PDF_SIZE_MB"] = str(_TEST_PDF_MB)
-os.environ["MAX_AUDIO_SIZE_MB"] = str(_TEST_AUDIO_MB)
-
-# Standard _server import guard — env vars for DB connections must exist.
-# tests/conftest.py already sets them, so this is a safety belt.
-for _k, _v in {
-    "SUPABASE_URL": "https://dummy.supabase.co",
-    "SUPABASE_SERVICE_ROLE_KEY": "dummy",
-    "NEO4J_URI": "bolt://localhost:7687",
-    "NEO4J_USER": "neo4j",
-    "NEO4J_PASSWORD": "dummy",
-    "GROQ_API_KEY": "gsk_dummy",
-}.items():
-    os.environ.setdefault(_k, _v)
-
-import importlib
-
-import app.config as srv  # noqa: E402  (import after env setup)
-
-importlib.reload(srv)
+import app.config as srv
 
 _MB = 1024 * 1024
 

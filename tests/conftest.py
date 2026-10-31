@@ -15,6 +15,8 @@ _TEST_ENV_DEFAULTS = {
     "NEO4J_USER": "neo4j",
     "NEO4J_PASSWORD": "dummy_password",
     "GROQ_API_KEY": "gsk_dummy_key",
+    "MAX_PDF_SIZE_MB": "10",
+    "MAX_AUDIO_SIZE_MB": "5",
 }
 for key, val in _TEST_ENV_DEFAULTS.items():
     if not os.getenv(key):

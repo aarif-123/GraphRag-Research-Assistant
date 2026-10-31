@@ -18,7 +18,7 @@ export async function checkHealth() {
         }
         const data = await res.json();
 
-        if (data.status === 'ok' || data.ready) {
+        if (data.ready === true) {
             if (dot) dot.className = 'status-dot connected';
             if (text) text.textContent = 'Connected';
         } else {
@@ -46,7 +46,7 @@ export async function showHealthModal() {
         const data = await res.json();
 
         const checks = Object.entries(data.checks || {}).map(([name, status]) => {
-            const isOk = status === 'ok';
+            const isOk = status === 'ok' || status === 'skipped';
             return `
                 <div class="health-check">
                     <span class="health-check-name">${name}</span>

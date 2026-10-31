@@ -180,6 +180,7 @@ async def groq_chat(
 
     max_attempts = max(retries + 1, len(GROQ_API_KEYS))
     last_err = ""
+    output_truncated = False
 
     for attempt in range(max_attempts):
         # We start rotation offsets to avoid key collisions on rate limits
@@ -255,7 +256,13 @@ async def groq_chat(
                 raise LLMError(f"Groq HTTP {r.status_code}: {r.text[:300]}")
 
             res = r.json()
-            out = res["choices"][0]["message"]["content"]
+            choice = res["choices"][0]
+            if choice.get("finish_reason") == "length":
+                last_err = "Model reached its output limit; the response was incomplete."
+                output_truncated = True
+                log.warning(last_err)
+                break
+            out = choice["message"]["content"]
             if ck:
                 set_cache("llm", ck, out)
             return out
@@ -274,6 +281,8 @@ async def groq_chat(
                 continue
             await asyncio.sleep(0.5)
 
+    if output_truncated:
+        raise LLMError(last_err)
     raise LLMError(f"Groq failed after {max_attempts} attempts: {last_err}")
 
 

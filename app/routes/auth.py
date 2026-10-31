@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.clients.pool import pool
 from app.config import (
     CREDIT_COSTS,
+    CREDIT_SYSTEM_ENABLED,
     FREE_CREDITS_PER_DAY,
     FREE_TOP_K_MAX,
     PRO_TOP_K_MAX,
@@ -44,7 +45,6 @@ from app.utils.credits import get_user_plan
 from app.utils.email import (
     send_reset_email,
     send_verification_email,
-    validate_email_mailboxlayer,
 )
 
 router = APIRouter(prefix="/api/auth")
@@ -58,9 +58,6 @@ async def auth_signup(req: SignUpRequest, request: Request):
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="Invalid email address")
 
-    is_valid, err_msg = await validate_email_mailboxlayer(email)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=err_msg)
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
 
@@ -353,8 +350,16 @@ async def get_plan(request: Request):
         "plan": plan,
         "is_pro": plan == "pro",
         "credits_used": credits_used,
-        "credits_limit": None if plan == "pro" else FREE_CREDITS_PER_DAY,
-        "credits_remaining": None if plan == "pro" else max(0, FREE_CREDITS_PER_DAY - credits_used),
+        "credits_limit": (
+            None
+            if not CREDIT_SYSTEM_ENABLED or plan == "pro"
+            else FREE_CREDITS_PER_DAY
+        ),
+        "credits_remaining": (
+            None
+            if not CREDIT_SYSTEM_ENABLED or plan == "pro"
+            else max(0, FREE_CREDITS_PER_DAY - credits_used)
+        ),
         "credits_reset_at": plan_info.get("credits_reset_at"),
         "features": {
             "survey": plan == "pro",
@@ -683,13 +688,21 @@ async def get_credits(request: Request):
     plan_info = await get_user_plan(request)
     plan = plan_info.get("plan", "free")
     credits_used = plan_info.get("credits_used", 0)
-    credits_remaining = None if plan == "pro" else max(0, FREE_CREDITS_PER_DAY - credits_used)
+    credits_remaining = (
+        None
+        if not CREDIT_SYSTEM_ENABLED or plan == "pro"
+        else max(0, FREE_CREDITS_PER_DAY - credits_used)
+    )
     return {
         "plan": plan,
         "credits_used": credits_used,
-        "credits_limit": None if plan == "pro" else FREE_CREDITS_PER_DAY,
+        "credits_limit": (
+            None
+            if not CREDIT_SYSTEM_ENABLED or plan == "pro"
+            else FREE_CREDITS_PER_DAY
+        ),
         "credits_remaining": credits_remaining,
         "credits_reset_at": plan_info.get("credits_reset_at"),
-        "is_unlimited": plan == "pro",
-        "credit_costs": CREDIT_COSTS,
+        "is_unlimited": not CREDIT_SYSTEM_ENABLED or plan == "pro",
+        "credit_costs": CREDIT_COSTS if CREDIT_SYSTEM_ENABLED else {},
     }

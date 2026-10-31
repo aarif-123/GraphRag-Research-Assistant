@@ -10,7 +10,6 @@ from typing import Dict, List
 from app.clients.groq import groq_chat
 from app.clients.pool import cache_key, get_cache, set_cache
 from app.config import PLAN_MODEL, log
-from app.core.exceptions import LLMError
 from app.models.research import QueryPlan
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -169,6 +168,66 @@ Input: "Explain the limitations of LoRA and how QLoRA resolves them, including t
 
 """
 
+PLAN_QUERY_TEMPLATE = """Create a compact research plan for this query.
+Query: {query}
+Conversation context: {context}
+
+Return one JSON object only, with these fields:
+{{"standalone_query":"...","route":"rag|compare|survey|timeline|conceptual|entity_lookup|structured|title_lookup|chitchat|context_only","graph_anchors":[],"vector_keywords":[],"required_metrics":[],"named_entities":[],"search_tiers":[],"depth":"standard|high","requirements":[],"reasoning_path":"...","ambiguous":false,"cache_key":"..."}}
+
+Use short search phrases, no full-sentence search tiers. Keep lists concise. Do not add Markdown or extra keys. If uncertain, use route "rag" and derive search terms directly from the query. If context does not resolve a follow-up, set ambiguous=true and keep route "rag"."""
+
+
+def _parse_planner_response(raw_text: str) -> Dict:
+    """Parse a JSON plan, tolerating surrounding Markdown or explanatory text."""
+    candidate = raw_text.strip()
+    if candidate.startswith("```"):
+        candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate, flags=re.IGNORECASE)
+
+    try:
+        data = json.loads(candidate)
+    except json.JSONDecodeError:
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        data = json.loads(candidate[start : end + 1])
+
+    if not isinstance(data, dict):
+        raise ValueError("Planner response must be a JSON object")
+    return data
+
+
+def _fallback_plan_data(query: str) -> Dict:
+    stop_words = {
+        "about", "after", "also", "and", "are", "can", "compare", "does", "for",
+        "from", "how", "into", "its", "the", "their", "this", "through", "what",
+        "when", "which", "with", "would",
+    }
+    keywords = list(
+        dict.fromkeys(
+            word
+            for word in re.findall(r"[a-z0-9][a-z0-9-]*", query.lower())
+            if len(word) > 2 and word not in stop_words
+        )
+    )[:8]
+    search_query = " ".join(keywords) or query.strip()
+    return {
+        "standalone_query": query,
+        "route": "rag",
+        "graph_anchors": [],
+        "vector_keywords": keywords[:5],
+        "required_metrics": [],
+        "reasoning_path": "Planner fallback: retrieve evidence using query keywords.",
+        "search_tiers": [search_query],
+    }
+
+
+def _string_list(value: object, limit: int) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()][:limit]
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # plan_query  (v2 — uses plan_v2 cache prefix to avoid stale v1 hits)
@@ -183,50 +242,73 @@ async def plan_query(query: str, context: str = "") -> QueryPlan:
         log.debug("Plan cache hit")
         return cached
 
-    prompt = SUPER_MASTER_PROMPT.format(query=query, context=context or "None")
+    prompt = PLAN_QUERY_TEMPLATE.format(query=query, context=context or "None")
     try:
         raw_text = await groq_chat(
             [{"role": "user", "content": prompt}],
             PLAN_MODEL,
             temperature=0.0,
-            max_tokens=800,
-            json_mode=True,
+            max_tokens=700,
         )
-        data = json.loads(raw_text.strip())
-    except (LLMError, json.JSONDecodeError, Exception) as e:
+        data = _parse_planner_response(raw_text)
+    except Exception as e:
         log.warning(f"Plan failed ({e}), using fallback")
-        data = {}
+        data = _fallback_plan_data(query)
 
     # Validate and sanitise named_entities and search_tiers
     raw_entities = data.get("named_entities", [])
-    named_entities: List[Dict] = [e for e in raw_entities if isinstance(e, dict) and e.get("name")]
-
-    raw_tiers = data.get("search_tiers", [])
-    search_tiers: List[str] = [
-        str(t).strip() for t in raw_tiers if isinstance(t, str) and t.strip()
-    ][:7]
+    named_entities: List[Dict] = [
+        entity
+        for entity in raw_entities
+        if isinstance(entity, dict)
+        and isinstance(entity.get("name"), str)
+        and entity["name"].strip()
+    ] if isinstance(raw_entities, list) else []
+    search_tiers = _string_list(data.get("search_tiers"), 7)
 
     depth = data.get("depth", "standard")
     if depth not in ("standard", "high"):
         depth = "standard"
 
-    raw_reqs = data.get("requirements", [])
-    requirements: List[str] = [str(r) for r in raw_reqs if isinstance(r, str) and r.strip()]
+    valid_routes = {
+        "entity_lookup",
+        "structured",
+        "title_lookup",
+        "compare",
+        "timeline",
+        "survey",
+        "conceptual",
+        "rag",
+        "chitchat",
+        "context_only",
+    }
+    route = data.get("route")
+    if not isinstance(route, str) or route not in valid_routes:
+        route = "rag"
+    standalone_query = data.get("standalone_query")
+    if not isinstance(standalone_query, str) or not standalone_query.strip():
+        standalone_query = query
+    reasoning_path = data.get("reasoning_path", "")
+    if not isinstance(reasoning_path, str):
+        reasoning_path = ""
+    cache_key_str = data.get("cache_key")
+    if not isinstance(cache_key_str, str):
+        cache_key_str = re.sub(r"[^\w\s]", "", query.lower())
 
     plan = QueryPlan(
-        standalone_query=data.get("standalone_query", query),
-        route=data.get("route", "rag"),
-        graph_anchors=data.get("graph_anchors", [])[:3],
-        vector_keywords=data.get("vector_keywords", [])[:5],
-        required_metrics=data.get("required_metrics", []),
-        reasoning_path=data.get("reasoning_path", ""),
-        ambiguous=data.get("ambiguous", False),
-        cache_key_str=data.get("cache_key", re.sub(r"[^\w\s]", "", query.lower())),
+        standalone_query=standalone_query,
+        route=route,
+        graph_anchors=_string_list(data.get("graph_anchors"), 3),
+        vector_keywords=_string_list(data.get("vector_keywords"), 5),
+        required_metrics=_string_list(data.get("required_metrics"), 10),
+        reasoning_path=reasoning_path,
+        ambiguous=data.get("ambiguous", False) is True,
+        cache_key_str=cache_key_str,
         raw=data,
         named_entities=named_entities,
         search_tiers=search_tiers,
         depth=depth,
-        requirements=requirements,
+        requirements=_string_list(data.get("requirements"), 10),
     )
     set_cache("plan", ck, plan)
     log.info(

@@ -16,6 +16,7 @@ from app.clients.groq import create_embedding, groq_chat
 from app.clients.pool import pool
 from app.config import (
     CREDIT_COSTS,
+    CREDIT_SYSTEM_ENABLED,
     FREE_CREDITS_PER_DAY,
     FREE_TOP_K_MAX,
     HEAVY_MODEL,
@@ -44,6 +45,7 @@ from app.core.planner import (
 from app.core.retrieval import (
     merge_adjacent_chunks,
     pack_context_within_budget,
+    paper_relevance_score,
     retrieve_arxiv_context,
     run_vector_pipeline,
 )
@@ -600,6 +602,10 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     # ── Full RAG ──────────────────────────────────────────────────────
     warning = None
 
+    def add_warning(message: str) -> None:
+        nonlocal warning
+        warning = f"{warning}; {message}" if warning else message
+
     # Combine graph anchors and vector keywords to preserve both specific entities and domain terms
     search_keywords = (plan.graph_anchors or []) + (plan.vector_keywords or [])
     search_query = " ".join(search_keywords) if search_keywords else query
@@ -613,14 +619,16 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 anchors=plan.graph_anchors,
             )
         except GraphRetrievalError:
-            warning = "Graph retrieval unavailable."
+            add_warning("Graph retrieval unavailable.")
             return []
 
     async def fetch_supabase():
         try:
             embedding = await create_embedding(search_query)
         except EmbeddingError as e:
-            raise HTTPException(502, str(e))
+            log.warning(f"[{rid}] Embedding retrieval unavailable: {e}")
+            add_warning("Vector retrieval unavailable because embeddings could not be generated.")
+            return []
 
         try:
             # Retrieve from Supabase globally in parallel with graph retrieval
@@ -628,7 +636,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 query, embedding, req.top_k, req.min_similarity, [], rid
             )
         except VectorSearchError as e:
-            raise HTTPException(502, str(e))
+            log.warning(f"[{rid}] Vector retrieval unavailable: {e}")
+            add_warning("Vector retrieval unavailable.")
+            return []
 
     async def fetch_arxiv():
         # ── Tiered entity-first retrieval ──────────────────────────────────
@@ -663,7 +673,12 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             )
             return merged[:14]
         # ── Default single-query path ────────────────────────────────────────
-        return await retrieve_arxiv_context(search_query, limit=10)
+        try:
+            return await retrieve_arxiv_context(search_query, limit=10)
+        except Exception as e:
+            log.warning(f"[{rid}] ArXiv retrieval unavailable: {e}")
+            add_warning("ArXiv retrieval unavailable.")
+            return []
 
     async def fetch_s2():
         try:
@@ -777,7 +792,12 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     # Rank candidates by hybrid significance score (relevance rank + citation count + recency bonus)
     import math
 
+    relevant_candidates = []
     for p in all_candidates:
+        relevance = paper_relevance_score(query, p)
+        if relevance <= 0:
+            continue
+        p["_relevance_score"] = relevance
         # Base rank score (lower rank in search is better: 10 - rank)
         rank_score = max(0, 10 - p.get("_rank", 0))
 
@@ -797,9 +817,18 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             pass
 
         p["_significance_score"] = rank_score + citation_bonus + recency_bonus
+        relevant_candidates.append(p)
 
-    # Sort candidates by significance score in descending order
-    all_candidates.sort(key=lambda x: x.get("_significance_score", 0.0), reverse=True)
+    if len(relevant_candidates) < len(all_candidates):
+        log.info(
+            f"[{rid}] Filtered {len(all_candidates) - len(relevant_candidates)} "
+            "papers below the query-relevance threshold"
+        )
+    all_candidates = relevant_candidates
+    all_candidates.sort(
+        key=lambda x: (x.get("_relevance_score", 0.0), x.get("_significance_score", 0.0)),
+        reverse=True,
+    )
 
     # Select the top 8 overall papers
     top_papers = all_candidates[:8]
@@ -842,25 +871,16 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     #         "warning": "No context or external papers retrieved.",
     #     }
 
-    # New conditional empty-evidence check:
-    # Only force defensive refusal if the user was looking for specific entities/anchors (plan.graph_anchors is not empty).
-    # If graph_anchors is empty, let it fall through to the main LLM generation (which uses Rule 4/5 for general synthesis).
-    if not chunks and not arxiv_papers and not s2_papers and not pdf_context and plan.graph_anchors:
-        sys_p = (
-            "You are Aether, a GraphRAG research assistant. No specific papers or context chunks could be retrieved for this query.\n"
-            "CRITICAL: Do NOT hallucinate, guess, or invent citations, authors, papers, or specific scientific results.\n"
-            "Explain clearly that you do not have the source literature in your database, and ask the user to upload the PDF or provide a specific identifier (like DOI or arXiv ID)."
-        )
-        msgs = await compile_chat_messages(sys_p, req.messages)
-        try:
-            answer = await groq_chat(msgs, REASON_MODEL, temperature=req.temperature)
-        except LLMError as e:
-            raise HTTPException(502, str(e))
-
+    if not chunks and not graph_nodes and not arxiv_papers and not s2_papers and not pdf_context:
+        add_warning("No research sources could be retrieved; no evidence-based answer was generated.")
         latency = int((time.time() - t0) * 1000)
         return {
             "request_id": rid,
-            "answer": answer,
+            "answer": (
+                "I couldn't retrieve research sources for this question, so I can't provide a "
+                "grounded answer right now. Please try again later or provide a paper, DOI, or "
+                "arXiv identifier to analyze."
+            ),
             "route": plan.route,
             "plan": {
                 "standalone_query": plan.standalone_query,
@@ -874,10 +894,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             "code_repos": [],
             "verification": None,
             "latency_ms": latency,
-            "model_used": REASON_MODEL,
-            "warning": "No context or external papers retrieved.",
+            "model_used": None,
+            "warning": warning,
         }
-    # [END OPTION A FALLBACK FIX]
 
     unique_datasets, all_repos = await retrieve_datasets_and_repos(
         query, arxiv_papers, s2_papers, graph_nodes
@@ -909,14 +928,21 @@ async def _chat_impl(req: ConversationRequest, request: Request):
 
     msgs = await compile_chat_messages(prompt, req.messages)
     try:
-        answer = await groq_chat(msgs, model, temperature=req.temperature, max_tokens=2000)
+        answer = await groq_chat(msgs, model, temperature=req.temperature, max_tokens=3500)
     except LLMError as e:
         raise HTTPException(502, str(e))
 
     verification = None
-    if req.verify and chunks:
+    if req.verify and (chunks or graph_nodes or arxiv_papers or s2_papers):
         answer, verification, warning = await apply_verification(
-            answer, chunks, REASON_MODEL, rid, warning, arxiv_papers, s2_papers
+            answer,
+            chunks,
+            REASON_MODEL,
+            rid,
+            warning,
+            arxiv_papers,
+            s2_papers,
+            graph_nodes,
         )
 
     if verification:
@@ -928,6 +954,7 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     )
 
     latency = int((time.time() - t0) * 1000)
+    credit_cost = CREDIT_COSTS.get("chat", 1) if CREDIT_SYSTEM_ENABLED else 0
     return {
         "request_id": rid,
         "answer": answer,
@@ -948,17 +975,21 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         "warning": warning,
         "credits": {
             "plan": user_plan,
-            "credits_used": plan_info.get("credits_used", 0) + CREDIT_COSTS.get("chat", 1),
+            "credits_used": plan_info.get("credits_used", 0) + credit_cost,
             "credits_remaining": None
-            if user_plan == "pro"
+            if not CREDIT_SYSTEM_ENABLED or user_plan == "pro"
             else max(
                 0,
                 FREE_CREDITS_PER_DAY
                 - plan_info.get("credits_used", 0)
-                - CREDIT_COSTS.get("chat", 1),
+                - credit_cost,
             ),
-            "credits_limit": None if user_plan == "pro" else FREE_CREDITS_PER_DAY,
-            "is_unlimited": user_plan == "pro",
+            "credits_limit": (
+                None
+                if not CREDIT_SYSTEM_ENABLED or user_plan == "pro"
+                else FREE_CREDITS_PER_DAY
+            ),
+            "is_unlimited": not CREDIT_SYSTEM_ENABLED or user_plan == "pro",
         },
     }
 

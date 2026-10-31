@@ -2,7 +2,7 @@
 
 > **Graph-Augmented Retrieval with Multi-Source Academic Enrichment, Anti-Hallucination Verification, and a Self-Hosted ArXiv MCP Server**
 >
-> Ask research questions — get grounded, cited answers enriched with live citation stats, GitHub code repos, and dataset links — powered by a Neo4j knowledge graph, Supabase pgvector, MongoDB Atlas, and Groq LLMs.
+> Ask research questions — get grounded, cited answers enriched with academic papers, code repositories, and dataset links. MongoDB stores accounts and history; Groq and external academic APIs power research while graph/vector retrieval is paused by default.
 
 <div align="center">
 
@@ -18,7 +18,7 @@
 
 > [!NOTE]
 > **Neo4j and Supabase are integrated but currently paused** (`FREEZE_RETRIEVAL=true`).
-> The system runs in external-API-only mode because the Neo4j instance is offline and database retrieval is frozen. All graph and vector retrieval code is preserved and can be re-enabled when the databases are online and active (the Supabase pgvector schema expects 768-dimensional embeddings).
+> The system runs in external-API-only mode. MongoDB remains required for accounts and history; Groq is required for planning and answer generation. Neo4j and Supabase credentials are not needed while retrieval is frozen. All graph and vector retrieval code is preserved and can be re-enabled when those databases are ready (the Supabase pgvector schema expects 768-dimensional embeddings).
 
 ---
 
@@ -41,6 +41,7 @@
 - [Environment Variables](#-environment-variables)
 - [Running the Project](#-running-the-project)
 - [API Reference](#-api-reference)
+- [Detailed Backend Documentation](docs/backend/README.md)
 - [Anti-Hallucination Pipeline](#-anti-hallucination-pipeline)
 - [Credit & Subscription System](#-credit--subscription-system)
 - [Deployment](#-deployment)
@@ -67,7 +68,8 @@ pip install -r requirements.txt
 
 # 4. Configure environment
 cp .env.example .env.local
-# Edit .env.local and fill in your real credentials (Supabase, Neo4j, Groq, etc.)
+# Edit .env.local. Configure MongoDB and Groq for the current frozen-retrieval mode.
+# Supabase and Neo4j are only needed if you enable database retrieval.
 
 # 5. Validate your configuration before starting
 python scripts/validate_env.py --env-file .env.local
@@ -143,14 +145,15 @@ Every push and pull request to `main` triggers the following pipeline:
 
 ## 🧠 Overview
 
-**Aether GraphRAG Research Assistant v4.5** is a production-grade, full-stack AI research tool that answers academic queries with grounded, fully-cited responses. It combines:
+**Aether GraphRAG Research Assistant v4.5** is a full-stack AI research tool that answers academic queries with grounded, cited responses. With retrieval frozen by default, it uses external research sources and MongoDB-backed accounts/history. It combines:
 
 - **Neo4j graph database** *(integrated, currently paused)* — 196,875 nodes & 398,961 relationships across `CITES`, `WRITTEN_BY`, `PUBLISHED_IN`, `SIMILAR_TO`, `HAS_TOPIC`. Full traversal code is in place for future activation.
 - **Supabase pgvector** *(integrated, currently paused)* — three-tier vector search (seed-exact → seed-fuzzy → expanded graph neighbours) with RRF fusion and MMR re-ranking, ready to re-enable.
 - **Seven external academic sources**: ArXiv XML API, ArXiv MCP Server (SSE), Semantic Scholar, Papers With Code, OpenAlex, CORE Open Access, Wikipedia, and Kaggle.
 - **Strategic Planning Brain**: a single `plan_query()` LLM call that classifies intent into 9 routes, extracts graph anchors, vector keywords, and required metrics — eliminating sequential LLM roundtrips.
 - **Anti-hallucination pipeline**: zero-temperature grounded generation + dual-pass LLM verification (`PASS/FAIL` with confidence scoring).
-- **MongoDB-backed auth** with JWT tokens, bcrypt password hashing, email verification, and a Razorpay-integrated freemium credit system.
+- **MongoDB-backed auth** with JWT tokens and bcrypt password hashing. Email verification is optional and disabled by default; Supabase is not used for sign-up or login.
+- Credit enforcement is temporarily disabled by default and can be re-enabled with `CREDIT_SYSTEM_ENABLED=true`.
 - **Self-hosted ArXiv MCP Server** mounted at `/sse` using the Model Context Protocol (FastMCP), with deadlock-safe self-loopback detection.
 
 ---
@@ -432,11 +435,13 @@ flowchart TD
 | **Wikipedia** | Dataset/concept contextual summaries |
 | **Kaggle** | Dataset enrichment for ML research queries |
 
+Research results can include datasets extracted from paper metadata or found through Kaggle and Hugging Face searches. The **Datasets** tab in the Sources & Evidence panel displays available dataset names, descriptions, source labels, modalities, and valid links. Dataset availability depends on the retrieved papers, query suggestions, and provider responses; an empty tab means no dataset results were returned for that query.
+
 ### 🔌 Auth & Session Management
 
 - **MongoDB Atlas** for users, chat sessions, payment records, and uploaded PDFs
 - **JWT** (`HS256`, 1-week expiry) with `PyJWT`; passwords hashed with `bcrypt`
-- **Email verification** flow (verify-link + token), **password reset**, **profile update**
+- **Email/password signup and login** with optional email verification, **password reset**, **profile update**
 - **Multi-turn conversation** with full session persistence (`/api/history`)
 
 ### 💳 Credit & Subscription System
@@ -449,6 +454,7 @@ flowchart TD
 - Credit costs: `query=1`, `chat=1`, `timeline=3`, `compare=3`, `pdf=5`
 - **Razorpay** payment gateway integration (`create-order` + `verify-payment` + HMAC-SHA256 signature validation)
 - Credits reset daily at midnight UTC
+- Set `CREDIT_SYSTEM_ENABLED=true` to enforce credit limits and deductions. When disabled (the default), credit checks are skipped and API responses report unlimited credits. Subscription-based feature gates remain in place.
 
 ### 🛡️ Token Engineering & Anti-Hallucination
 
@@ -465,6 +471,7 @@ flowchart TD
 - JWT login/signup flow (`landing.html` → `index.html`)
 - **Mermaid.js v10** auto-rendering with inline-style sanitization and zoom/fullscreen modal
 - Adjustable parameters: Top K, Min Similarity, Model selection, Hallucination check toggle
+- **Dataset results panel**: open the Datasets tab in Sources & Evidence to browse datasets returned with a research answer, including source details and available provider links
 - Audio transcription (`/api/audio/transcribe`) and PDF upload (`/api/upload/pdf`)
 
 ---
@@ -591,11 +598,11 @@ GraphRag-Research-Assistant/
 ## 📦 Prerequisites
 
 - Python **3.11+**
-- **Neo4j Aura** instance loaded with publication graph data
-- **Supabase** project with `match_paper_chunks` and `hybrid_search` RPC functions
-- **MongoDB Atlas** cluster (free tier works)
-- **Groq API** key → [console.groq.com](https://console.groq.com)
+- **MongoDB** connection (required for accounts, chat history, and uploaded files)
+- **Groq API** key → [console.groq.com](https://console.groq.com) (required for planning and answer generation)
+- **Neo4j Aura** and **Supabase pgvector** are optional while `FREEZE_RETRIEVAL=true`; configure them only when enabling graph/vector retrieval
 - **HuggingFace** token (required on Vercel; optional locally with `sentence-transformers`)
+- External research providers (ArXiv is public; CORE, Semantic Scholar, Kaggle, and others may need provider-specific credentials)
 - *(Optional)* **Razorpay** account for subscription payments
 - *(Optional)* **Upstash Redis** for persistent PDF chunk caching
 
@@ -648,11 +655,15 @@ cp .env.example .env
 # -- MongoDB -------------------------------------------------------
 MONGODB_URI=mongodb+srv://user:password@cluster0.mongodb.net/
 MONGODB_DB_NAME=aether_research_assistant
+REQUIRE_EMAIL_VERIFICATION=false
+CREDIT_SYSTEM_ENABLED=false
 JWT_SECRET=your-jwt-signing-secret-256-bit
 
 # -- Supabase ------------------------------------------------------
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+# Optional; use only the public anon key if a browser client needs it.
+SUPABASE_ANON_KEY=your-public-anon-key
 
 # -- Neo4j ---------------------------------------------------------
 NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
@@ -699,10 +710,14 @@ RATE_LIMIT_PER_MIN=30
 REQUEST_TIMEOUT=60
 
 # -- Feature flags -------------------------------------------------
-FREEZE_RETRIEVAL=false   # set true to disable live DB/vector retrieval (offline mode)
+FREEZE_RETRIEVAL=true    # set false to enable Supabase/Neo4j retrieval; external paper sources remain available
 ENV=prod
 PORT=8000
 ```
+
+Never expose `SUPABASE_SERVICE_ROLE_KEY` to a browser or return it from a public
+configuration endpoint. If it has previously been exposed, rotate it in Supabase
+and update the deployment environment.
 
 ---
 
@@ -738,8 +753,9 @@ vercel dev
 |---|---|
 | `http://localhost:8000/app` | Frontend UI (redirects to `landing.html` if unauthenticated) |
 | `http://localhost:8000/docs` | Swagger / OpenAPI interactive docs |
-| `http://localhost:8000/api/health` | Quick health check |
-| `http://localhost:8000/api/health/full` | Full diagnostics (DB connectivity + embedding) |
+| `http://localhost:8000/api/health` | Liveness and readiness status |
+| `http://localhost:8000/api/ready` | Readiness probe (503 until configured) |
+| `http://localhost:8000/api/health/full` | Full dependency diagnostics; retrieval services are skipped when frozen |
 
 ---
 
@@ -819,11 +835,12 @@ vercel dev
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/health` | Quick connectivity health check |
-| `GET` | `/api/health/full` | Full diagnostics: DB + embedding + external APIs |
+| `GET` | `/api/health` | Liveness and readiness status |
+| `GET` | `/api/ready` | Readiness probe; returns 503 until the API is configured |
+| `GET` | `/api/health/full` | Full dependency diagnostics; retrieval services are skipped when frozen |
 | `GET` | `/api/stats` | Neo4j + Supabase database statistics |
 | `GET` | `/api/models` | List of configured LLM models |
-| `GET` | `/api/config` | Runtime configuration snapshot |
+| `GET` | `/api/config` | Public runtime config; never returns the service-role key |
 
 ---
 

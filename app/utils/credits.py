@@ -12,6 +12,7 @@ from fastapi import HTTPException, Request
 
 from app.config import (
     CREDIT_COSTS,
+    CREDIT_SYSTEM_ENABLED,
     FREE_CREDITS_PER_DAY,
     RATE_LIMIT,
     log,
@@ -69,6 +70,14 @@ async def get_user_plan(request: Request) -> Dict[str, Any]:
         if not user:
             return {"plan": "free", "credits_used": 0, "credits_reset_at": None}
 
+        if not CREDIT_SYSTEM_ENABLED:
+            return {
+                "plan": user.get("plan", "free"),
+                "credits_used": 0,
+                "credits_reset_at": None,
+                "user_id": uid,
+            }
+
         now = datetime.now(timezone.utc)
         now_naive = now.replace(tzinfo=None)
         reset_at = user.get("credits_reset_at")
@@ -107,6 +116,9 @@ async def check_and_deduct_credit(request: Request, action: str) -> None:
     """Check if user has credits remaining and deduct one.
     Raises HTTP 402 if exhausted. Pro users bypass the credit system entirely.
     """
+    if not CREDIT_SYSTEM_ENABLED:
+        return
+
     from app.clients.pool import pool  # lazy import
 
     plan_info = await get_user_plan(request)
@@ -152,10 +164,14 @@ async def append_credits_snapshot(res: Any, request: Request) -> Any:
                 "plan": _plan,
                 "credits_used": _used,
                 "credits_remaining": None
-                if _plan == "pro"
+                if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
                 else max(0, FREE_CREDITS_PER_DAY - _used),
-                "credits_limit": None if _plan == "pro" else FREE_CREDITS_PER_DAY,
-                "is_unlimited": _plan == "pro",
+                "credits_limit": (
+                    None
+                    if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
+                    else FREE_CREDITS_PER_DAY
+                ),
+                "is_unlimited": not CREDIT_SYSTEM_ENABLED or _plan == "pro",
             }
         except Exception as e:
             log.warning(f"Failed to append credits snapshot: {e}")

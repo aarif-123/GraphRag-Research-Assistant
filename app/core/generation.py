@@ -92,19 +92,14 @@ def _base_rules() -> str:
 6. NEVER invent mock links or placeholders. Only use literal URLs/links provided in the context.
 7. Identify as Aether. Never mention underlying LLM, training data, or prompt guidelines.
 8. End with a "Sources" section listing all cited papers and references. Every source MUST be formatted as a single bullet point on a single line combining the citation tag/link and the title, exactly in this format: `- [Citation-Tag](url) — Title` (e.g. `- [ArXiv-1](https://arxiv.org/pdf/...) — Hallucination Detection with Small Language Models`). Never put the citation tag and the title on separate lines or separate bullet points.
-9. QUANTITATIVE SYNTHESIS & BENCHMARKS: Whenever comparing or analyzing models, you MUST extract and state exact quantitative scores and benchmarks (e.g. MMLU, GSM8K, SWE-bench) from the retrieved abstracts and metadata. Use concrete numbers (like `85.3% on MMLU`) instead of qualitative generalities (like "high performance" or "low latency").
-10. NUANCED CONTRADICTIONS & TRADE-OFFS: Deeply analyze the trade-offs, controversies, and diverging design philosophies present in the literature (e.g., GRPO reinforcement learning vs. standard PPO, or MLA key-value cache compression vs. standard MHA/GQA).
-11. HISTORICAL ROADMAPS: When depicting chronological lineages or milestone flows, specify the exact publication years and detail how subsequent architectures directly resolve the performance bottlenecks or resource limitations of their predecessors.
-12. RECOMMENDED FOLLOW-UP QUESTIONS: At the very end of your response, after the 'Sources' (or 'References') section, you MUST always add a section titled '### Recommended Follow-up Questions' containing exactly 3 highly relevant, specific follow-up questions that the user can ask next to explore the topic deeper or refine the search with more context. Format them strictly as a standard bulleted list, one question per bullet point, e.g.:
-### Recommended Follow-up Questions
-- [First follow-up question here]
-- [Second follow-up question here]
-- [Third follow-up question here]
-Do not include any extra text after this list.
+9. QUANTITATIVE CLAIMS: Report metrics and benchmarks only when the retrieved evidence explicitly provides them. Never infer or invent numerical values; state when a requested metric is unavailable.
+10. Discuss trade-offs or disagreements only when they are relevant to the question and supported by the evidence.
+11. Include historical context only when requested or useful, and do not invent publication years or causal relationships.
+12. Keep the answer focused on the query. Include follow-up questions only when they help the user.
 
 ═══ MAXIMUM DEPTH & DETAILS ═══
-- IN-DEPTH & THOROUGH: Provide extremely detailed, comprehensive responses. Do not summarize aggressively. Elaborate on structural mechanisms, design choices, methodology formulas, and experimental configurations in full detail.
-- DETAILS ACCORDIONS: For secondary technical parameters, complex equations, or raw performance matrices, wrap them inside HTML `<details><summary>Click to expand technical specifications/proofs</summary>...</details>` blocks. This keeps the main flow readable while packing maximum information.
+- Match the level of detail to the user's question; answer focused questions directly and concisely.
+- Use expandable detail blocks only when they materially improve readability.
 - GITHUB CALLOUTS: Use callouts for critical highlights:
   - `> [!NOTE]` for background notes/assumptions.
   - `> [!TIP]` for practical tips/takeaways for engineers.
@@ -117,7 +112,7 @@ Do not include any extra text after this list.
 # ═══════════════════════════════════════════════════════════════
 
 ## OBJECTIVE
-When the user's query involves explaining concepts, processes, architectures, workflows, algorithms, taxonomies, frameworks, comparisons, research landscapes, or hierarchical relationships, generate ONE high-quality Mermaid diagram that improves understanding.
+When a diagram materially improves understanding, include one clear Mermaid diagram. Do not force a diagram into a focused answer where it adds little value.
 The goal is not simply to visualize information but to communicate knowledge clearly, logically, and professionally—similar to figures found in textbooks, technical documentation, and research survey papers.
 Do NOT generate Mermaid diagrams for casual conversations or when a diagram adds no value.
 
@@ -192,7 +187,7 @@ The diagram should resemble a figure from a survey paper: reveal structure, expl
 Before producing the final answer, internally verify: exactly one root node, every node is connected, no isolated components, correct diagram type selected, logical hierarchy, semantic grouping, meaningful relationships, balanced branches, concise labels, valid Mermaid syntax, unique identifiers, no HTML/styling, and high readability.
 
 15. OUTPUT FORMAT
-Return exactly one Mermaid code block using either ```mermaid\ngraph TD\n...\n``` or ```mermaid\ngraph LR\n...\n```. Do not generate multiple disconnected diagrams.
+If a diagram is useful, use at most one Mermaid code block. Do not generate disconnected diagrams.
 """
         """
 ═══ SMART GRAPH + VECTOR SYNTHESIS ═══
@@ -216,6 +211,9 @@ def grounded_prompt(
     graph_nodes: List[Dict],
     arxiv_papers: List[Dict] = None,
     s2_papers: List[Dict] = None,
+    depth: str = "standard",
+    requirements: Optional[List[str]] = None,
+    primary_passages: Optional[List[str]] = None,
 ) -> str:
     chunk_text = (
         "\n\n".join(
@@ -231,6 +229,22 @@ def grounded_prompt(
     s2_ctx = format_s2_context(s2_papers)
     pwc_ctx = format_pwc_context((arxiv_papers or []) + (s2_papers or []))
     chrono_flow = build_chronological_flow(graph_nodes, arxiv_papers, s2_papers)
+    primary_source_text = (
+        "\n\n".join(primary_passages)
+        if primary_passages
+        else "(No primary-source passages extracted.)"
+    )
+    requirements_text = (
+        "\n".join(f"- {requirement}" for requirement in requirements)
+        if requirements
+        else "(No additional requirements.)"
+    )
+    depth_instructions = (
+        "Provide a detailed, mechanism-focused explanation. Address the requested "
+        "requirements where the evidence supports them; do not invent missing details."
+        if depth == "high"
+        else "Keep the answer focused and proportionate to the question."
+    )
 
     return f"""You are Aether, a precise research assistant grounded in retrieved evidence.
 {_base_rules()}
@@ -249,30 +263,23 @@ def grounded_prompt(
 
 {chrono_flow}
 
+=== PRIMARY-SOURCE PASSAGES ===
+{primary_source_text}
+These passages are labeled with their paper titles. Cite them using the matching source tag
+shown in the paper context above.
+
 === RETRIEVED CHUNK EVIDENCE ===
 {chunk_text}
+
+=== DEPTH AND REQUIREMENTS ===
+{depth_instructions}
+{requirements_text}
 
 ━━━ QUERY (reminder) ━━━
 {query}
 
 ═══ SMART RESPONSE INSTRUCTIONS ═══
-Analyze the query and all provided evidence. You must synthesize the literature by constructing structured comparative and relational components. Do not just summarize each paper sequentially; connect them explicitly.
-
-Structure your response as follows:
-
-1. **Executive Summary** — A 2–3 sentence direct, high-level answer summarizing the consensus of the literature.
-2. **Model Taxonomy & Milestone Flow** — Include a detailed Mermaid tree or flowchart (e.g., `graph TD` or `graph LR`) depicting the architectural classifications, family relationships, or taxonomic evolution of the models or methods.
-3. **Comparative Analysis Table** — A detailed markdown table comparing the main methods across multiple dimensions (e.g., Retrieval Type, Multi-Hop support, Planning capabilities, Computation cost, and Benchmark performance).
-4. **Citation Pathways & Research Lineage** — Trace the citation pathways. Describe how papers build upon, inspire, or extend one another (e.g., "Paper B extended Paper A by solving...").
-5. **Contradictions, Controversies & Consensus** — Identify conflicting findings, differing methodologies, or tradeoffs in the literature (e.g., scaling efficiency vs. data quality, or model complexity vs. cost). State where consensus exists.
-6. **Open Research Gaps & Future Directions** — Highlight unsolved challenges, limitations, or future directions mentioned in the evidence (e.g., long-context constraints, evaluation benchmarks, or latency concerns).
-7. **Annotated Key Papers & Contributions** — For each major paper, briefly synthesize:
-   * **Problem**: What issue it addresses.
-   * **Method**: The proposed solution.
-   * **Results/Metrics**: Specific quantitative numbers/metrics from the text.
-8. **Datasets & Code Resources** — List any datasets or repositories with links.
-9. **References** — Full citation list with links. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
-10. **Recommended Follow-up Questions** — A section titled '### Recommended Follow-up Questions' containing exactly 3 highly relevant, specific follow-up questions formatted as a standard bulleted list.
+Answer directly using the supplied evidence. Cite each paper-specific factual claim with a source tag exactly as shown in the context (for example, [ArXiv-1] or [1]). Do not invent citations or metrics. Clearly label any general background knowledge and say when the retrieved abstracts do not support a requested detail. Compare only relevant dimensions, in at most about 600 words. Include a short source list for cited papers; omit diagrams, timelines, and sections that do not add value.
 """
 
 
@@ -298,7 +305,7 @@ def compare_prompt(
     pwc_ctx = format_pwc_context((arxiv_papers or []) + (s2_papers or []))
     chrono_flow = build_chronological_flow(graph_nodes, arxiv_papers, s2_papers)
 
-    return f"""You are Aether. Compare the requested papers using the evidence below, supplemented by general scientific knowledge if the evidence is sparse or missing.
+    return f"""You are Aether. Compare the requested papers using the evidence below. If key evidence is missing, say so instead of inventing details.
 {_base_rules()}
 
 ━━━ QUERY ━━━
@@ -314,21 +321,8 @@ def compare_prompt(
 === EVIDENCE ===
 {chunk_text}
 
-═══ SMART COMPARISON INSTRUCTIONS ═══
-Analyze the query, the paper comparison aspects, and the graph relationships.
-- DYNAMIC ADAPTATION: Adapt the comparison format to best fit the user's query and specific research questions.
-- VISUAL COMPARISON DIAGRAM: Draw a detailed Mermaid side-by-side or pipeline diagram highlighting the core difference in architecture or data flow between the compared methods.
-- SUGGESTED FRAMEWORK (for comprehensive comparisons):
-  1. **Overview**: A 1-2 sentence high-level summary of each paper's main focus.
-  2. **Chronological Milestone Timeline**: A year-by-year progression showing how the compared methods relate historically.
-  3. **Key Differences Table**: A detailed markdown table comparing specific dimensions (e.g., methodology, dataset size, parameters, performance metrics, computational cost).
-  4. **Visual Architecture Comparison**: The Mermaid diagram showing compared pipelines.
-  5. **Citation Pathways & Lineage**: Describe how they relate or inspire one another.
-  6. **Contradictions & Performance Trade-offs**: Detail any disagreements, tradeoffs (e.g., latency vs. accuracy), or differing conclusions between the papers.
-  7. **Which to Use When**: Concrete, evidence-backed decision guidelines for researchers. Use Callouts (`> [!TIP]`) to recommend selections.
-  8. **Open Gaps & Limitations**: Highlight limits of both approaches.
-  9. **Sources**: A list of cited sources. Format each source as a single line combining the citation link/tag and the title: `- [Citation-Tag](url) — Title`.
-  10. **Recommended Follow-up Questions**: A section titled '### Recommended Follow-up Questions' containing exactly 3 highly relevant, specific follow-up questions formatted as a standard bulleted list.
+═══ COMPARISON INSTRUCTIONS ═══
+Give a direct summary, then compare the methods only on relevant, evidence-supported dimensions. Cite each paper-specific factual claim using the exact source tag shown in the context (for example, [ArXiv-1] or [1]). Do not invent citations or metrics. Clearly mark details that the evidence does not establish. Keep the response to about 600 words or fewer; a compact table is optional when useful. Do not force a timeline, diagram, benchmark, or follow-up section.
 
 
 {s2_ctx}
@@ -775,7 +769,7 @@ def clean_and_resolve_links(
 
 
 def extract_verifiable_claims(answer: str) -> List[str]:
-    years = re.findall(r"\b(19|20)\d{2}\b", answer)
+    years = re.findall(r"\b(?:19|20)\d{2}\b", answer)
     numbers = re.findall(r"\b\d+(?:\.\d+)?%?\b", answer)
     names = re.findall(r"\b[A-Z][a-z]+ et al\.?", answer)
     quoted = re.findall(r'"([^"]{4,60})"', answer)
@@ -799,9 +793,10 @@ def hard_verify(
     chunks: List[Dict],
     arxiv_papers: Optional[List[Dict]] = None,
     s2_papers: Optional[List[Dict]] = None,
+    graph_nodes: Optional[List[Dict]] = None,
 ) -> List[str]:
     raw_texts = [c.get("chunk", "") for c in chunks]
-    for p in (arxiv_papers or []) + (s2_papers or []):
+    for p in (arxiv_papers or []) + (s2_papers or []) + (graph_nodes or []):
         raw_texts.append(p.get("title", ""))
         raw_texts.append(p.get("abstract", ""))
         raw_texts.append(p.get("tldr") or "")
@@ -838,11 +833,24 @@ async def verify_answer(
     model: str,
     arxiv_papers: Optional[List[Dict]] = None,
     s2_papers: Optional[List[Dict]] = None,
+    graph_nodes: Optional[List[Dict]] = None,
 ) -> Dict[str, Any]:
-    flagged_hard = hard_verify(extract_verifiable_claims(answer), chunks, arxiv_papers, s2_papers)
-    chunk_text = "\n\n".join(
-        f"[{i + 1}] {c.get('title', '?')}: {c.get('chunk', '')}" for i, c in enumerate(chunks)
+    flagged_hard = hard_verify(
+        extract_verifiable_claims(answer), chunks, arxiv_papers, s2_papers, graph_nodes
     )
+    source_sections = [
+        f"[{i + 1}] {c.get('title', '?')}: {c.get('chunk', '')}" for i, c in enumerate(chunks)
+    ]
+    for source_name, papers in (
+        ("ArXiv", arxiv_papers),
+        ("Semantic Scholar", s2_papers),
+        ("Knowledge graph", graph_nodes),
+    ):
+        for paper in papers or []:
+            title = paper.get("title") or "Untitled source"
+            abstract = paper.get("abstract") or paper.get("chunk") or paper.get("description") or ""
+            source_sections.append(f"[{source_name}] {title}: {abstract}")
+    source_text = "\n\n".join(source_sections) or "(No source text available.)"
     focus = (
         ("Pay special attention:\n" + "\n".join(f"  - {c}" for c in flagged_hard))
         if flagged_hard
@@ -855,11 +863,12 @@ ANSWER:
 {answer}
 
 SOURCES:
-{chunk_text}
+{source_text}
 
 {focus}
 
-INSTRUCTIONS: Break into individual factual claims. Check each against sources. Rate confidence 0–1.
+INSTRUCTIONS: Check factual claims against the supplied sources. Do not infer missing facts.
+Keep the response concise; list at most five short unsupported claims and provide no rationale.
 
 Respond ONLY in this format:
 CONFIDENCE: <0.0-1.0>
@@ -874,7 +883,7 @@ VERDICT: <PASS / PARTIAL / FAIL>"""
             [{"role": "user", "content": verify_prompt}],
             model,
             temperature=0.0,
-            max_tokens=500,
+            max_tokens=3000,
         )
         conf, verified, total, flagged, verdict = 0.5, 0, 0, [], "UNKNOWN"
         for line in result.strip().split("\n"):
@@ -925,28 +934,37 @@ async def apply_verification(
     warning: Optional[str] = None,
     arxiv_papers: Optional[List[Dict]] = None,
     s2_papers: Optional[List[Dict]] = None,
+    graph_nodes: Optional[List[Dict]] = None,
 ) -> Tuple[str, Dict, Optional[str]]:
-    """Runs verify_answer and appends a low-grounding warning block if confidence < 0.70."""
+    """Runs verification against retrieved evidence and warns on low confidence."""
     import time
 
     t_v0 = time.time()
-    verification = await verify_answer(answer, chunks, model, arxiv_papers, s2_papers)
+    verification = await verify_answer(
+        answer, chunks, model, arxiv_papers, s2_papers, graph_nodes
+    )
     v_ms = int((time.time() - t_v0) * 1000)
     log.info(
         f"[{rid}] Verification ({v_ms}ms): confidence={verification.get('confidence')}"
         f" verdict={verification.get('verdict')}"
     )
 
-    if (
-        verification.get("verdict") in ("PARTIAL", "FAIL")
-        and verification.get("flagged_claims")
-        and verification.get("confidence") is not None
-        and verification.get("confidence", 1.0) < 0.70
-    ):
-        notice = "\n\n---\n> [!WARNING]\n> **Low Grounding Confidence** — the following claims could not be verified against the retrieved text:\n"
-        for claim in verification["flagged_claims"]:
+    if verification.get("verdict") in ("PARTIAL", "FAIL"):
+        notice = (
+            "\n\n---\n> [!WARNING]\n"
+            "> **Grounding Warning** — one or more claims could not be verified against the retrieved evidence.\n"
+        )
+        for claim in verification.get("flagged_claims") or []:
             notice += f"> - {claim}\n"
         answer += notice
-        warning = "Some statements in the answer could not be fully grounded in the retrieved paper chunks."
+        warning = "Some statements in the answer could not be fully grounded in retrieved sources."
+    elif verification.get("verdict") == "SKIPPED":
+        answer += (
+            "\n\n---\n> [!WARNING]\n"
+            "> Answer verification could not be completed; treat this response as unverified."
+        )
+        warning = (
+            f"{warning}; " if warning else ""
+        ) + "Answer verification could not be completed."
 
     return answer, verification, warning

@@ -23,8 +23,10 @@ from app.config import (
     CACHE_MAX,
     CACHE_TTL,
     CREDIT_COSTS,
+    CREDIT_SYSTEM_ENABLED,
     FREE_CREDITS_PER_DAY,
     FREEZE_RETRIEVAL,
+    GROQ_API_KEYS,
     GROQ_TIMEOUT,
     JWT_ALGORITHM,
     JWT_EXPIRY_HOURS,
@@ -233,6 +235,14 @@ async def get_user_plan(request: Request) -> Dict[str, Any]:
         if not user:
             return {"plan": "free", "credits_used": 0, "credits_reset_at": None}
 
+        if not CREDIT_SYSTEM_ENABLED:
+            return {
+                "plan": user.get("plan", "free"),
+                "credits_used": 0,
+                "credits_reset_at": None,
+                "user_id": uid,
+            }
+
         now = datetime.now(timezone.utc)
         now_naive = now.replace(tzinfo=None)
         reset_at = user.get("credits_reset_at")
@@ -270,6 +280,9 @@ async def get_user_plan(request: Request) -> Dict[str, Any]:
 async def check_and_deduct_credit(request: Request, action: str) -> None:
     """Check if user has credits remaining and deduct one. Raises 402 if exhausted.
     Pro users bypass the credit system entirely."""
+    if not CREDIT_SYSTEM_ENABLED:
+        return
+
     plan_info = await get_user_plan(request)
     plan = plan_info.get("plan", "free")
     if plan == "pro":
@@ -313,10 +326,14 @@ async def append_credits_snapshot(res: Any, request: Request) -> Any:
                 "plan": _plan,
                 "credits_used": _used,
                 "credits_remaining": None
-                if _plan == "pro"
+                if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
                 else max(0, FREE_CREDITS_PER_DAY - _used),
-                "credits_limit": None if _plan == "pro" else FREE_CREDITS_PER_DAY,
-                "is_unlimited": _plan == "pro",
+                "credits_limit": (
+                    None
+                    if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
+                    else FREE_CREDITS_PER_DAY
+                ),
+                "is_unlimited": not CREDIT_SYSTEM_ENABLED or _plan == "pro",
             }
         except Exception as e:
             log.warning(f"Failed to append credits snapshot: {e}")
@@ -348,27 +365,47 @@ class Pool:
         self.groq_http = None
         self.db = None
         self.neo4j_ok = False
+        self.supabase_ok = False
+        self.mongodb_ok = False
         self._ready = False
 
     async def init(self) -> None:
         global mongo_client, db
         errors = []
-        try:
-            self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-            log.info("Supabase connected")
-        except Exception as e:
-            errors.append(f"Supabase: {e}")
+        if FREEZE_RETRIEVAL:
+            log.info("Database retrieval is frozen. Skipping Supabase initialization.")
+        elif not SUPABASE_URL or not SUPABASE_KEY:
+            errors.append("Supabase: required configuration is missing")
+        else:
+            try:
+                self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                await asyncio.to_thread(
+                    lambda: self.supabase.table("papers").select("id").limit(1).execute()
+                )
+                self.supabase_ok = True
+                log.info("Supabase connected and query verified")
+            except Exception as e:
+                errors.append(f"Supabase: {e}")
+                log.warning(f"Supabase unavailable: {e}")
 
         try:
-            mongo_client = MongoClient(MONGODB_URI)
-            db = mongo_client[MONGODB_DB_NAME]
+            def _initialize_mongo():
+                client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+                database = client[MONGODB_DB_NAME]
+                client.admin.command("ping")
+                database.users.create_index("email", unique=True)
+                database.payments.create_index("user_id")
+                database.payments.create_index("razorpay_payment_id", unique=True)
+                return client, database
+
+            mongo_client, db = await asyncio.to_thread(_initialize_mongo)
             self.db = db
-            # Create a unique index on email
-            db.users.create_index("email", unique=True)
-            db.payments.create_index("user_id")
-            db.payments.create_index("razorpay_payment_id", unique=True)
-            log.info("MongoDB connected and unique indexes on email and payments verified")
+            self.mongodb_ok = True
+            log.info("MongoDB connected and indexes verified")
         except Exception as e:
+            mongo_client = None
+            db = None
+            self.db = None
             errors.append(f"MongoDB: {e}")
             log.error(f"MongoDB connection failed: {e}")
 
@@ -391,8 +428,7 @@ class Pool:
             timeout=httpx.Timeout(GROQ_TIMEOUT, connect=5.0),
             limits=httpx.Limits(max_connections=30, max_keepalive_connections=15),
         )
-        if self.supabase and db is not None:
-            self._ready = True
+        self._ready = bool(self.groq_http and GROQ_API_KEYS)
         if errors:
             log.warning(f"Startup errors: {errors}")
 
@@ -409,7 +445,20 @@ class Pool:
 
     def assert_ready(self) -> None:
         if not self._ready:
-            raise HTTPException(503, "Service not initialised.")
+            raise HTTPException(
+                503,
+                {
+                    "error": "service_not_ready",
+                    "dependencies": {
+                        "groq": "ok" if self.groq_http and GROQ_API_KEYS else "unavailable",
+                        "supabase": (
+                            "skipped"
+                            if FREEZE_RETRIEVAL
+                            else "ok" if self.supabase_ok else "unavailable"
+                        ),
+                    },
+                },
+            )
 
 
 pool = Pool()

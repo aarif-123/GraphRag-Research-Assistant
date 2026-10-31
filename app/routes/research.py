@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from app.clients.groq import create_embedding, groq_chat
 from app.clients.pool import cache_key, get_cache, pool, set_cache
 from app.config import (
+    CREDIT_SYSTEM_ENABLED,
     FREE_CREDITS_PER_DAY,
     FREE_TOP_K_MAX,
     HEAVY_MODEL,
@@ -55,6 +56,7 @@ from app.core.planner import (
 from app.core.retrieval import (
     merge_adjacent_chunks,
     pack_context_within_budget,
+    paper_relevance_score,
     retrieve_arxiv_context,
     run_vector_pipeline,
 )
@@ -801,7 +803,12 @@ async def _research_impl(req: ResearchRequest, request: Request):
     # Rank candidates by hybrid significance score (relevance rank + citation count + recency bonus)
     import math
 
+    relevant_candidates = []
     for p in all_candidates:
+        relevance = paper_relevance_score(query, p)
+        if relevance <= 0:
+            continue
+        p["_relevance_score"] = relevance
         rank_score = max(0, 10 - p.get("_rank", 0))
         citations = p.get("citation_count") or 0
         citation_bonus = 2.5 * math.log(1 + citations)
@@ -815,33 +822,32 @@ async def _research_impl(req: ResearchRequest, request: Request):
         except ValueError:
             pass
         p["_significance_score"] = rank_score + citation_bonus + recency_bonus
+        relevant_candidates.append(p)
 
-    all_candidates.sort(key=lambda x: x.get("_significance_score", 0.0), reverse=True)
+    if len(relevant_candidates) < len(all_candidates):
+        log.info(
+            f"[{rid}] Filtered {len(all_candidates) - len(relevant_candidates)} "
+            "papers below the query-relevance threshold"
+        )
+    all_candidates = relevant_candidates
+    all_candidates.sort(
+        key=lambda x: (x.get("_relevance_score", 0.0), x.get("_significance_score", 0.0)),
+        reverse=True,
+    )
     top_papers = all_candidates[:8]
 
     arxiv_papers = [p for p in top_papers if p.get("_source") == "arxiv"]
     s2_papers = [p for p in top_papers if p.get("_source") == "s2"]
 
-    if not chunks and not arxiv_papers and not s2_papers:
-        sys_p = (
-            "You are Aether, a GraphRAG research assistant. No specific papers or context chunks could be retrieved for this query. "
-            "Since this is an academic research query, you have the flexibility to address it using your general scientific knowledge, "
-            "but ONLY if you are fully confident in the facts and there is a very low chance of hallucination or output degradation. "
-            "If you cannot provide a highly accurate, confident answer, explain clearly and briefly that you cannot verify the details due to the lack of source literature."
-        )
-        try:
-            answer = await groq_chat(
-                [{"role": "system", "content": sys_p}, {"role": "user", "content": query}],
-                REASON_MODEL,
-                temperature=req.temperature,
-            )
-        except LLMError as e:
-            raise HTTPException(502, str(e))
-
+    if not chunks and not graph_nodes and not arxiv_papers and not s2_papers and not pdf_context:
         latency = int((time.time() - t0) * 1000)
         return {
             "request_id": rid,
-            "answer": answer,
+            "answer": (
+                "I couldn't retrieve research sources for this question, so I can't provide a "
+                "grounded answer right now. Please try again later or provide a paper, DOI, or "
+                "arXiv identifier to analyze."
+            ),
             "route": plan.route,
             "plan": {
                 "standalone_query": plan.standalone_query,
@@ -855,8 +861,11 @@ async def _research_impl(req: ResearchRequest, request: Request):
             "code_repos": [],
             "verification": None,
             "latency_ms": latency,
-            "model_used": REASON_MODEL,
-            "warning": "No context or external papers retrieved.",
+            "model_used": None,
+            "warning": (
+                f"{warning}; " if warning else ""
+            )
+            + "No research sources could be retrieved; no evidence-based answer was generated.",
         }
 
     unique_datasets, all_repos = await retrieve_datasets_and_repos(
@@ -897,9 +906,12 @@ async def _research_impl(req: ResearchRequest, request: Request):
                 read_primary_source_passages(p, extraction_terms) for p in primary_papers
             ]
             passage_lists = await asyncio.gather(*passage_tasks, return_exceptions=True)
-            for result in passage_lists:
+            for paper, result in zip(primary_papers, passage_lists):
                 if isinstance(result, list):
-                    primary_passages.extend(result)
+                    title = paper.get("title") or "Untitled primary source"
+                    primary_passages.extend(
+                        f"[{title}]\n{passage}" for passage in result
+                    )
             if primary_passages:
                 log.info(
                     f"[{rid}] Primary source passages: {len(primary_passages)} extracted "
@@ -932,7 +944,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
         prompt += f"\n\n{pdf_context}"
 
     # Raise token budget for high-depth answers (equations + detailed mechanisms)
-    max_tokens_for_answer = 3500 if plan.depth == "high" else 2000
+    max_tokens_for_answer = 4500 if plan.depth == "high" else 3500
 
     try:
         answer = await groq_chat(
@@ -957,9 +969,16 @@ async def _research_impl(req: ResearchRequest, request: Request):
             answer += reqs_notice
 
     verification = None
-    if req.verify and chunks:
+    if req.verify and (chunks or graph_nodes or arxiv_papers or s2_papers):
         answer, verification, warning = await apply_verification(
-            answer, chunks, REASON_MODEL, rid, warning, arxiv_papers, s2_papers
+            answer,
+            chunks,
+            REASON_MODEL,
+            rid,
+            warning,
+            arxiv_papers,
+            s2_papers,
+            graph_nodes,
         )
 
     if verification:
@@ -984,9 +1003,17 @@ async def _research_impl(req: ResearchRequest, request: Request):
     credits_snap = {
         "plan": _plan,
         "credits_used": _used,
-        "credits_remaining": None if _plan == "pro" else max(0, FREE_CREDITS_PER_DAY - _used),
-        "credits_limit": None if _plan == "pro" else FREE_CREDITS_PER_DAY,
-        "is_unlimited": _plan == "pro",
+        "credits_remaining": (
+            None
+            if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
+            else max(0, FREE_CREDITS_PER_DAY - _used)
+        ),
+        "credits_limit": (
+            None
+            if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
+            else FREE_CREDITS_PER_DAY
+        ),
+        "is_unlimited": not CREDIT_SYSTEM_ENABLED or _plan == "pro",
     }
 
     show_external = plan.route not in ("chitchat", "structured", "title_lookup", "entity_lookup")

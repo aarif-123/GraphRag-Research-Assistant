@@ -303,6 +303,9 @@ def validate(env_file: Optional[str] = None) -> ValidationReport:
             from dotenv import load_dotenv  # type: ignore[import-not-found]
 
             load_dotenv(env_path, override=True)
+            fallback_env = Path(".env")
+            if env_path.resolve() != fallback_env.resolve():
+                load_dotenv(fallback_env, override=False)
         except ImportError:
             print(
                 _yellow(
@@ -312,19 +315,29 @@ def validate(env_file: Optional[str] = None) -> ValidationReport:
             )
 
     report = ValidationReport()
+    retrieval_frozen = os.getenv("FREEZE_RETRIEVAL", "true").strip().lower() == "true"
 
     print(f"\n{_bold('--- Required Variables ---')}")
 
-    supabase_url = _check_required(report, "SUPABASE_URL")
-    _check_url(report, "SUPABASE_URL", supabase_url)
+    if retrieval_frozen:
+        report.add(
+            ValidationResult(
+                name="Retrieval database credentials",
+                passed=True,
+                message="not required while FREEZE_RETRIEVAL=true",
+            )
+        )
+    else:
+        supabase_url = _check_required(report, "SUPABASE_URL")
+        _check_url(report, "SUPABASE_URL", supabase_url)
 
-    _check_required(report, "SUPABASE_SERVICE_ROLE_KEY")
+        _check_required(report, "SUPABASE_SERVICE_ROLE_KEY")
 
-    neo4j_uri = _check_required(report, "NEO4J_URI")
-    _check_neo4j_uri(report, neo4j_uri)
+        neo4j_uri = _check_required(report, "NEO4J_URI")
+        _check_neo4j_uri(report, neo4j_uri)
 
-    _check_required(report, "NEO4J_USER")
-    _check_required(report, "NEO4J_PASSWORD")
+        _check_required(report, "NEO4J_USER")
+        _check_required(report, "NEO4J_PASSWORD")
 
     print(f"\n{_bold('--- Recommended Variables (warnings only) ---')}")
 
