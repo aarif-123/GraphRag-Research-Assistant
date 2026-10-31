@@ -940,9 +940,7 @@ async def apply_verification(
     import time
 
     t_v0 = time.time()
-    verification = await verify_answer(
-        answer, chunks, model, arxiv_papers, s2_papers, graph_nodes
-    )
+    verification = await verify_answer(answer, chunks, model, arxiv_papers, s2_papers, graph_nodes)
     v_ms = int((time.time() - t_v0) * 1000)
     log.info(
         f"[{rid}] Verification ({v_ms}ms): confidence={verification.get('confidence')}"

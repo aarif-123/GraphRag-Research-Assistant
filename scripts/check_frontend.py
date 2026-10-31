@@ -2,9 +2,9 @@ import re
 
 
 def check():
-    with open('frontend-v2/js/state.js', 'r', encoding='utf-8') as f:
+    with open("frontend-v2/js/state.js", "r", encoding="utf-8") as f:
         js_text = f.read()
-    with open('frontend-v2/index.html', 'r', encoding='utf-8') as f:
+    with open("frontend-v2/index.html", "r", encoding="utf-8") as f:
         html_text = f.read()
 
     requested_ids = re.findall(r"document\.getElementById\('([^']+)'\)", js_text)
@@ -20,5 +20,6 @@ def check():
     else:
         print("PERFECT: 100% of DOM IDs referenced in state.js exist in index.html!")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     check()

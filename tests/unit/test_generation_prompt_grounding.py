@@ -93,4 +93,6 @@ async def test_partial_verification_is_reported_even_with_high_confidence(monkey
     assert verification["confidence"] == 0.92
     assert "Grounding Warning" in answer
     assert "A claim without source support." in answer
-    assert warning == "Some statements in the answer could not be fully grounded in retrieved sources."
+    assert (
+        warning == "Some statements in the answer could not be fully grounded in retrieved sources."
+    )

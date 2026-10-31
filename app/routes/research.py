@@ -862,9 +862,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
             "verification": None,
             "latency_ms": latency,
             "model_used": None,
-            "warning": (
-                f"{warning}; " if warning else ""
-            )
+            "warning": (f"{warning}; " if warning else "")
             + "No research sources could be retrieved; no evidence-based answer was generated.",
         }
 
@@ -909,9 +907,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
             for paper, result in zip(primary_papers, passage_lists):
                 if isinstance(result, list):
                     title = paper.get("title") or "Untitled primary source"
-                    primary_passages.extend(
-                        f"[{title}]\n{passage}" for passage in result
-                    )
+                    primary_passages.extend(f"[{title}]\n{passage}" for passage in result)
             if primary_passages:
                 log.info(
                     f"[{rid}] Primary source passages: {len(primary_passages)} extracted "
@@ -1009,9 +1005,7 @@ async def _research_impl(req: ResearchRequest, request: Request):
             else max(0, FREE_CREDITS_PER_DAY - _used)
         ),
         "credits_limit": (
-            None
-            if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
-            else FREE_CREDITS_PER_DAY
+            None if not CREDIT_SYSTEM_ENABLED or _plan == "pro" else FREE_CREDITS_PER_DAY
         ),
         "is_unlimited": not CREDIT_SYSTEM_ENABLED or _plan == "pro",
     }

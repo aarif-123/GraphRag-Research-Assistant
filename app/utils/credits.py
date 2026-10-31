@@ -167,9 +167,7 @@ async def append_credits_snapshot(res: Any, request: Request) -> Any:
                 if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
                 else max(0, FREE_CREDITS_PER_DAY - _used),
                 "credits_limit": (
-                    None
-                    if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
-                    else FREE_CREDITS_PER_DAY
+                    None if not CREDIT_SYSTEM_ENABLED or _plan == "pro" else FREE_CREDITS_PER_DAY
                 ),
                 "is_unlimited": not CREDIT_SYSTEM_ENABLED or _plan == "pro",
             }

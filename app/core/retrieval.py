@@ -45,6 +45,7 @@ _PAPER_STOP_WORDS = {
 
 def paper_relevance_score(query: str, paper: Dict[str, Any]) -> float:
     """Score and gate external papers against the query before popularity ranking."""
+
     def tokens(text: str) -> set[str]:
         normalized = set()
         for token in re.findall(r"[a-z0-9]+", text.lower()):
@@ -69,10 +70,7 @@ def paper_relevance_score(query: str, paper: Dict[str, Any]) -> float:
         return 0.0
     title_tokens = tokens(str(paper.get("title") or ""))
     abstract_tokens = tokens(
-        " ".join(
-            str(paper.get(key) or "")
-            for key in ("abstract", "tldr", "description")
-        )
+        " ".join(str(paper.get(key) or "") for key in ("abstract", "tldr", "description"))
     )
     document_tokens = title_tokens | abstract_tokens
 
@@ -84,9 +82,7 @@ def paper_relevance_score(query: str, paper: Dict[str, Any]) -> float:
     if len(matched) < min(2, len(query_tokens)):
         return 0.0
 
-    weighted_matches = 2 * len(query_tokens & title_tokens) + len(
-        query_tokens & abstract_tokens
-    )
+    weighted_matches = 2 * len(query_tokens & title_tokens) + len(query_tokens & abstract_tokens)
     return min(1.0, weighted_matches / (2 * len(query_tokens)))
 
 

@@ -33,14 +33,10 @@ A client module in Aether can fetch data from this endpoint:
 ```python
 import httpx
 
+
 async def get_arxiv_mcp_papers(query: str, limit: int = 5):
     url = f"{os.getenv('ARXIV_MCP_URL')}/tools/search_arxiv/call"
-    payload = {
-        "arguments": {
-            "query": query,
-            "limit": limit
-        }
-    }
+    payload = {"arguments": {"query": query, "limit": limit}}
     async with httpx.AsyncClient() as client:
         response = await client.post(url, json=payload, timeout=15.0)
         if response.status_code == 200:

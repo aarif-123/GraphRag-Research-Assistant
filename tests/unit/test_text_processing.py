@@ -248,4 +248,3 @@ class TestBuildChronologicalFlow:
         idx_unknown = flow.index("[Unknown Year]")
 
         assert idx_2019 < idx_2021 < idx_2023 < idx_unknown
-

@@ -40,7 +40,9 @@ def check_frontend_v1():
             print(f"    - {m}")
         errors += len(missing_ids)
     else:
-        print(f"  [DOM IDs] All {len(queried_ids)} queried IDs in state.js are present in index.html.")
+        print(
+            f"  [DOM IDs] All {len(queried_ids)} queried IDs in state.js are present in index.html."
+        )
 
     # Check CSS file
     css_path = os.path.join(root, "styles.css")
@@ -49,7 +51,9 @@ def check_frontend_v1():
             css_text = f.read()
         opens = css_text.count("{")
         closes = css_text.count("}")
-        print(f"  [CSS] styles.css: {len(css_text.splitlines())} lines, open braces: {opens}, close braces: {closes}")
+        print(
+            f"  [CSS] styles.css: {len(css_text.splitlines())} lines, open braces: {opens}, close braces: {closes}"
+        )
         if opens != closes:
             print("  [CSS MISMATCH] Braces do not balance!")
             errors += 1
@@ -59,6 +63,7 @@ def check_frontend_v1():
 
     print(f"\nFrontend checks completed with {errors} errors.")
     return errors
+
 
 if __name__ == "__main__":
     check_frontend_v1()

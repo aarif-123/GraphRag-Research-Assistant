@@ -22,9 +22,7 @@ async def test_planner_failure_builds_keyword_search_fallback(monkeypatch):
     monkeypatch.setattr(planner, "get_cache", lambda *args: None)
     monkeypatch.setattr(planner, "set_cache", lambda *args: None)
 
-    plan = await planner.plan_query(
-        "How do Graph Neural Networks improve multi-hop retrieval?"
-    )
+    plan = await planner.plan_query("How do Graph Neural Networks improve multi-hop retrieval?")
 
     assert plan.route == "rag"
     assert plan.vector_keywords[:3] == ["graph", "neural", "networks"]

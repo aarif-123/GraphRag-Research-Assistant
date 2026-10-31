@@ -36,11 +36,7 @@ async def test_groq_rejects_output_truncated_by_token_limit(monkeypatch):
 async def test_verifier_includes_external_paper_abstracts(monkeypatch):
     llm = AsyncMock(
         return_value=(
-            "CONFIDENCE: 0.9\n"
-            "VERIFIED_CLAIMS: 1\n"
-            "TOTAL_CLAIMS: 1\n"
-            "FLAGGED:\n- None\n"
-            "VERDICT: PASS"
+            "CONFIDENCE: 0.9\nVERIFIED_CLAIMS: 1\nTOTAL_CLAIMS: 1\nFLAGGED:\n- None\nVERDICT: PASS"
         )
     )
     monkeypatch.setattr(generation, "groq_chat", llm)

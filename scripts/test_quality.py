@@ -37,7 +37,7 @@ RESEARCH_QUESTION = (
 
 async def main():
     print("=== Starting End-to-End Response Quality Test ===")
-    print(f"Research Query:\n\"{RESEARCH_QUESTION}\"\n")
+    print(f'Research Query:\n"{RESEARCH_QUESTION}"\n')
 
     t_start = time.time()
     await pool.init()
@@ -115,6 +115,7 @@ async def main():
 
     except Exception as e:
         import traceback
+
         traceback.print_exc()
     finally:
         await pool.close()

@@ -21,4 +21,3 @@ if __name__ == "__main__":
         log_level="info",
         workers=int(os.getenv("WORKERS", "1")),
     )
-

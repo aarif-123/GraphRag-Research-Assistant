@@ -28,7 +28,11 @@ def test_live_server():
         for path, expected_status in endpoints:
             try:
                 r = client.get(f"{base}{path}")
-                is_ok = r.status_code == expected_status if isinstance(expected_status, int) else r.status_code in expected_status
+                is_ok = (
+                    r.status_code == expected_status
+                    if isinstance(expected_status, int)
+                    else r.status_code in expected_status
+                )
                 status_label = "PASS" if is_ok else f"FAIL (got {r.status_code})"
                 if not is_ok:
                     all_passed = False
@@ -38,6 +42,7 @@ def test_live_server():
                 all_passed = False
 
     print("\nServer asset test summary: " + ("ALL PASSED!" if all_passed else "SOME FAILED!"))
+
 
 if __name__ == "__main__":
     test_live_server()

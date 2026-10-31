@@ -351,9 +351,7 @@ async def get_plan(request: Request):
         "is_pro": plan == "pro",
         "credits_used": credits_used,
         "credits_limit": (
-            None
-            if not CREDIT_SYSTEM_ENABLED or plan == "pro"
-            else FREE_CREDITS_PER_DAY
+            None if not CREDIT_SYSTEM_ENABLED or plan == "pro" else FREE_CREDITS_PER_DAY
         ),
         "credits_remaining": (
             None
@@ -697,9 +695,7 @@ async def get_credits(request: Request):
         "plan": plan,
         "credits_used": credits_used,
         "credits_limit": (
-            None
-            if not CREDIT_SYSTEM_ENABLED or plan == "pro"
-            else FREE_CREDITS_PER_DAY
+            None if not CREDIT_SYSTEM_ENABLED or plan == "pro" else FREE_CREDITS_PER_DAY
         ),
         "credits_remaining": credits_remaining,
         "credits_reset_at": plan_info.get("credits_reset_at"),

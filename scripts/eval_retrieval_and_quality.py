@@ -22,11 +22,14 @@ from app.models.chat import ChatMessage, ConversationRequest
 from app.routes.chat import _chat_impl
 
 # High value research question without punctuation that breaks arXiv syntax
-RESEARCH_QUESTION = "Graph Neural Networks for Retrieval-Augmented Generation and multi-hop reasoning"
+RESEARCH_QUESTION = (
+    "Graph Neural Networks for Retrieval-Augmented Generation and multi-hop reasoning"
+)
+
 
 async def run_eval():
     print("=== Research Question Quality & Grounding Evaluation ===")
-    print(f"Query: \"{RESEARCH_QUESTION}\"\n")
+    print(f'Query: "{RESEARCH_QUESTION}"\n')
 
     await pool.init()
 
@@ -43,7 +46,7 @@ async def run_eval():
         messages=[ChatMessage(role="user", content=RESEARCH_QUESTION)],
         top_k=5,
         temperature=0.2,
-        mode="research"
+        mode="research",
     )
 
     t0 = time.time()
@@ -68,15 +71,21 @@ async def run_eval():
     print(f"\nGenerated Answer Length: {len(answer)} chars")
 
     with open("eval_grounded_result.json", "w", encoding="utf-8") as f:
-        json.dump({
-            "query": RESEARCH_QUESTION,
-            "latency": total_time,
-            "papers": papers,
-            "datasets": datasets,
-            "answer": answer
-        }, f, indent=2, ensure_ascii=False)
+        json.dump(
+            {
+                "query": RESEARCH_QUESTION,
+                "latency": total_time,
+                "papers": papers,
+                "datasets": datasets,
+                "answer": answer,
+            },
+            f,
+            indent=2,
+            ensure_ascii=False,
+        )
 
     await pool.close()
+
 
 if __name__ == "__main__":
     asyncio.run(run_eval())

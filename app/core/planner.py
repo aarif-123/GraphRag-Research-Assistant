@@ -200,9 +200,28 @@ def _parse_planner_response(raw_text: str) -> Dict:
 
 def _fallback_plan_data(query: str) -> Dict:
     stop_words = {
-        "about", "after", "also", "and", "are", "can", "compare", "does", "for",
-        "from", "how", "into", "its", "the", "their", "this", "through", "what",
-        "when", "which", "with", "would",
+        "about",
+        "after",
+        "also",
+        "and",
+        "are",
+        "can",
+        "compare",
+        "does",
+        "for",
+        "from",
+        "how",
+        "into",
+        "its",
+        "the",
+        "their",
+        "this",
+        "through",
+        "what",
+        "when",
+        "which",
+        "with",
+        "would",
     }
     keywords = list(
         dict.fromkeys(
@@ -257,13 +276,17 @@ async def plan_query(query: str, context: str = "") -> QueryPlan:
 
     # Validate and sanitise named_entities and search_tiers
     raw_entities = data.get("named_entities", [])
-    named_entities: List[Dict] = [
-        entity
-        for entity in raw_entities
-        if isinstance(entity, dict)
-        and isinstance(entity.get("name"), str)
-        and entity["name"].strip()
-    ] if isinstance(raw_entities, list) else []
+    named_entities: List[Dict] = (
+        [
+            entity
+            for entity in raw_entities
+            if isinstance(entity, dict)
+            and isinstance(entity.get("name"), str)
+            and entity["name"].strip()
+        ]
+        if isinstance(raw_entities, list)
+        else []
+    )
     search_tiers = _string_list(data.get("search_tiers"), 7)
 
     depth = data.get("depth", "standard")

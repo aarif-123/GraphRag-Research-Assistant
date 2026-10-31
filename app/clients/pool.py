@@ -329,9 +329,7 @@ async def append_credits_snapshot(res: Any, request: Request) -> Any:
                 if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
                 else max(0, FREE_CREDITS_PER_DAY - _used),
                 "credits_limit": (
-                    None
-                    if not CREDIT_SYSTEM_ENABLED or _plan == "pro"
-                    else FREE_CREDITS_PER_DAY
+                    None if not CREDIT_SYSTEM_ENABLED or _plan == "pro" else FREE_CREDITS_PER_DAY
                 ),
                 "is_unlimited": not CREDIT_SYSTEM_ENABLED or _plan == "pro",
             }
@@ -389,6 +387,7 @@ class Pool:
                 log.warning(f"Supabase unavailable: {e}")
 
         try:
+
             def _initialize_mongo():
                 client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
                 database = client[MONGODB_DB_NAME]
@@ -416,7 +415,9 @@ class Pool:
                 self.neo4j = GraphDatabase.driver(
                     NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD), notifications_min_severity="OFF"
                 )
-                await asyncio.wait_for(asyncio.to_thread(self.neo4j.verify_connectivity), timeout=10.0)
+                await asyncio.wait_for(
+                    asyncio.to_thread(self.neo4j.verify_connectivity), timeout=10.0
+                )
                 self.neo4j_ok = True
                 log.info("Neo4j connected")
             except asyncio.TimeoutError:
@@ -454,7 +455,9 @@ class Pool:
                         "supabase": (
                             "skipped"
                             if FREEZE_RETRIEVAL
-                            else "ok" if self.supabase_ok else "unavailable"
+                            else "ok"
+                            if self.supabase_ok
+                            else "unavailable"
                         ),
                     },
                 },

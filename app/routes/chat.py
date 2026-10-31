@@ -872,7 +872,9 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     #     }
 
     if not chunks and not graph_nodes and not arxiv_papers and not s2_papers and not pdf_context:
-        add_warning("No research sources could be retrieved; no evidence-based answer was generated.")
+        add_warning(
+            "No research sources could be retrieved; no evidence-based answer was generated."
+        )
         latency = int((time.time() - t0) * 1000)
         return {
             "request_id": rid,
@@ -980,14 +982,10 @@ async def _chat_impl(req: ConversationRequest, request: Request):
             if not CREDIT_SYSTEM_ENABLED or user_plan == "pro"
             else max(
                 0,
-                FREE_CREDITS_PER_DAY
-                - plan_info.get("credits_used", 0)
-                - credit_cost,
+                FREE_CREDITS_PER_DAY - plan_info.get("credits_used", 0) - credit_cost,
             ),
             "credits_limit": (
-                None
-                if not CREDIT_SYSTEM_ENABLED or user_plan == "pro"
-                else FREE_CREDITS_PER_DAY
+                None if not CREDIT_SYSTEM_ENABLED or user_plan == "pro" else FREE_CREDITS_PER_DAY
             ),
             "is_unlimited": not CREDIT_SYSTEM_ENABLED or user_plan == "pro",
         },
