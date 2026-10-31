@@ -25,7 +25,13 @@ from app.config import (
     log,
 )
 from app.core.document import get_or_parse_pdf_safe, get_relevant_pdf_chunks
-from app.core.exceptions import EmbeddingError, GraphRetrievalError, LLMError, VectorSearchError
+from app.core.exceptions import (
+    EmbeddingError,
+    GraphRetrievalError,
+    LLMError,
+    VectorSearchError,
+    user_facing_llm_error,
+)
 from app.core.generation import (
     apply_verification,
     compare_prompt,
@@ -314,7 +320,8 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                 msgs, HEAVY_MODEL, temperature=req.temperature, max_tokens=2500
             )
         except LLMError as e:
-            raise HTTPException(502, f"LLM error while generating summary: {str(e)}")
+            log.error(f"[{rid}] LLM failed while generating PDF summary: {e}")
+            raise HTTPException(502, user_facing_llm_error(e))
 
         latency = int((time.time() - t0) * 1000)
         return {
@@ -379,7 +386,8 @@ async def _chat_impl(req: ConversationRequest, request: Request):
         try:
             answer = await groq_chat(msgs, model, temperature=req.temperature, max_tokens=2000)
         except LLMError as e:
-            raise HTTPException(502, f"LLM error while answering from PDF: {str(e)}")
+            log.error(f"[{rid}] LLM failed while answering from PDF: {e}")
+            raise HTTPException(502, user_facing_llm_error(e))
 
         # Format the retrieved chunks for rendering in the frontend sources panel
         formatted_chunks = [
@@ -442,7 +450,8 @@ async def _chat_impl(req: ConversationRequest, request: Request):
                             msgs, REASON_MODEL, temperature=req.temperature, max_tokens=1500
                         )
                     except LLMError as e:
-                        raise HTTPException(502, str(e))
+                        log.error(f"[{rid}] LLM failed while answering entity lookup: {e}")
+                        raise HTTPException(502, user_facing_llm_error(e))
                     return {
                         "request_id": rid,
                         "answer": answer,
@@ -932,7 +941,8 @@ async def _chat_impl(req: ConversationRequest, request: Request):
     try:
         answer = await groq_chat(msgs, model, temperature=req.temperature, max_tokens=3500)
     except LLMError as e:
-        raise HTTPException(502, str(e))
+        log.error(f"[{rid}] LLM failed while synthesizing chat response: {e}")
+        raise HTTPException(502, user_facing_llm_error(e))
 
     verification = None
     if req.verify and (chunks or graph_nodes or arxiv_papers or s2_papers):
@@ -952,7 +962,11 @@ async def _chat_impl(req: ConversationRequest, request: Request):
 
     show_external = plan.route not in ("chitchat", "structured", "title_lookup", "entity_lookup")
     answer = clean_and_resolve_links(
-        answer, chunks, graph_nodes, arxiv_papers if show_external else []
+        answer,
+        chunks,
+        graph_nodes,
+        arxiv_papers if show_external else [],
+        s2_papers if show_external else [],
     )
 
     latency = int((time.time() - t0) * 1000)
@@ -1004,7 +1018,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     try:
         answer = await groq_chat(req.messages, model, req.temperature, req.max_tokens)
     except LLMError as e:
-        raise HTTPException(502, str(e))
+        log.error(f"[{rid}] LLM failed for chat completions request: {e}")
+        raise HTTPException(502, user_facing_llm_error(e))
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
         "object": "chat.completion",

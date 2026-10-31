@@ -33,6 +33,7 @@ from app.core.exceptions import (
     GraphRetrievalError,
     LLMError,
     VectorSearchError,
+    user_facing_llm_error,
 )
 from app.core.generation import (
     apply_verification,
@@ -239,7 +240,8 @@ async def _research_impl(req: ResearchRequest, request: Request):
                 msgs, HEAVY_MODEL, temperature=req.temperature, max_tokens=2500
             )
         except LLMError as e:
-            raise HTTPException(502, f"LLM error while generating summary: {str(e)}")
+            log.error(f"[{rid}] LLM failed while generating PDF summary: {e}")
+            raise HTTPException(502, user_facing_llm_error(e))
 
         latency = int((time.time() - t0) * 1000)
         return {
@@ -299,7 +301,8 @@ async def _research_impl(req: ResearchRequest, request: Request):
         try:
             answer = await groq_chat(msgs, model, temperature=req.temperature, max_tokens=2000)
         except LLMError as e:
-            raise HTTPException(502, f"LLM error while answering from PDF: {str(e)}")
+            log.error(f"[{rid}] LLM failed while answering from PDF: {e}")
+            raise HTTPException(502, user_facing_llm_error(e))
 
         # Format the retrieved chunks for rendering in the frontend sources panel
         formatted_chunks = [
@@ -950,7 +953,8 @@ async def _research_impl(req: ResearchRequest, request: Request):
             max_tokens=max_tokens_for_answer,
         )
     except LLMError as e:
-        raise HTTPException(502, str(e))
+        log.error(f"[{rid}] LLM failed while synthesizing research response: {e}")
+        raise HTTPException(502, user_facing_llm_error(e))
 
     # ── Requirement coverage self-check (depth=high only) ────────────────────
     if plan.depth == "high" and plan.requirements:
@@ -985,6 +989,9 @@ async def _research_impl(req: ResearchRequest, request: Request):
         chunks,
         graph_nodes,
         arxiv_papers
+        if plan.route not in ("chitchat", "structured", "title_lookup", "entity_lookup")
+        else [],
+        s2_papers
         if plan.route not in ("chitchat", "structured", "title_lookup", "entity_lookup")
         else [],
     )
@@ -1173,9 +1180,16 @@ async def research_survey(req: SurveyRequest, request: Request):
 
     model = HEAVY_MODEL if req.use_heavy else REASON_MODEL
     prompt = survey_prompt(req.topic, chunks, graph_nodes, arxiv_papers)
-    answer = await groq_chat(
-        [{"role": "system", "content": prompt}], model, temperature=req.temperature, max_tokens=3000
-    )
+    try:
+        answer = await groq_chat(
+            [{"role": "system", "content": prompt}],
+            model,
+            temperature=req.temperature,
+            max_tokens=3000,
+        )
+    except LLMError as e:
+        log.error(f"[{rid}] LLM failed while generating literature survey: {e}")
+        raise HTTPException(502, user_facing_llm_error(e))
 
     return {
         "request_id": rid,

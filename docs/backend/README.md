@@ -15,7 +15,7 @@ overview, then use the endpoint and workflow guides to trace a request.
 6. [05. AI AND RAG PIPELINE](./05.%20AI%20AND%20RAG%20PIPELINE.md)
 7. [06. QUERY PLANNER DEEP DIVE](./06.%20QUERY%20PLANNER%20DEEP%20DIVE.md)
 8. [07. DATABASE AND DATA MODEL DOCUMENTATION](./07.%20DATABASE%20AND%20DATA%20MODEL%20DOCUMENTATION.md)
-9. [08. MCP AND EXTERNAL INTEGRATIONS](./08.%20MCP%20AND%20EXTERNAL%20INTEGRATIONS.md)
+9. [08. EXTERNAL INTEGRATIONS](./08.%20EXTERNAL%20INTEGRATIONS.md)
 10. [09. AUTHENTICATION AND SECURITY](./09.%20AUTHENTICATION%20AND%20SECURITY.md)
 11. [10. ASYNC PROGRAMMING AND PERFORMANCE](./10.%20ASYNC%20PROGRAMMING%20AND%20PERFORMANCE.md)
 12. [11. ERROR HANDLING AND RELIABILITY](./11.%20ERROR%20HANDLING%20AND%20RELIABILITY.md)
@@ -24,11 +24,11 @@ overview, then use the endpoint and workflow guides to trace a request.
 
 ## Scope and evidence
 
-The application backend inventory contains 40 Python files under `app/`,
-alongside the Vercel entry point, a separately runnable ArXiv MCP server,
-offline Neo4j tooling, Supabase ingestion scripts, CI/deployment configuration,
-and tests. The docs describe both the main FastAPI application and these
-adjacent tools, but mark components that are not mounted by `app.main:app`.
+The application backend inventory contains Python files under `app/`,
+alongside the Vercel entry point, offline Neo4j tooling, Supabase ingestion
+scripts, CI/deployment configuration, and tests. The docs describe the main
+FastAPI application and adjacent tools, and mark components that are not
+mounted by `app.main:app`.
 
 The checked-in configuration defaults to `FREEZE_RETRIEVAL=true` and
 `CREDIT_SYSTEM_ENABLED=false`; runtime environment values can override them.

@@ -12,6 +12,7 @@ import httpx
 
 from app.clients.pool import cache_key, get_cache, set_cache
 from app.config import log
+from app.utils.dataset_relevance import dataset_relevance_score
 
 # ──────────────────────────────────────────────────────────────────────────────
 # URL DETECTION
@@ -126,22 +127,45 @@ def clean_and_resolve_links(
     chunks: Optional[List[Dict]] = None,
     graph_nodes: Optional[List[Dict]] = None,
     arxiv_papers: Optional[List[Dict]] = None,
+    s2_papers: Optional[List[Dict]] = None,
 ) -> str:
     """Validate and replace hallucinated or placeholder links in the response
-    with real arXiv or Google Scholar URLs derived from retrieved evidence.
+    with links that match the retrieved paper title and citation identifier.
     """
 
-    # 1. Build a map of 1-based indices → real arXiv URLs
+    def normalized_title(title: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", title.lower())
+
+    def paper_url(paper: Dict, source: str) -> str:
+        if source == "arxiv":
+            return paper.get("url") or paper.get("arxiv_url") or paper.get("pdf_url") or ""
+        return (
+            paper.get("s2_url")
+            or paper.get("arxiv_url")
+            or paper.get("doi_url")
+            or paper.get("pdf_url")
+            or ""
+        )
+
+    # 1. Keep source-tag indices aligned with the corresponding prompt contexts.
     arxiv_map: Dict[int, Dict] = {}
     if arxiv_papers:
         for idx, p in enumerate(arxiv_papers):
-            pdf_url = p.get("pdf_url") or p.get("url") or f"https://arxiv.org/abs/{p.get('id', '')}"
-            url = p.get("url") or pdf_url
             arxiv_map[idx + 1] = {
-                "pdf_url": pdf_url,
-                "url": url,
-                "title": p.get("title", ""),
+                "url": paper_url(p, "arxiv"),
+                "title": p.get("title") or "",
                 "id": p.get("id", ""),
+            }
+
+    s2_map: Dict[int, Dict] = {}
+    if s2_papers:
+        for idx, p in enumerate(s2_papers):
+            s2_map[idx + 1] = {
+                "url": paper_url(p, "s2"),
+                "title": p.get("title") or "",
+                "id": p.get("s2_id", ""),
+                "arxiv_id": p.get("arxiv_id", ""),
+                "doi": p.get("doi", ""),
             }
 
     # 2. Build a map of 1-based indices → database chunk Scholar links
@@ -178,12 +202,14 @@ def clean_and_resolve_links(
             or not url.startswith("http")
         )
 
-        # ArXiv-N citations
-        arxiv_cite = re.search(r"arxiv-(\d+)", text.lower())
-        if arxiv_cite:
-            num = int(arxiv_cite.group(1))
-            if num in arxiv_map:
-                return f"[{text}]({arxiv_map[num]['pdf_url']})"
+        # Source tags carry an explicit index and must resolve only within that source.
+        source_cite = re.search(r"\b(arxiv|s2)-(\d+)\b", text.lower())
+        if source_cite:
+            source, raw_num = source_cite.groups()
+            source_map = arxiv_map if source == "arxiv" else s2_map
+            source_entry = source_map.get(int(raw_num))
+            if source_entry and source_entry["url"]:
+                return f"[{text}]({source_entry['url']})"
 
         # Numeric [N] citations
         num_cite = re.search(r"^\[?(\d+)\]?$", text)
@@ -192,43 +218,35 @@ def clean_and_resolve_links(
             if num in chunk_map:
                 return f"[{text}]({chunk_map[num]['url']})"
 
-        # ArXiv ID or title in URL
-        for num, p in arxiv_map.items():
-            if p["id"] and p["id"] in url:
-                return f"[{text}]({p['pdf_url']})"
-            if p["title"] and p["title"].lower() in text.lower():
-                return f"[{text}]({p['pdf_url']})"
+        # For a linked paper title, trust an exact retrieved title over the model's URL.
+        for source_map in (arxiv_map, s2_map):
+            for p in source_map.values():
+                if normalized_title(p["title"]) == normalized_title(text) and p["url"]:
+                    return f"[{text}]({p['url']})"
 
         # Graph paper title match
         for t_lower, s_url in graph_map.items():
-            if t_lower in text.lower() or t_lower in url_lower:
+            if normalized_title(t_lower) == normalized_title(text):
                 return f"[{text}]({s_url})"
 
+        # If a known paper identifier points to a different title, remove the misleading link.
+        known_paper_maps = (arxiv_map, s2_map)
+        known_url_mismatch = any(
+            (p.get("id") and p["id"] in url)
+            or (p.get("arxiv_id") and p["arxiv_id"] in url)
+            or (p.get("doi") and p["doi"].lower() in url_lower)
+            for source_map in known_paper_maps
+            for p in source_map.values()
+        )
+        if known_url_mismatch:
+            return text
+
         if is_placeholder:
-            for num, p in arxiv_map.items():
-                if p["title"] and len(p["title"]) > 10 and p["title"].lower()[:25] in text.lower():
-                    return f"[{text}]({p['pdf_url']})"
-            for t_lower, s_url in graph_map.items():
-                if len(t_lower) > 10 and t_lower[:25] in text.lower():
-                    return f"[{text}]({s_url})"
             return text
 
         return match.group(0)
 
     answer = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", link_replacer, answer)
-
-    def arxiv_link_placeholder_replacer(match: re.Match) -> str:
-        num = int(match.group(1))
-        between = match.group(2)
-        if num in arxiv_map:
-            return f"[ArXiv-{num}]{between}[ArXiv Link]({arxiv_map[num]['pdf_url']})"
-        return match.group(0)
-
-    answer = re.sub(
-        r"\[ArXiv-(\d+)\]([^\n]{0,150}?)(?:\[ArXiv Link\]|\[PDF Link\]|\[PDF\]|\[Link\])\(([^)]*)\)",
-        arxiv_link_placeholder_replacer,
-        answer,
-    )
 
     def standard_link_placeholder_replacer(match: re.Match) -> str:
         num = int(match.group(1))
@@ -243,13 +261,15 @@ def clean_and_resolve_links(
         answer,
     )
 
-    def arxiv_tag_replacer(match: re.Match) -> str:
-        num = int(match.group(1))
-        if num in arxiv_map:
-            return f"[ArXiv-{num}]({arxiv_map[num]['pdf_url']})"
+    def source_tag_replacer(match: re.Match) -> str:
+        source, raw_num = match.groups()
+        source_map = arxiv_map if source.lower() == "arxiv" else s2_map
+        paper = source_map.get(int(raw_num))
+        if paper and paper["url"]:
+            return f"[{source}-{raw_num}]({paper['url']})"
         return match.group(0)
 
-    answer = re.sub(r"\[ArXiv-(\d+)\](?!\()", arxiv_tag_replacer, answer)
+    answer = re.sub(r"\[(ArXiv|S2)-(\d+)\](?!\()", source_tag_replacer, answer)
 
     def chunk_tag_replacer(match: re.Match) -> str:
         num = int(match.group(1))
@@ -270,18 +290,18 @@ def clean_and_resolve_links(
 
 
 async def search_huggingface_datasets(query: str, limit: int = 5) -> List[Dict[str, Any]]:
-    """Search Hugging Face Hub for datasets matching a query."""
+    """Search Hugging Face Hub and keep results with topical metadata overlap."""
     if not query.strip():
         return []
 
-    ck = cache_key("hf_datasets", query, limit)
+    ck = cache_key("hf_datasets_relevance_v2", query, limit)
     cached = get_cache("api", ck)
     if cached is not None:
         log.info(f"Cache HIT for HF datasets query: {query}")
         return cached
 
     url = "https://huggingface.co/api/datasets"
-    params = {"search": query, "limit": limit}
+    params = {"search": query, "limit": min(max(limit * 5, 15), 100)}
     headers = {"User-Agent": "Aether-Research-Assistant/5.0 (contact@aether-assistant.org)"}
     try:
         async with httpx.AsyncClient(headers=headers, timeout=3.5) as client:
@@ -290,66 +310,41 @@ async def search_huggingface_datasets(query: str, limit: int = 5) -> List[Dict[s
                 return []
             data = resp.json()
             results = []
-            for item in data[:limit]:
+            for item in data:
                 dataset_id = item.get("id")
                 if dataset_id:
+                    candidate = {
+                        "name": dataset_id,
+                        "full_name": dataset_id,
+                        "description": item.get("description") or "",
+                        "tags": item.get("tags") or [],
+                    }
+                    score = dataset_relevance_score(query, candidate)
+                    if score == 0:
+                        continue
                     results.append(
                         {
-                            "name": dataset_id,
-                            "full_name": dataset_id,
+                            **candidate,
                             "url": f"https://huggingface.co/datasets/{dataset_id}",
-                            "description": f"Hugging Face dataset: {item.get('downloads', 0)} downloads, {item.get('likes', 0)} likes.",
+                            "description": candidate["description"]
+                            or (
+                                f"Hugging Face dataset: {item.get('downloads', 0)} downloads, "
+                                f"{item.get('likes', 0)} likes."
+                            ),
                             "modalities": [],
                             "source": "huggingface_search",
+                            "discovery_query": query,
+                            "relevance_score": score,
+                            "relevance_label": f"Hugging Face search match for: {query}",
                         }
                     )
+            results.sort(key=lambda result: result["relevance_score"], reverse=True)
+            results = results[:limit]
             set_cache("api", ck, results)
             return results
     except Exception as e:
         log.error(f"Error querying Hugging Face datasets API: {e}")
         return []
-
-
-async def suggest_datasets_for_query(query: str) -> List[str]:
-    """Use an LLM to suggest 1-3 canonical academic dataset names for a query."""
-    from app.clients.groq import groq_chat  # lazy import
-    from app.config import REASON_MODEL
-
-    if not query.strip():
-        return []
-
-    ck = cache_key("suggested_datasets", query)
-    cached = get_cache("api", ck)
-    if cached is not None:
-        return cached
-
-    sys_p = (
-        "You are Aether, an academic research assistant. Given a research query, identify up to 3 canonical, "
-        "widely-used benchmark datasets that are highly relevant to the topic. "
-        "Respond ONLY with a valid JSON object containing a 'datasets' key with a list of dataset name strings. "
-        "Do NOT include any explanations, introduction, markdown blocks, or extra text. "
-        'Example output: {"datasets": ["Cora", "CiteSeer", "PubMed"]}'
-    )
-    try:
-        raw = await groq_chat(
-            [{"role": "system", "content": sys_p}, {"role": "user", "content": query}],
-            model=REASON_MODEL,
-            temperature=0.0,
-            max_tokens=100,
-            json_mode=True,
-            purpose="plan",
-        )
-        import json
-
-        data = json.loads(raw.strip())
-        suggested = data.get("datasets", [])
-        if isinstance(suggested, list):
-            res = [str(s).strip() for s in suggested if s][:3]
-            set_cache("api", ck, res)
-            return res
-    except Exception as e:
-        log.warning(f"Failed to suggest datasets via LLM: {e}")
-    return []
 
 
 async def retrieve_datasets_and_repos(
@@ -415,22 +410,29 @@ async def retrieve_datasets_and_repos(
             continue
         for p in papers_list:
             if isinstance(p, dict):
+                paper_title = p.get("title") or "Untitled paper"
+                paper_url = (
+                    p.get("url") or p.get("arxiv_url") or p.get("s2_url") or p.get("doi_url") or ""
+                )
                 for ds in p.get("datasets") or []:
-                    all_datasets.append(ds)
-                    if isinstance(ds, dict) and ds.get("name"):
-                        mentioned_ds_names.add(ds["name"])
+                    if isinstance(ds, dict):
+                        paper_reference = {
+                            "title": paper_title,
+                            "url": paper_url,
+                            "relationship": "Linked by paper"
+                            if ds.get("source") == "huggingface_linked"
+                            else "Mentioned in paper",
+                        }
+                        all_datasets.append({**ds, "paper_references": [paper_reference]})
+                        if ds.get("name"):
+                            mentioned_ds_names.add(ds["name"])
                 for repo in p.get("code_repos") or []:
                     all_repos.append(repo)
 
-    # 2. Search Kaggle & HF in parallel for LLM-suggested + top mentioned datasets
-    llm_suggested = await suggest_datasets_for_query(query)
-    log.info(f"LLM suggested benchmark datasets for query '{query}': {llm_suggested}")
-
-    search_queries = list(llm_suggested)
-    for ds_name in list(mentioned_ds_names)[:2]:
-        if not any(
-            ds_name.lower() in sq.lower() or sq.lower() in ds_name.lower() for sq in search_queries
-        ):
+    # Search by the user's actual topic and concrete dataset names found in papers.
+    search_queries = [query.strip()] if query.strip() else []
+    for ds_name in sorted(mentioned_ds_names)[:2]:
+        if ds_name.lower() not in {sq.lower() for sq in search_queries}:
             search_queries.append(ds_name)
 
     search_tasks = []
@@ -440,14 +442,24 @@ async def retrieve_datasets_and_repos(
 
     try:
         search_results = await asyncio.gather(*search_tasks)
-        for results in search_results:
+        for idx, results in enumerate(search_results):
             if results:
-                all_datasets.extend(results)
+                search_query = search_queries[idx // 2]
+                all_datasets.extend(
+                    {
+                        **result,
+                        "discovery_query": result.get("discovery_query") or search_query,
+                        "relevance_label": result.get("relevance_label")
+                        or f"{result.get('source', 'Catalog').replace('_', ' ').title()} match for: {search_query}",
+                    }
+                    for result in results
+                    if isinstance(result, dict)
+                )
     except Exception as e:
         log.warning(f"Error searching datasets in bulk: {e}")
 
     # 3. Deduplicate datasets by name/slug
-    seen_ds: set = set()
+    seen_ds: Dict[str, Dict[str, Any]] = {}
     unique_datasets: List[Dict] = []
     for d in all_datasets:
         if not isinstance(d, dict):
@@ -455,19 +467,33 @@ async def retrieve_datasets_and_repos(
         name = d.get("name") or d.get("full_name") or ""
         if name:
             slug = name.lower().strip()
-            if slug not in seen_ds:
-                seen_ds.add(slug)
-                unique_datasets.append(
-                    {
-                        "name": name,
-                        "full_name": d.get("full_name") or name,
-                        "url": d.get("url")
-                        or f"https://paperswithcode.com/dataset/{slug.replace(' ', '-')}",
-                        "description": d.get("description") or "",
-                        "modalities": d.get("modalities") or [],
-                        "source": d.get("source") or "paper_extracted",
-                    }
-                )
+            normalized = {
+                "name": name,
+                "full_name": d.get("full_name") or name,
+                "url": d.get("url")
+                or f"https://paperswithcode.com/dataset/{slug.replace(' ', '-')}",
+                "description": d.get("description") or "",
+                "modalities": d.get("modalities") or [],
+                "source": d.get("source") or "paper_extracted",
+            }
+            if d.get("paper_references"):
+                normalized["paper_references"] = d["paper_references"]
+            if d.get("discovery_query"):
+                normalized["discovery_query"] = d["discovery_query"]
+            if d.get("relevance_label"):
+                normalized["relevance_label"] = d["relevance_label"]
+            if d.get("relevance_score") is not None:
+                normalized["relevance_score"] = d["relevance_score"]
+
+            existing = seen_ds.get(slug)
+            if existing is None:
+                seen_ds[slug] = normalized
+                unique_datasets.append(normalized)
+            elif normalized.get("paper_references"):
+                refs = existing.setdefault("paper_references", [])
+                for reference in normalized["paper_references"]:
+                    if reference not in refs:
+                        refs.append(reference)
 
     # Deduplicate repos by URL
     seen_repos: set = set()

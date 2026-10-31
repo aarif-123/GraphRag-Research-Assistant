@@ -11,44 +11,12 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.utils.dataset_relevance import dataset_relevance_score
+
 log = logging.getLogger("aether.kaggle")
 
-# In-memory TTL cache to minimize API calls
+# In-memory cache to minimize API calls
 _KAGGLE_CACHE: Dict[str, Any] = {}
-
-COMMON_STOP_WORDS = {
-    "explain",
-    "what",
-    "is",
-    "how",
-    "does",
-    "why",
-    "show",
-    "me",
-    "find",
-    "on",
-    "of",
-    "and",
-    "their",
-    "applications",
-    "the",
-    "a",
-    "an",
-    "to",
-    "in",
-    "for",
-    "with",
-    "about",
-    "recent",
-    "advances",
-    "overview",
-    "survey",
-    "paper",
-    "papers",
-    "literature",
-    "dataset",
-    "datasets",
-}
 
 
 def _get_kaggle_cache(key: str) -> Any:
@@ -75,7 +43,7 @@ async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
     if not clean_query:
         return None
 
-    cache_key = f"kaggle_{clean_query.lower()}"
+    cache_key = f"kaggle_relevance_v2_{clean_query.lower()}"
     cached = _get_kaggle_cache(cache_key)
     if cached is not None:
         return cached
@@ -101,59 +69,38 @@ async def search_kaggle_dataset(query: str) -> Optional[Dict[str, Any]]:
                 _set_kaggle_cache(cache_key, None)
                 return None
 
-            # Rerank/filter results to find the best match
-            best_match = None
-            best_score = -1.0
-
-            import re
-
-            q_words = {
-                w for w in re.findall(r"\b\w+\b", clean_query.lower()) if w not in COMMON_STOP_WORDS
-            }
-            if not q_words:
-                q_words = set(clean_query.lower().split())
+            # Filter on dataset metadata before popularity is used as a tie-breaker.
+            best_match: Optional[Dict[str, Any]] = None
+            best_score = 0.0
 
             for item in data[:10]:  # Check top 10 results
                 title = item.get("title", "")
                 ref = item.get("ref", "")
                 vote_count = item.get("voteCount", 0)
-
-                # Check match score
-                title_lower = title.lower()
-                ref_lower = ref.lower()
-
-                # Basic score based on word overlap and popularity
-                title_words = set(re.findall(r"\b\w+\b", title_lower))
-                ref_words = set(re.findall(r"\b\w+\b", ref_lower))
-                words_in_title = sum(1 for w in q_words if w in title_words)
-                words_in_ref = sum(1 for w in q_words if w in ref_words)
-                overlap = max(words_in_title, words_in_ref)
-
-                # If no core terms match, this is an unwanted/unrelated result
-                if overlap == 0:
+                relevance = dataset_relevance_score(
+                    clean_query,
+                    {
+                        "title": title,
+                        "ref": ref,
+                        "subtitle": item.get("subtitle", ""),
+                        "tags": item.get("tags", []),
+                    },
+                )
+                if relevance == 0:
                     continue
 
-                # Perfect title match gets bonus
-                exact_bonus = (
-                    5.0
-                    if clean_query.lower() == title_lower
-                    or clean_query.lower() == ref_lower.split("/")[-1]
-                    else 0.0
-                )
-
-                # Normalize vote count influence (cap at 1000 votes for scoring)
-                popularity_bonus = min(vote_count / 200.0, 5.0)
-
-                score = (overlap * 2.0) + exact_bonus + popularity_bonus
-
-                if score > best_score:
-                    best_score = score
+                if relevance > best_score or (
+                    relevance == best_score and vote_count > (best_match or {}).get("vote_count", 0)
+                ):
+                    best_score = relevance
                     best_match = {
                         "title": title,
                         "ref": ref,
                         "url": item.get("url", f"https://www.kaggle.com/datasets/{ref}"),
                         "vote_count": vote_count,
                         "subtitle": item.get("subtitle", ""),
+                        "relevance_score": relevance,
+                        "discovery_query": clean_query,
                     }
 
             _set_kaggle_cache(cache_key, best_match)
@@ -223,7 +170,7 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
     if not clean_query:
         return []
 
-    cache_key = f"kaggle_bulk_{clean_query.lower()}_{limit}"
+    cache_key = f"kaggle_bulk_relevance_v2_{clean_query.lower()}_{limit}"
     cached = _get_kaggle_cache(cache_key)
     if cached is not None:
         log.info(f"Cache HIT for Kaggle bulk datasets: {clean_query}")
@@ -244,30 +191,20 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
             if not isinstance(data, list) or not data:
                 return []
 
-            import re
-
-            q_words = {
-                w for w in re.findall(r"\b\w+\b", clean_query.lower()) if w not in COMMON_STOP_WORDS
-            }
-            if not q_words:
-                q_words = set(clean_query.lower().split())
-
             results = []
             for item in data[:10]:  # Look through top 10 results to find matches
                 title = item.get("title", "")
                 ref = item.get("ref", "")
-                title_lower = title.lower()
-                ref_lower = ref.lower()
-
-                # Basic score based on word overlap
-                title_words = set(re.findall(r"\b\w+\b", title_lower))
-                ref_words = set(re.findall(r"\b\w+\b", ref_lower))
-                words_in_title = sum(1 for w in q_words if w in title_words)
-                words_in_ref = sum(1 for w in q_words if w in ref_words)
-                overlap = max(words_in_title, words_in_ref)
-
-                # Skip completely unrelated results
-                if overlap == 0:
+                relevance = dataset_relevance_score(
+                    clean_query,
+                    {
+                        "title": title,
+                        "ref": ref,
+                        "subtitle": item.get("subtitle", ""),
+                        "tags": item.get("tags", []),
+                    },
+                )
+                if relevance == 0:
                     continue
 
                 results.append(
@@ -279,10 +216,19 @@ async def search_kaggle_datasets_bulk(query: str, limit: int = 5) -> List[Dict[s
                         "kaggle_url": item.get("url", f"https://www.kaggle.com/datasets/{ref}"),
                         "kaggle_votes": item.get("voteCount", 0),
                         "source": "kaggle_search",
+                        "discovery_query": clean_query,
+                        "relevance_score": relevance,
+                        "relevance_label": f"Kaggle search match for: {clean_query}",
                     }
                 )
-                if len(results) >= limit:
-                    break
+            results.sort(
+                key=lambda result: (
+                    result["relevance_score"],
+                    result.get("kaggle_votes", 0),
+                ),
+                reverse=True,
+            )
+            results = results[:limit]
             _set_kaggle_cache(cache_key, results)
             return results
 

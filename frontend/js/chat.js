@@ -32,6 +32,13 @@ export async function apiCall(endpoint, body, method = 'POST') {
             e.creditDetail = err.detail;
             throw e;
         }
+        if (res.status >= 500) {
+            throw new Error(
+                res.status === 502
+                    ? "I couldn't complete that response. Please try again, or ask for fewer papers and only the details you need."
+                    : 'A temporary server issue prevented this request from completing. Please try again in a moment.'
+            );
+        }
         throw new Error(
             typeof err.detail === 'string' ? err.detail :
                 (err.detail?.message || `HTTP ${res.status}`)

@@ -26,6 +26,8 @@ from app.config import (
 )
 from app.core.exceptions import EmbeddingError, LLMError
 
+_MAX_OUTPUT_TOKENS = 8192
+
 # ================================================================
 # LOCAL EMBEDDING MODEL INITIALIZATION
 # ================================================================
@@ -258,6 +260,22 @@ async def groq_chat(
             res = r.json()
             choice = res["choices"][0]
             if choice.get("finish_reason") == "length":
+                if max_tokens < _MAX_OUTPUT_TOKENS:
+                    increased_limit = min(max(max_tokens + 1, max_tokens * 2), _MAX_OUTPUT_TOKENS)
+                    log.warning(
+                        "Groq response reached max_tokens=%s; retrying once with max_tokens=%s.",
+                        max_tokens,
+                        increased_limit,
+                    )
+                    return await groq_chat(
+                        messages=messages,
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=increased_limit,
+                        retries=0,
+                        json_mode=json_mode,
+                        purpose=purpose,
+                    )
                 last_err = "Model reached its output limit; the response was incomplete."
                 output_truncated = True
                 log.warning(last_err)

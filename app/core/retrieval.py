@@ -1,5 +1,4 @@
 import asyncio
-import os
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -338,29 +337,6 @@ async def retrieve_arxiv_context(query: str, limit: int = 3) -> List[Dict[str, A
     if cached is not None:
         log.info(f"Cache HIT for arXiv context query: {query} (limit={limit})")
         return cached
-
-    # Try ArXiv MCP Server if configured in env
-    mcp_url = os.getenv("ARXIV_MCP_URL")
-    is_self = False
-    if mcp_url:
-        parsed = urllib.parse.urlparse(mcp_url)
-        # Avoid calling ourselves via HTTP to prevent single-worker deadlocks
-        if (
-            "graphrag-research-assistant.onrender.com" in parsed.netloc
-            or "localhost:8000" in parsed.netloc
-            or "127.0.0.1:8000" in parsed.netloc
-        ):
-            is_self = True
-
-    if mcp_url and not is_self:
-        try:
-            from app.sources.arxiv_mcp import query_arxiv_mcp
-
-            mcp_papers = await query_arxiv_mcp(query, limit=limit)
-            if mcp_papers:
-                return mcp_papers
-        except Exception as e:
-            log.warning(f"ArXiv MCP query failed: {e}. Falling back to standard XML feed.")
 
     # ── Smart query extraction: strip NL question filler words, keep domain terms ──
     _NL_STOPWORDS = {

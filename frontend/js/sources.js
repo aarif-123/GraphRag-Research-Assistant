@@ -295,6 +295,18 @@ export function renderDatasetCards(datasets) {
                     <span class="domain-tag">${source}</span>
                 </div>
                 <p class="dataset-card-desc">${description}</p>
+                ${Array.isArray(dataset.paper_references) && dataset.paper_references.length
+                    ? `<p class="dataset-card-desc"><strong>Paper evidence:</strong> ${dataset.paper_references.map(reference => {
+                        const title = text(reference.title || 'Untitled paper');
+                        const relationship = text(reference.relationship || 'From paper');
+                        const paperUrl = getSafeExternalUrl(reference.url);
+                        return paperUrl
+                            ? `${relationship}: <a href="${text(paperUrl)}" target="_blank" rel="noopener noreferrer">${title}</a>`
+                            : `${relationship}: ${title}`;
+                    }).join('; ')}</p>`
+                    : dataset.relevance_label
+                        ? `<p class="dataset-card-desc"><strong>Why shown:</strong> ${text(dataset.relevance_label)}</p>`
+                        : ''}
                 ${modalities ? `<p class="dataset-card-desc"><strong>Modalities:</strong> ${modalities}</p>` : ''}
                 ${links ? `<div class="dataset-card-links">${links}</div>` : ''}
             </article>

@@ -3,9 +3,6 @@ Aether External Source Connectors
 Provides async access to Semantic Scholar, Papers with Code, and Google Scholar.
 """
 
-from .arxiv_mcp import (
-    query_arxiv_mcp,
-)
 from .kaggle import (
     enrich_datasets_with_kaggle,
     search_kaggle_dataset,
@@ -36,7 +33,6 @@ __all__ = [
     "get_paper_repos_pwc",
     "get_paper_datasets_pwc",
     "enrich_arxiv_papers_with_pwc",
-    "query_arxiv_mcp",
     "search_wikipedia_summary",
     "enrich_datasets_with_wikipedia",
     "search_kaggle_dataset",

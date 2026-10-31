@@ -1,6 +1,6 @@
 # 🔬 Aether GraphRAG Research Assistant
 
-> **Graph-Augmented Retrieval with Multi-Source Academic Enrichment, Anti-Hallucination Verification, and a Self-Hosted ArXiv MCP Server**
+> **Graph-Augmented Retrieval with Multi-Source Academic Enrichment and Anti-Hallucination Verification**
 >
 > Ask research questions — get grounded, cited answers enriched with academic papers, code repositories, and dataset links. MongoDB stores accounts and history; Groq and external academic APIs power research while graph/vector retrieval is paused by default.
 
@@ -149,12 +149,11 @@ Every push and pull request to `main` triggers the following pipeline:
 
 - **Neo4j graph database** *(integrated, currently paused)* — 196,875 nodes & 398,961 relationships across `CITES`, `WRITTEN_BY`, `PUBLISHED_IN`, `SIMILAR_TO`, `HAS_TOPIC`. Full traversal code is in place for future activation.
 - **Supabase pgvector** *(integrated, currently paused)* — three-tier vector search (seed-exact → seed-fuzzy → expanded graph neighbours) with RRF fusion and MMR re-ranking, ready to re-enable.
-- **Seven external academic sources**: ArXiv XML API, ArXiv MCP Server (SSE), Semantic Scholar, Papers With Code, OpenAlex, CORE Open Access, Wikipedia, and Kaggle.
+- **Academic source integrations**: ArXiv XML API, Semantic Scholar, Papers With Code, OpenAlex, CORE Open Access, Wikipedia, and Kaggle.
 - **Strategic Planning Brain**: a single `plan_query()` LLM call that classifies intent into 9 routes, extracts graph anchors, vector keywords, and required metrics — eliminating sequential LLM roundtrips.
 - **Anti-hallucination pipeline**: zero-temperature grounded generation + dual-pass LLM verification (`PASS/FAIL` with confidence scoring).
 - **MongoDB-backed auth** with JWT tokens and bcrypt password hashing. Email verification is optional and disabled by default; Supabase is not used for sign-up or login.
 - Credit enforcement is temporarily disabled by default and can be re-enabled with `CREDIT_SYSTEM_ENABLED=true`.
-- **Self-hosted ArXiv MCP Server** mounted at `/sse` using the Model Context Protocol (FastMCP), with deadlock-safe self-loopback detection.
 
 ---
 
@@ -185,10 +184,6 @@ graph TB
         LLMLayer["LLM Generation Layer groq_chat"]
         Verify["Verification Pass Dual-pass fact-check"]
         ContextAssembly["Context Assembly and Prompt Engineering"]
-    end
-
-    subgraph MCPServer["ArXiv MCP Server (Remote Render)"]
-        MCP["FastMCP Server (SSE) search_arxiv & get_paper_details tools"]
     end
 
     subgraph Databases["Persistent Storage"]
@@ -245,8 +240,6 @@ graph TB
     Retrieval -->|"Cache lookup"| InMemoryCache
 
     Retrieval --> ArXivXML & S2 & PwC & OpenAlex & CORE & Wiki & Kaggle
-    Retrieval -->|"SSE Client connection (ARXIV_MCP_URL)"| MCP
-
     Retrieval --> LocalBGE
     Retrieval --> HFAPI
 
@@ -365,7 +358,7 @@ flowchart LR
     end
 
     subgraph ExternalEnrichment["External Source Enrichment parallel"]
-        AX["ArXiv XML API\nor Remote MCP Server"]
+        AX["ArXiv XML API"]
         S2E["Semantic Scholar\ncitations, TLDR, abstract"]
         PWCE["Papers With Code\nGitHub repos, datasets\nHF models, spaces, metrics"]
         OA["OpenAlex\nopen scholarly graph"]
@@ -431,7 +424,6 @@ flowchart TD
 | **OpenAlex** | Open scholarly graph — works, venues, authors |
 | **CORE Open Access** | Full-text open-access paper search via core.ac.uk v3 API |
 | **ArXiv XML API** | Live paper search with categories, DOI, journal refs, comment fields |
-| **ArXiv MCP Server** | Standalone SSE service (FastMCP) — `search_arxiv` + `get_paper_details` tools, accessed via `ARXIV_MCP_URL` |
 | **Wikipedia** | Dataset/concept contextual summaries |
 | **Kaggle** | Dataset enrichment for ML research queries |
 
@@ -492,10 +484,9 @@ Research results can include datasets extracted from paper metadata or found thr
 | **Text Splitting** | LangChain `RecursiveCharacterTextSplitter` | — |
 | **Authentication** | PyJWT + bcrypt | ≥ 2.8 / ≥ 4.0 |
 | **Payment Gateway** | Razorpay (HMAC-SHA256 signature verification) & Stripe Webhook | — |
-| **MCP Protocol** | FastMCP (SSE transport) | ≥ 1.2.0 |
 | **Frontend** | HTML5 + CSS3 (Glassmorphic) + Vanilla JS | — |
 | **Diagram Engine** | Mermaid.js | v10 |
-| **Deployment** | Vercel (serverless) + Render (MCP server) | — |
+| **Deployment** | Vercel (serverless) | — |
 
 ---
 
@@ -544,7 +535,6 @@ GraphRag-Research-Assistant/
 │       ├── papers_with_code.py           # Papers With Code GitHub repository and datasets parser
 │       ├── openalex.py                   # OpenAlex open scholarly graph connector
 │       ├── core.py                       # CORE Open Access search API connector
-│       ├── arxiv_mcp.py                  # ArXiv MCP client for connecting to remote MCP Server
 │       ├── wikipedia.py                  # Wikipedia context retrieval connector
 │       └── kaggle.py                     # Kaggle datasets catalog query tool
 │
@@ -553,11 +543,6 @@ GraphRag-Research-Assistant/
 │   ├── landing.html                      # Secure Login / Signup page
 │   ├── app.js                            # Frontend logic: JWT, SSE, Mermaid sanitizer
 │   └── styles.css                        # Dark-theme glassmorphic stylesheet
-│
-├── arxiv-mcp-server/                     # Standalone ArXiv MCP Server (Render deploy)
-│   ├── mcp_server.py                     # FastMCP server: search_arxiv + get_paper_details
-│   ├── requirements.txt
-│   └── Dockerfile
 │
 ├── ingestion/
 │   ├── ingestIntoSupabase.py             # Primary ingestion: CSV → chunks → BGE → Supabase
@@ -679,7 +664,6 @@ HEAVY_MODEL=llama-3.3-70b-versatile
 PLAN_MODEL=llama-3.3-70b-versatile
 
 # -- External Sources (optional) -----------------------------------
-ARXIV_MCP_URL=https://your-render-app.onrender.com/sse
 CORE_API_KEY=your-core-api-key
 S2_API_KEY=your-semantic-scholar-api-key
 OPENALEX_EMAIL=your-email@example.com      # raises rate limit to 10 req/s
@@ -905,10 +889,6 @@ Vercel routes defined in `vercel.json`:
 
 > **Note**: `sentence-transformers` is too large for Vercel's 250 MB limit. Set `HF_TOKEN` to use the HuggingFace Inference API for embeddings on Vercel.
 
-### Render (ArXiv MCP Server)
-
-Deploy `arxiv-mcp-server/` as a separate Render web service using the included `Dockerfile`. Set `ARXIV_MCP_URL` in your main `.env` to point to the Render URL. The main app's self-loopback detection prevents deadlocks if both services share the same host.
-
 ---
 
 ## 🔬 Testing Connectivity
@@ -931,7 +911,6 @@ Checks: Supabase RPC, Neo4j Cypher, MongoDB `ping`, embedding generation, Groq L
 | `LLMError: Groq failed after N attempts` | Rate limit or invalid key | Add comma-separated keys to `GROQ_API_KEY` |
 | `402 credit_exhausted` | Daily free limit reached | Upgrade to Pro or wait for midnight UTC reset |
 | Mermaid diagrams not rendering | Browser CSP or missing script | Check `mermaid.initialize()` in `app.js` |
-| `/sse` endpoint 404 on Vercel | MCP SSE not supported serverlessly | Deploy `arxiv-mcp-server/` to Render separately |
 
 ---
 
@@ -942,4 +921,4 @@ See the [LICENSE](LICENSE) file for full terms.
 
 ---
 
-*Built with ❤️ using FastAPI · Neo4j · MongoDB · Supabase · Groq · HuggingFace · Razorpay · FastMCP*
+*Built with ❤️ using FastAPI · Neo4j · MongoDB · Supabase · Groq · HuggingFace · Razorpay*

@@ -11,13 +11,13 @@ This is a repository-grounded answer guide for the Aether project questionnaire.
 
 ## High-confidence project summary
 
-> Aether is a browser-based academic research assistant backed by a FastAPI modular monolith. It uses a Groq-hosted LLM to plan and synthesize research responses, searches external academic APIs, and can optionally use Neo4j graph retrieval and Supabase pgvector. The current default sets `FREEZE_RETRIEVAL=true`, so graph/vector database retrieval is paused; the application is configured for external-source research instead. MongoDB supports accounts, chat history, payments, and uploaded PDFs. A separate ArXiv MCP server exists and can be called over SSE when configured.
+> Aether is a browser-based academic research assistant backed by a FastAPI modular monolith. It uses a Groq-hosted LLM to plan and synthesize research responses, searches external academic APIs, and can optionally use Neo4j graph retrieval and Supabase pgvector. The current default sets `FREEZE_RETRIEVAL=true`, so graph/vector database retrieval is paused; the application is configured for external-source research instead. MongoDB supports accounts, chat history, payments, and uploaded PDFs. ArXiv search uses its public XML API directly.
 
 Be precise when describing it:
 
 - The code uses graph database traversal; it does **not** implement a Graph Neural Network.
 - “GraphRAG” is the project's name/architecture direction, but the README says Neo4j and Supabase retrieval are frozen by default.
-- Do not describe the application backend as independently deployable microservices. It is principally one FastAPI application with routers and modules, plus an optional separately hosted ArXiv MCP service.
+- Do not describe the application backend as independently deployable microservices. It is principally one FastAPI application with routers and modules.
 - Do not claim high throughput, a concurrency limit, measured accuracy, zero hallucinations, or 10,000-user scalability without test/production evidence.
 
 ## Batch 1 — Project, architecture, and request lifecycle
@@ -36,7 +36,7 @@ Be precise when describing it:
 - External paper search/enrichment.
 - PDF upload, text extraction, and question answering.
 - Account/authentication, history, and payment-related APIs.
-- Optional graph, vector, caching, and ArXiv MCP integrations.
+- Optional graph, vector, and caching integrations.
 - Static browser UI.
 
 **Difference from general chat/search products:** The code is designed to return research-source metadata and use research-specific routes/prompts; it can enrich papers with citation, venue, dataset, and code details. Do not claim it is more accurate than ChatGPT or Perplexity without a comparative evaluation.
@@ -86,7 +86,6 @@ app/
     media.py                    PDF and audio endpoints
     research.py                 Main research, timeline, survey and bulk routes
   sources/
-    arxiv_mcp.py                MCP client and result mapping
     core.py, kaggle.py, openalex.py, papers_with_code.py,
     semantic_scholar.py, wikipedia.py  External source adapters
   utils/
@@ -94,8 +93,6 @@ app/
     conversation.py             Conversation context/summarization helpers
     credits.py                  Rate limit, plans, credit checks/snapshots
     misc.py                     Link and dataset/repository utilities
-arxiv-mcp-server/
-  mcp_server.py                 Separate FastMCP ArXiv tool server
   Dockerfile, requirements.txt  Standalone service packaging
 assets/                          Architecture illustrations and UI image assets
 docs/
@@ -125,7 +122,7 @@ tests/
 | Supabase / pgvector | Optional paper-chunk vector/hybrid search RPCs | Retrieval functions exist, but vector operations are skipped by the same freeze flag. |
 | PyMuPDF (`fitz`) | Extract text from PDF pages | Used on a worker thread; scanned-image OCR is not implemented. |
 | BGE (`BAAI/bge-base-en`) | Optional 768-dimensional text embeddings | Configured model; may load locally if `sentence-transformers` is installed or use Hugging Face Inference API when retrieval is enabled. |
-| FastMCP + MCP Python SDK | ArXiv search/details tools exposed/consumed over SSE | Separate optional service. Main research code also has a standard ArXiv XML-feed fallback. |
+| ArXiv public XML API | Search and retrieve paper metadata and abstracts | Called directly from the main application. |
 | PyJWT + bcrypt | Signed JWTs and password hashing | Auth implementation uses HS256 and bcrypt password hashes. |
 | Upstash Redis | Optional PDF chunk/embedding cache | In-memory fallback exists; general application cache is also in process memory. |
 | Razorpay / Stripe | Payment-related routes | Razorpay order/verification APIs and a Stripe webhook handler exist. Feature use/deployment is not confirmed. |
@@ -141,19 +138,18 @@ Why each was originally selected beyond these code-level roles: **I don't know y
 5. The backend returns JSON; frontend JavaScript renders the answer and source panels.
 6. `api/index.py` imports the same `app.main:app` for Vercel. It is not a second application.
 
-There is no API gateway or queue visible in the repository. Internal features communicate through Python function calls and shared client/database modules; the browser uses HTTP. The ArXiv MCP client uses SSE/HTTP to a separate MCP server when configured.
+There is no API gateway or queue visible in the repository. Internal features communicate through Python function calls and shared client/database modules; the browser uses HTTP. ArXiv search uses its public XML API directly.
 
 ### 5. Number of apps, processes, and “microservices” claim
 
 - **Main backend:** one FastAPI app (`app.main:app`) with routers for health, auth/history/payment, graph, research, chat, and media.
 - **Compatibility entry points:** `app._server` and `api.index` import/expose the same main app; they do not create more backend services.
-- **MCP app:** `arxiv-mcp-server/mcp_server.py` defines a separate FastAPI app around FastMCP. It can run/deploy independently, e.g. as the README's optional Render service.
-- **Process count:** depends on deployment. The main app can be one process with configurable Uvicorn workers; if the MCP server is deployed separately, there is another service/process. This is not a fixed microservice count.
+- **Process count:** depends on deployment. The main app can be one process with configurable Uvicorn workers. This is not a fixed microservice count.
 - Research, auth, payment, and AI processing are **not** separate services. They are routers/modules in the main API.
-- They cannot be independently deployed from this design without extracting them. The MCP service can.
+- They cannot be independently deployed from this design without extracting them.
 - No message queue is present in the primary execution flow.
 
-**Accurate architecture label:** “A modular FastAPI monolith with an optional separately deployed ArXiv MCP service,” not “a microservices architecture.”
+**Accurate architecture label:** “A modular FastAPI monolith,” not “a microservices architecture.”
 
 ### 6. FastAPI entry point, routers, and lifespan
 
@@ -202,6 +198,7 @@ Browser sendQuery()
   -> execute the selected route
   -> for standard RAG, concurrently request graph, vector, ArXiv, Semantic Scholar, CORE
   -> enrich/deduplicate/rank returned papers; gather related code/dataset metadata
+  -> label datasets linked/mentioned by a paper; filter catalog additions against query terms
   -> build route-specific grounded context/prompt
   -> Groq synthesis
   -> optional second LLM verification if enabled and evidence was retrieved
@@ -322,19 +319,15 @@ Graph traversal can support multi-hop relationships by following paths such as c
 
 **Current operational status:** `FREEZE_RETRIEVAL=true` by default skips Neo4j initialization and graph retrieval. README states the database is paused. It reports 196,875 nodes and 398,961 relationships, but this guide has not verified those counts against a live database or dated export. State them only as README-reported historical figures, not current live metrics.
 
-## Batch 3 — MCP, sources, LLM, prompts, and verification
+## Batch 3 — Sources, LLM, prompts, and verification
 
-### 14. MCP and academic-source integrations
+### 14. Academic-source integrations
 
-**MCP definition:** Model Context Protocol is a protocol for exposing tools/context to an LLM application. Here, the FastMCP server exposes ArXiv operations; the main app is an MCP client. The main research synthesis does not itself need to be an MCP server/client to call the other external APIs.
-
-**Server:** `arxiv-mcp-server/mcp_server.py`, a separate FastMCP-backed FastAPI app. It defines `search_arxiv(query, limit)` and `get_paper_details(arxiv_id)`. It uses the `arxiv` Python client and has a Dockerfile; README describes separate hosting (e.g. Render).
-
-**Client:** `app/sources/arxiv_mcp.py` appends `/sse` to `ARXIV_MCP_URL`, opens an SSE transport, initializes `ClientSession`, calls `search_arxiv`, parses text content as JSON, and maps the results into Aether paper fields.
-
-**Fallback:** `app/core/retrieval.py` attempts MCP when configured and not detected as a self-loopback; if MCP errors or returns no papers, it falls back to the standard ArXiv XML API. Do not claim MCP is active in production without checking `ARXIV_MCP_URL` and service status.
-
-**Source adapters present:** ArXiv XML API, ArXiv MCP, Semantic Scholar, CORE, OpenAlex enrichment, Papers With Code/Hugging Face metadata, Wikipedia, and Kaggle. These are adapters, not guaranteed always-on providers. The README says “seven” but enumerates eight named source paths when the ArXiv options are counted separately.
+ArXiv search calls the public XML API directly through
+`retrieve_arxiv_context()` in `app/core/retrieval.py`. Other source adapters
+include Semantic Scholar, CORE, OpenAlex enrichment, Papers With
+Code/Hugging Face metadata, Wikipedia, and Kaggle. These are adapters, not
+guaranteed always-on providers.
 
 Normalization/deduplication happens in source adapters and research route logic; for example, paper title strings are cleaned for matching and candidates are filtered for query relevance. Some providers are used for enrichment rather than primary search in the main route. External APIs have their own timeouts/rate behavior; do not claim a uniform retry policy for all providers.
 
@@ -426,9 +419,7 @@ Chat history endpoints store and query MongoDB documents associated with the aut
 - `vercel.json` sends incoming routes to `api/index.py` and includes `frontend/**`.
 - GitHub Actions CI checks Ruff, mypy on source modules, environment validation, unit tests, and mocked integration tests.
 - CD workflow builds/deploys to Vercel when credentials are configured; it can skip deployment when the Vercel token is absent.
-- ArXiv MCP service has its own Dockerfile and is documented for independent deployment (e.g. Render).
 - `frontend-v2/` is not included in the Vercel include pattern or mounted by `app/main.py`; treat it as an alternate/experimental frontend unless deployment proves otherwise.
-- `arxiv-mcp-server` is independently deployable; auth, research, payments, and LLM processing are not independently deployable services in this architecture.
 
 ### 22. Testing, quality, and performance claims
 
@@ -458,7 +449,6 @@ Answer to “10,000 users?”: not measured. A credible scale plan would require
 | Supabase pgvector/hybrid retrieval | Implemented but paused by default | Freeze flag skips search; current MMR wiring mismatch must be resolved before claiming activation-ready. |
 | In-process RRF | Helper only | Defined but not found wired into current research pipeline. |
 | Answer verification | Implemented as an optional second LLM check | Warning/flags are generated; not a correctness guarantee. |
-| ArXiv MCP | Separate service/client implemented, optional | Requires a reachable MCP server and `ARXIV_MCP_URL`; XML fallback exists. |
 | Credit enforcement | Implemented but off by default | Requires `CREDIT_SYSTEM_ENABLED=true`. |
 | Payments | API handlers exist | Live provider credentials, production payment reconciliation, and end-to-end tests are unverified. |
 | OCR for scanned PDFs | Not implemented in inspected path | Text extraction only. |
@@ -469,7 +459,7 @@ Answer to “10,000 users?”: not measured. A credible scale plan would require
 
 | Claim/question | Defensible answer |
 |---|---|
-| “Microservices” | Replace with “modular FastAPI backend plus a separately deployable optional ArXiv MCP service.” |
+| “Microservices” | Replace with “modular FastAPI backend.” |
 | “High throughput” | Not established without load-test numbers. |
 | “Agentic” | The query planner selects among route types and retrieval strategies. There is no evidence here of a multi-agent framework or autonomous long-running agent loop. Prefer “LLM-assisted query planning and routing.” |
 | “Automated verification guardrails” | A second LLM checks generated claims against retrieved text and returns a verdict/confidence/flagged claims. It is an imperfect heuristic, not a guarantee. |
@@ -477,7 +467,6 @@ Answer to “10,000 users?”: not measured. A credible scale plan would require
 | “Graph neural network” | Not implemented in this repo. Neo4j Cypher graph retrieval exists but is paused by default. |
 | “GraphRAG active in production” | Not established. Default configuration freezes graph/vector retrieval. |
 | “Redis caching” | Optional Upstash cache is used in selected PDF paths; general in-memory cache is process-local. |
-| “MCP integration” | An optional client/server implementation exists with SSE; runtime use depends on `ARXIV_MCP_URL` and server availability. |
 | “No hallucinations” | Not supportable. The system can reduce risk and surface warnings, not guarantee zero hallucinations. |
 | “Production active” | Deployment status must be verified with current environment and service health; source code alone is not evidence. |
 | “I personally built…” | **I don't know yet.** Confirm against your commits and actual work. |
@@ -499,7 +488,7 @@ Grounded improvement answers:
 Trade-off questions:
 
 - **Remove planner:** the application loses structured intent classification, query rewriting, route selection, and extracted anchors/search tiers; fallback routing may be less tailored.
-- **Remove MCP:** ArXiv XML fallback remains in `retrieve_arxiv_context`; MCP-specific tool transport/details are lost.
+- ArXiv uses the public XML API directly; no separate protocol service is required.
 - **Remove Neo4j:** no graph result context or relationship traversal; external-source search can still serve the default frozen configuration.
 - **Remove Redis:** PDF cache can fall back to process-local memory, which is not shared and may disappear on restart.
 - **Remove verification:** fewer latency/cost calls, but no second-pass unsupported-claim warning.
@@ -509,7 +498,6 @@ Trade-off questions:
 
 1. **Model mismatch:** `app/config.py` defaults to `openai/gpt-oss-120b`; README advertises `llama-3.3-70b-versatile`. Ask what the deployed environment actually sets.
 2. **Route count:** planner accepts ten route names while README calls them nine.
-3. **Source count:** README says seven while listing eight integrations if ArXiv XML and ArXiv MCP are counted separately.
 4. **RRF status:** helper exists but was not found called from the application pipeline.
 5. **Vector activation:** the MMR call/signature mismatch appears to break the non-empty path.
 6. **Graph scale:** README's 196,875 node / 398,961 relationship figures need a dated live query/export to be defensible.
@@ -532,7 +520,6 @@ Trade-off questions:
 - Database clients/cache: `app/clients/pool.py`
 - Auth and credits: `app/utils/auth.py`, `app/utils/credits.py`, `app/routes/auth.py`
 - PDF/audio: `app/core/document.py`, `app/routes/media.py`
-- MCP: `app/sources/arxiv_mcp.py`, `arxiv-mcp-server/mcp_server.py`
 - Frontend request flow: `frontend/js/chat.js`, `frontend/js/state.js`
 - Deployment and CI/CD: `vercel.json`, `.github/workflows/ci.yml`, `.github/workflows/cd.yml`
 - Test suites: `tests/unit/`, `tests/integration/`
